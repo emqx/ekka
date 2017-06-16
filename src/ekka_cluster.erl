@@ -39,7 +39,7 @@ join(Node) when is_atom(Node) ->
             {error, {already_clustered, Node}}
     end.
 
-%% @doc Leave from cluster.
+%% @doc Leave from the cluster.
 -spec(leave() -> ok | {error, any()}).
 leave() ->
     case ekka_mnesia:running_nodes() -- [node()] of
@@ -74,14 +74,19 @@ force_leave(Node) ->
 -spec(prepare(join | leave) -> ok).
 prepare(Action) ->
     ekka_node_monitor:notify(Action),
-    application:stop(ekka).
+    case ekka:callback(prepare) of
+        {ok, Prepare} -> Prepare(Action);
+        undefined     -> application:stop(ekka)
+    end.
 
 %% @doc Reboot after join or leave cluster.
 -spec(reboot() -> ok).
 reboot() ->
-    application:start(ekka).
+    case ekka:callback(reboot) of
+        {ok, Reboot} -> Reboot();
+        undefined    -> application:start(ekka)
+    end.
 
 %% @doc Cluster status.
-status() ->
-    ekka_mnesia:cluster_status().
+status() -> ekka_mnesia:cluster_status().
 

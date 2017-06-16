@@ -241,7 +241,7 @@ connect(Node) ->
     end.
 
 %% @doc Running nodes.
--spec(running_nodes() -> [node()]).
+-spec(running_nodes() -> list(node())).
 running_nodes() -> cluster_nodes(running).
 
 %% @doc Cluster nodes.

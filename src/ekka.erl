@@ -21,6 +21,9 @@
 %% Start/Stop
 -export([start/0, stop/0]).
 
+%% Register callback
+-export([callback/1, callback/2]).
+
 %% Env
 -export([cluster/0, cookie/0, strategy/0, autoheal/0]).
 
@@ -46,6 +49,12 @@ start() ->
 
 stop() ->
     application:stop(ekka).
+
+callback(Name) ->
+    application:get_env(ekka, {callback, Name}).
+
+callback(Name, Fun) ->
+    application:set_env(ekka, {callback, Name}, Fun).
 
 %%%-------------------------------------------------------------------
 %%% Env
