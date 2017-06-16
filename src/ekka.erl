@@ -36,6 +36,9 @@
 %% Membership
 -export([local_member/0, members/0]).
 
+%% Subscribe/Unsubscribe Event
+-export([subscribe/1, unsubscribe/1]).
+
 %% RPC
 -export([cast/4, call/4]).
 
@@ -123,6 +126,18 @@ leave() ->
 -spec(force_leave(node()) -> ok | ignore | {error, any()}).
 force_leave(Node) ->
     ekka_cluster:force_leave(Node).
+
+%%%-------------------------------------------------------------------
+%%% Subscribe/Unsubscribe
+%%%-------------------------------------------------------------------
+
+-spec(subscribe(node | membership) -> ok).
+subscribe(What) ->
+    ekka_node_monitor:subscribe(What).
+
+-spec(unsubscribe(node | membership) -> ok).
+unsubscribe(What) ->
+    ekka_node_monitor:unsubscribe(What).
 
 %%%-------------------------------------------------------------------
 %%% RPC API

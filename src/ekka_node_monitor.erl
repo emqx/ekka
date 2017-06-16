@@ -99,9 +99,9 @@ handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
 
-handle_cast({ping, {Node, Guid}}, State) ->
+handle_cast({ping, {_Node, _Guid}}, State) ->
     %%TODO: Add or update a member?
-    io:format("Ping from ~s:~p~n", [Node, Guid]),
+    %%io:format("Ping from ~s:~p~n", [Node, Guid]),
     {noreply, State};
 
 handle_cast({notify, {Node, Guid}, Action}, State) ->
@@ -126,17 +126,18 @@ handle_info({nodedown, Node, Info}, State) ->
     io:format("Nodedown ~s: ~p~n", [Node, proplists:get_value(nodedown_reason, Info)]),
     {noreply, State};
 
-handle_info({mnesia_system_event, {mnesia_up, Node}}, State) ->
+handle_info({mnesia_system_event, {mnesia_up, Node}}, State = #state{subscribers = Subscribers}) ->
     io:format("Mnesia ~s up.~n", [Node]),
     case ets:lookup(membership, Node) of
         [Member] -> ets:insert(membership, Member#member{status = up});
         [] -> ets:insert(membership, #member{node = Node, status = up})
     end,
+    [Pid ! {member_up, Node} || {{Pid, membership}, _MRef} <- Subscribers],
     {noreply, State};
 
-handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
-    %%cast({suspect, Node}, 
+handle_info({mnesia_system_event, {mnesia_down, Node}}, State = #state{subscribers = Subscribers}) ->
     io:format("Mnesia ~s down.~n", [Node]),
+    [Pid ! {member_down, Node} || {{Pid, membership}, _MRef} <- Subscribers],
     {noreply, State};
 
 handle_info({mnesia_system_event, {inconsistent_database, Context, Node}}, State) ->
