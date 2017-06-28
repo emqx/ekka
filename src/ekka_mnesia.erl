@@ -23,8 +23,8 @@
 
 %% Cluster mnesia
 -export([join_cluster/1, leave_cluster/0, remove_from_cluster/1,
-         cluster_status/0, cluster_status/1, cluster_nodes/1,
-         running_nodes/0]).
+         cluster_status/0, cluster_status/1, cluster_view/0,
+         cluster_nodes/1, running_nodes/0]).
 
 -export([is_node_in_cluster/0, is_node_in_cluster/1]).
 
@@ -167,6 +167,11 @@ cluster_status(Node) ->
         false ->
             false
     end.
+
+-spec(cluster_view() -> {[node()], [node()]}).
+cluster_view() ->
+    list_to_tuple([lists:sort(cluster_nodes(Status))
+                   || Status <- [running, stopped]]).
 
 %% @doc This node try leave the cluster
 -spec(leave_cluster() -> ok | {error, any()}).

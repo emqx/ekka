@@ -36,6 +36,8 @@
 
 -type(guid() :: <<_:128>>).
 
+-export_type([guid/0]).
+
 %% @doc Generate a global unique id.
 -spec(gen() -> guid()).
 gen() ->

@@ -34,13 +34,10 @@
 -export([join/1, leave/0, force_leave/1]).
 
 %% Membership
--export([local_member/0, members/0]).
+-export([local_member/0, members/0, status/0]).
 
-%% Subscribe/Unsubscribe Event
--export([subscribe/1, unsubscribe/1]).
-
-%% RPC
--export([cast/4, call/4]).
+%% Monitor membership events
+-export([monitor/1]).
 
 %%%-------------------------------------------------------------------
 %%% Start/Stop
@@ -48,10 +45,14 @@
 
 start() ->
     ekka_mnesia:start(),
-    application:start(ekka).
+    application:ensure_all_started(ekka).
 
 stop() ->
     application:stop(ekka).
+
+%%%-------------------------------------------------------------------
+%%% Register Callback
+%%%-------------------------------------------------------------------
 
 callback(Name) ->
     application:get_env(ekka, {callback, Name}).
@@ -87,12 +88,16 @@ env(Key, Default) ->
 %%%-------------------------------------------------------------------
 
 %% Cluster members
--spec(members() -> [member()]).
-members() -> ekka_node_monitor:members().
+-spec(members() -> list(member())).
+members() -> ekka_membership:members().
 
 %% Local member
 -spec(local_member() -> member()).
-local_member() -> ekka_node_monitor:local_member().
+local_member() -> ekka_membership:local_member().
+
+%% Status of the cluster
+status() ->
+    [{members, members()}, {partitions, ekka_node_monitor:partitions()}].
 
 %%%-------------------------------------------------------------------
 %%% Node API
@@ -128,24 +133,8 @@ force_leave(Node) ->
     ekka_cluster:force_leave(Node).
 
 %%%-------------------------------------------------------------------
-%%% Subscribe/Unsubscribe
+%%% Monitor membership events
 %%%-------------------------------------------------------------------
 
--spec(subscribe(node | membership) -> ok).
-subscribe(What) ->
-    ekka_node_monitor:subscribe(What).
-
--spec(unsubscribe(node | membership) -> ok).
-unsubscribe(What) ->
-    ekka_node_monitor:unsubscribe(What).
-
-%%%-------------------------------------------------------------------
-%%% RPC API
-%%%-------------------------------------------------------------------
-
-cast(Node, Mod, Fun, Args) ->
-    ekka_rpc:cast(Node, Mod, Fun, Args).
-
-call(Node, Mod, Fun, Args) ->
-    ekka_rpc:call(Node, Mod, Fun, Args).
+monitor(OnOff) -> ekka_membership:monitor(OnOff).
 

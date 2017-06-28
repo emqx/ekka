@@ -76,7 +76,7 @@ delegate(Node, Options) ->
 %% @doc Forward message to a node
 -spec(forward(node(), any()) -> ok | {error, any()}).
 forward(Node, Msg) ->
-    case ekka_node_sup:delegate(Node) of
+    case ekka_node_sup:delegate(Node) of %% TODO: performance issue?
         {ok, Pid} -> gen_server:cast(Pid, {forward, Node, Msg});
         false     -> {error, no_delegate}
     end.
@@ -87,11 +87,11 @@ forward(Node, Msg) ->
 
 init([Node, Options]) ->
     erlang:monitor_node(Node, true),
-    Status = status(lists:member(Node, nodes())),
+    Status = case lists:member(Node, nodes()) of
+                 true  -> up;
+                 false -> down
+             end,
     {ok, #state{name = Node, status = Status, options = Options}}.
-
-status(true)  -> up;
-status(false) -> down.
 
 handle_call(_Request, _From, State) ->
     {reply, ignore, State}.

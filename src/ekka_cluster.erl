@@ -14,7 +14,7 @@
 %%% limitations under the License.
 %%%===================================================================
 
-%% Ekka Cluster.
+%%% Ekka Cluster with Mnesia Database.
 
 -module(ekka_cluster).
 
@@ -22,7 +22,7 @@
 -export([join/1, leave/0, force_leave/1, status/0]).
 
 %% RPC Call for Cluster Management
--export([prepare/1, reboot/0]).
+-export([prepare/1, heal/1, reboot/0]).
 
 %% @doc Join the cluster
 -spec(join(node()) -> ok | ignore | {error, any()}).
@@ -65,15 +65,23 @@ force_leave(Node) ->
         false ->
             {error, node_not_in_cluster};
         {badrpc, nodedown} ->
+            ekka_membership:announce({force_leave, Node}),
             ekka_mnesia:remove_from_cluster(Node);
         {badrpc, Reason} ->
             {error, Reason}
     end.
 
+%% @doc Heal partitions
+-spec(heal(shutdown | reboot) -> ok).
+heal(shutdown) ->
+    prepare(heal), ekka_mnesia:ensure_stopped();
+heal(reboot) ->
+    ekka_mnesia:ensure_started(), reboot().
+
 %% @doc Prepare to join or leave the cluster.
 -spec(prepare(join | leave) -> ok).
 prepare(Action) ->
-    ekka_node_monitor:notify(Action),
+    ekka_membership:announce(Action),
     case ekka:callback(prepare) of
         {ok, Prepare} -> Prepare(Action);
         undefined     -> application:stop(ekka)
@@ -84,7 +92,7 @@ prepare(Action) ->
 reboot() ->
     case ekka:callback(reboot) of
         {ok, Reboot} -> Reboot();
-        undefined    -> application:start(ekka)
+        undefined    -> ekka:start()
     end.
 
 %% @doc Cluster status.
