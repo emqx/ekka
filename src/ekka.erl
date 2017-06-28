@@ -37,7 +37,7 @@
 -export([local_member/0, members/0, status/0]).
 
 %% Monitor membership events
--export([monitor/1]).
+-export([monitor/1, unmonitor/1]).
 
 %%%-------------------------------------------------------------------
 %%% Start/Stop
@@ -136,5 +136,11 @@ force_leave(Node) ->
 %%% Monitor membership events
 %%%-------------------------------------------------------------------
 
-monitor(OnOff) -> ekka_membership:monitor(OnOff).
+%%TODO:
+
+monitor(membership) ->
+    ekka_membership:monitor(true).
+
+unmonitor(membership) ->
+    ekka_membership:monitor(false).
 
