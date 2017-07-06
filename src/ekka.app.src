@@ -1,0 +1,12 @@
+{application,ekka,
+             [{description,"Autocluster and Autoheal for EMQ"},
+              {vsn,"0.1"},
+              {modules,[]},
+              {env, [
+                {cluster_autoheal, true},
+                {cluster_clean_down, 3600},
+                {cluster_discovery, manual}
+              ]},
+              {registered,[ekka_sup]},
+              {applications,[kernel,stdlib,mnesia,lager]},
+              {mod,{ekka_app,[]}}]}.

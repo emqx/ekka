@@ -65,6 +65,7 @@ init([]) ->
     {ok, _} = mnesia:subscribe(system),
     lists:foreach(fun(N) -> self() ! {nodeup, N, []} end, nodes() -- [node()]),
     {ok, heartbeat(#state{partitions = []})}.
+    %%{ok, heartbeat(#state{partitions = []})}.
 
 handle_call(partitions, _From, State = #state{partitions = Partitions}) ->
     {reply, Partitions, State};
@@ -251,11 +252,11 @@ autoheal(SpitViews = [{_, Minority}|_]) ->
 
 shutdown(Node) ->
     ?AHLOG(info, "Shutdown ~s for autoheal...", [Node]),
-    rpc:call(Node, ekka_cluster, heal, [shutdown]).
+    rpc:call(Node, ekka_cluster, heal, [shutdown, node()]).
 
 reboot(Node) ->
     ?AHLOG(info, "Reboot ~s for autoheal...", [Node]),
-    rpc:call(Node, ekka_cluster, heal, [reboot]).
+    rpc:call(Node, ekka_cluster, heal, [reboot, node()]).
 
 ensure_cancel_timer(undefined) ->
     ok;
