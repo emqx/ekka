@@ -22,6 +22,7 @@
 
 nodelist(Options) ->
     Seeds = proplists:get_value(seeds, Options, []),
+    lager:info("Node: ~p, Seeds: ~p", [node(), Seeds]),
     [Node || Node <- Seeds, Node =/= node(), ekka_node:is_aliving(Node)].
 
 register(_Options) ->

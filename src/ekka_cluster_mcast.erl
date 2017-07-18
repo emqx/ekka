@@ -60,7 +60,6 @@ start_link(Options) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Options, []).
 
 init(Options) ->
-    io:format("Options: ~p~n", [Options]),
     Addr  = get_value(addr, Options),
     Ports = get_value(ports, Options),
     Loop  = get_value(loop, Options, true),
@@ -81,7 +80,7 @@ handle_call(nodelist, From, State = #state{sock = Sock, addr = Addr, ports = Por
     lists:foreach(fun(Port) ->
                     udp_send(Sock, Addr, Port, Ping)
                   end, Ports),
-    erlang:send_after(3000, self(), {reply, nodelist, From}),
+    erlang:send_after(5000, self(), {reply, nodelist, From}),
     {noreply, State};
 
 handle_call(Req, _From, State) ->
@@ -99,7 +98,7 @@ handle_info({reply, nodelist, From}, State = #state{seen = Seen}) ->
 handle_info({udp, Sock, Ip, InPort, Data}, State = #state{sock = Sock, seen = Seen}) ->
     inet:setopts(Sock, [{active, 1}]),
     MyCookie = cookie_hash(),
-    NewState = try binary_to_term(Data) of
+    {noreply, try binary_to_term(Data) of
                    {_Tag, Node, _Cookie} when Node =:= node() ->
                        State;
                    {ping, Node, Cookie} when Cookie == MyCookie ->
@@ -117,8 +116,7 @@ handle_info({udp, Sock, Ip, InPort, Data}, State = #state{sock = Sock, seen = Se
                    error:badarg ->
                        ?LOG(error, "Corrupt Data: ~p", [Data]),
                        State
-               end,
-    {noreply, NewState};
+               end};
 
 handle_info({udp_closed, Sock}, State = #state{sock = Sock}) ->
     {stop, udp_closed, State};

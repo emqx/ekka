@@ -147,7 +147,7 @@ handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
 handle_info({mnesia_system_event, {inconsistent_database, Context, Node}},
             State = #state{partitions = Partitions}) ->
     ?LOG(critical, "Network partition detected from node ~s: ~p", [Node, Context]),
-    case ekka:autoheal() of
+    case ekka_autoheal:enabled() of
         true  -> erlang:send_after(3000, self(), confirm_partition);
         false -> ignore
     end,

@@ -18,14 +18,11 @@
 
 -include("ekka.hrl").
 
-%% Start/Stop
--export([start/0, stop/0]).
+%% Start/Stop, and Env
+-export([start/0, env/1, env/2, stop/0]).
 
 %% Register callback
 -export([callback/1, callback/2]).
-
-%% Env
--export([cluster/0, cookie/0, strategy/0, autoheal/0]).
 
 %% Node API
 -export([is_aliving/1, is_running/2]).
@@ -51,6 +48,16 @@ stop() ->
     application:stop(ekka).
 
 %%%-------------------------------------------------------------------
+%%% Env
+%%%-------------------------------------------------------------------
+
+env(Key) ->
+    application:get_env(ekka, Key).
+
+env(Key, Default) ->
+    application:get_env(ekka, Key, Default).
+
+%%%-------------------------------------------------------------------
 %%% Register Callback
 %%%-------------------------------------------------------------------
 
@@ -61,30 +68,7 @@ callback(Name, Fun) ->
     application:set_env(ekka, {callback, Name}, Fun).
 
 %%%-------------------------------------------------------------------
-%%% Env
-%%%-------------------------------------------------------------------
-
-%% @doc Cluster name.
--spec(cluster() -> atom()).
-cluster() -> env(cluster_name, ekka).
-
-%% @doc Cluster cookie.
--spec(cookie() -> atom()).
-cookie() -> erlang:get_cookie().
-
-%% @doc Cluster discovery.
--spec(strategy() -> atom()).
-strategy() -> env(cluster_strategy, epmd).
-
-%% @doc Cluster autoheal.
--spec(autoheal() -> boolean()).
-autoheal() -> env(cluster_autoheal, true).
-
-env(Key, Default) ->
-    application:get_env(ekka, Key, Default).
-
-%%%-------------------------------------------------------------------
-%%% Membership
+%%% Membership API
 %%%-------------------------------------------------------------------
 
 %% Cluster members

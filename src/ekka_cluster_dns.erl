@@ -18,7 +18,7 @@
 
 -behaviour(ekka_cluster_strategy).
 
-%% cluster strategy Callbacks
+%% Cluster strategy Callbacks
 -export([nodelist/1, register/1, unregister/1]).
 
 -type(option() :: {name, string()} | {app, atom()}).
@@ -37,9 +37,4 @@ register(_Options) ->
     
 unregister(_Options) ->
     ok.
-
-%%TODO: Get hosts
-%% [extract_host(inet:gethostbyaddr(A)) || A <- inet_res:lookup(Name, in, a)],
-%% extract_host({ok, {hostent, FQDN, _, _, _, _}}) ->
-%%
 

@@ -40,7 +40,7 @@ extract_nodes(Json) ->
   end.
 
 with_prefix(Prefix, Path) ->
-    Prefix ++ "/" ++ atom_to_list(ekka:cluster()) ++ Path.
+    Prefix ++ "/" ++ atom_to_list(ekka:env(cluster_name, ekka)) ++ Path.
 
 extract_node(V) ->
     list_to_atom(binary_to_list(lists:last(binary:split(maps:get(<<"key">>, V), <<"/">>, [global])))).

@@ -16,7 +16,10 @@
 
 -module(ekka_autoheal).
 
--export([heal/1]).
+-export([enabled/0, heal/1]).
+
+enabled() ->
+    ekka:env(cluster_autoheal, false).
 
 heal(SplitView) ->
     {ok, SplitView}.

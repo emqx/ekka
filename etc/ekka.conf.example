@@ -1,0 +1,51 @@
+
+##--------------------------------------------------------------------
+## Cluster
+##--------------------------------------------------------------------
+
+## Cluster name
+cluster.name = ekka
+
+## Cluster discovery strategy: manual | static | mcast | dns | etcd
+cluster.discovery = static
+
+## Cluster Autoheal: on | off
+cluster.autoheal = on
+
+## Clean down node of the cluster
+cluster.clean_down = 1h
+
+##--------------------------------------------------------------------
+## Cluster with static node list
+
+cluster.static.seeds = ekka1@127.0.0.1,ekka2@127.0.0.1
+
+##--------------------------------------------------------------------
+## Cluster with multicast
+
+cluster.mcast.addr = 239.192.0.1
+
+cluster.mcast.ports = 4369,4370
+
+cluster.mcast.iface = 0.0.0.0
+
+cluster.mcast.ttl = 1
+
+cluster.mcast.loop = on
+
+##--------------------------------------------------------------------
+## Cluster with DNS
+
+cluster.dns.name = localhost
+
+cluster.dns.app  = emqx
+
+##--------------------------------------------------------------------
+## Cluster with Etcd
+
+cluster.etcd.addr = http://127.0.0.1:2367
+
+cluster.etcd.prefix = ekkacluster
+
+cluster.etcd.node_ttl = 1h
+
