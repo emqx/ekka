@@ -33,9 +33,19 @@
 ]}.
 
 %%--------------------------------------------------------------------
-%% Cluster with epmd
+%% Cluster with Static node list
 
-{mapping, "cluster.epmd.seeds", "ekka.cluster_discovery", [
+{mapping, "cluster.static.seeds", "ekka.cluster_discovery", [
+  {datatype, string}
+]}.
+
+%%--------------------------------------------------------------------
+%% Cluster with DNS
+{mapping, "cluster.dns.name", "ekka.cluster_discovery", [
+  {datatype, string}
+]}.
+
+{mapping, "cluster.dns.app", "ekka.cluster_discovery", [
   {datatype, string}
 ]}.
 
@@ -43,10 +53,16 @@
 %% Cluster with IP Multicast
 
 {mapping, "cluster.mcast.addr", "ekka.cluster_discovery", [
-  {datatype, ip}
+  {default, "239.192.0.1"},
+  {datatype, string}
 ]}.
 
-{mapping, "cluster.mcast.period", "ekka.cluster_discovery", [
+{mapping, "cluster.mcast.ports", "ekka.cluster_discovery", [
+  {default, "4369"},
+  {datatype, string}
+]}.
+
+{mapping, "cluster.mcast.heartbeat", "ekka.cluster_discovery", [
   {datatype, {duration, ms}},
   {default, "1s"}
 ]}.
@@ -131,24 +147,28 @@
              {Ip, Port}
            end,
   Options = fun(static) ->
-                 [{seeds, cuttlefish:conf_get("cluster.epmd.seeds", Conf)}];
+                 [{seeds, [list_to_atom(S) || S <- string:tokens(cuttlefish:conf_get("cluster.static.seeds", Conf, ""), ",")]}];
+               (dns) ->
+                 [{name, cuttlefish:conf_get("cluster.dns.name", Conf)},
+                  {app, cuttlefish:conf_get("cluster.dns.app", Conf)}];
                (mcast) ->
-                 {Addr, Port} = cuttlefish:conf_get("cluster.mcast.addr", Conf),
-                 {ok, Ip} = inet:parse_address(Addr),
+                 {ok, Addr} = inet:parse_address(cuttlefish:conf_get("cluster.mcast.addr", Conf)),
                  {ok, Iface} = inet:parse_address(cuttlefish:conf_get("cluster.mcast.iface", Conf)),
-                 [{addr, Ip}, {port, Port}, {iface, Iface},
-                  {period, cuttlefish:conf_get("cluster.mcast.period", Conf)},
+                 Ports = [list_to_integer(S) || S <- string:tokens(cuttlefish:conf_get("cluster.mcast.ports", Conf), ",")],
+
+                 [{addr, Addr}, {ports, Ports}, {iface, Iface},
+                  {heartbeat, cuttlefish:conf_get("cluster.mcast.heartbeat", Conf)},
                   {ttl, cuttlefish:conf_get("cluster.mcast.ttl", Conf, 1)},
                   {loop, cuttlefish:conf_get("cluster.mcast.loop", Conf, true)}];
                (etcd) ->
-                 [{seeds, cuttlefish:conf_get("cluster.epmd.seeds", Conf)},
-                  {clean_down, cuttlefish:conf_get("cluster.epmd.clean_down", Conf, undefined)}];
+                 [{seeds, cuttlefish:conf_get("cluster.static.seeds", Conf)},
+                  {clean_down, cuttlefish:conf_get("cluster.static.clean_down", Conf, undefined)}];
                (gossip) ->
                  [{seeds, [IpPort(S) || S <- string:tokens(",", cuttlefish:conf_get("cluster.gossip.seeds", Conf))]},
                   {protocol_period, cuttlefish:conf_get("cluster.gossip.protocol_period", Conf)},
                   {suspicion_factor, cuttlefish:conf_get("cluster.gossip.suspicion_factor", Conf, 3)}];
                (etcd) ->
-                 [{addr, cuttlefish:conf_get("cluster.etcd.addr", Conf)},
+                 [{addr, string:tokens(cuttlefish:conf_get("cluster.etcd.addr", Conf), ",")},
                   {prefix, cuttlefish:conf_get("cluster.etcd.prefix", Conf, "emq")},
                   {node_ttl, cuttlefish:conf_get("cluster.etcd.node_ttl", Conf, 60)}];
                (consul) ->
