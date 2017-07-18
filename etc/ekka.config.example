@@ -1,0 +1,9 @@
+[{ekka,[{cluster_clean_down,3600000},
+        {cluster_autoheal,true},
+        {cluster_name,ekka},
+        {cluster_discovery,{mcast,[{addr,{239,192,0,1}},
+                                   {ports,[4369,4370]},
+                                   {iface,{0,0,0,0}},
+                                   {heartbeat,1000},
+                                   {ttl,1},
+                                   {loop,true}]}}]}].
