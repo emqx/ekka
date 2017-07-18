@@ -23,7 +23,7 @@
 -export([start_link/0]).
 
 %% Members API
--export([local_member/0, lookup_member/1, members/0, members/1]).
+-export([local_member/0, lookup_member/1, members/0, members/1, oldest/1]).
 
 -export([leader/0, nodelist/0, coordinator/0, coordinator/1]).
 
@@ -90,7 +90,7 @@ coordinator(Nodes) ->
     Member = oldest([M || M <- [lookup_member(N) || N <- Nodes], M =/= false]),
     Member#member.node.
 
-%% @private
+%% Get oldest member.
 oldest(Members) ->
     hd(lists:sort(fun compare/2, Members)).
 

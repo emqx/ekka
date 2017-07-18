@@ -36,7 +36,7 @@ join(Node) when is_atom(Node) ->
         {false, false} ->
             {error, {node_down, Node}};
         {true, _} ->
-            {error, {already_clustered, Node}}
+            {error, {already_in_cluster, Node}}
     end.
 
 %% @doc Leave from the cluster.
