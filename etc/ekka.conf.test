@@ -9,11 +9,11 @@ cluster.name = ekka
 ## Cluster discovery strategy: manual | static | mcast | dns | etcd
 cluster.discovery = manual
 
+## Clean down node of the cluster
+cluster.autoclean = 1h
+
 ## Cluster Autoheal: on | off
 cluster.autoheal = on
-
-## Clean down node of the cluster
-cluster.clean_down = 1h
 
 ##--------------------------------------------------------------------
 ## Cluster with static node list

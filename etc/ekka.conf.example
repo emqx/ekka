@@ -7,13 +7,13 @@
 cluster.name = ekka
 
 ## Cluster discovery strategy: manual | static | mcast | dns | etcd
-cluster.discovery = static
+cluster.discovery = k8s
 
 ## Cluster Autoheal: on | off
 cluster.autoheal = on
 
 ## Clean down node of the cluster
-cluster.clean_down = 1h
+## cluster.autoclean = 0h
 
 ##--------------------------------------------------------------------
 ## Cluster with static node list
@@ -29,7 +29,7 @@ cluster.mcast.ports = 4369,4370
 
 cluster.mcast.iface = 0.0.0.0
 
-cluster.mcast.ttl = 1
+cluster.mcast.ttl = 2
 
 cluster.mcast.loop = on
 
@@ -48,4 +48,15 @@ cluster.etcd.addr = http://127.0.0.1:2367
 cluster.etcd.prefix = ekkacluster
 
 cluster.etcd.node_ttl = 1h
+
+##--------------------------------------------------------------------
+## Cluster with k8s
+
+cluster.k8s.addr = http://10.110.111.204:8080
+
+cluster.k8s.path = api/v1/namespaces/default/endpoints/emqttd
+
+cluster.k8s.app_name = emq
+
+##cluster.k8s.service = ekka
 

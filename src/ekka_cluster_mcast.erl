@@ -31,9 +31,6 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(LOG(Level, Format, Args),
-        lager:Level("Ekka(Mcast): " ++ Format, Args)).
-
 -type(option() :: {addr, inet:ip_address()}
                 | {ports, list(inet:port_number())}
                 | {iface, inet:ip_address()}
@@ -45,10 +42,18 @@
 
 -record(state, {sock, addr, ports, seen}).
 
+-define(SERVER, ?MODULE).
+
+-define(LOG(Level, Format, Args),
+        lager:Level("Ekka(Mcast): " ++ Format, Args)).
+
 -spec(nodelist(list(option())) -> list(node())).
 nodelist(Options) ->
-    {ok, Pid} = ekka_cluster_sup:start_child(?MODULE, Options),
-    gen_server:call(Pid, nodelist, 60000).
+    Server = case whereis(?SERVER) of
+                 false -> {ok, Pid} = ekka_cluster_sup:start_child(?SERVER, Options), Pid;
+                 Pid   -> Pid
+             end,
+    gen_server:call(Server, nodelist, 60000).
 
 register(_Options) ->
     ignore.
@@ -57,7 +62,7 @@ unregister(_Options) ->
     ok.
 
 start_link(Options) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Options, []).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
 
 init(Options) ->
     Addr  = get_value(addr, Options),

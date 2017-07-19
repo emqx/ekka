@@ -14,12 +14,30 @@
 %%% limitations under the License.
 %%%===================================================================
 
--module(ekka_autodown).
+-module(ekka_autoclean).
 
--export([clean/1]).
+-include("ekka.hrl").
 
-clean(Node) ->
-    %% 1. ensure node is down and expired
-    ekka_mnesia:force_remove(Node),
-    {ok, Node}.
+-export([init/0, check/1]).
+
+-record(?MODULE, {period, timer}).
+
+init() ->
+    case ekka:env(cluster_autoclean) of
+        undefined -> undefined;
+        Period    -> sched(#?MODULE{period = Period})
+    end.
+
+sched(State = #?MODULE{period = Period}) ->
+    State#?MODULE{timer = erlang:send_after(Period div 2, self(), autoclean)}.
+
+check(State = #?MODULE{period = Period}) ->
+    [maybe_clean(Member, Period) || Member <- ekka_membership:members(down)],
+    sched(State).
+
+maybe_clean(#member{node = Node, ltime = LTime}, Expiry) ->
+    case timer:now_diff(erlang:timestamp(), LTime) > Expiry of
+        true  -> ekka_mnesia:force_remove(Node);
+        false -> ok
+    end.
 

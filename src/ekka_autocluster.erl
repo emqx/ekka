@@ -30,7 +30,6 @@ maybe_join([]) ->
     ignore;
 
 maybe_join(Nodes) ->
-    ?LOG(info, "Join ~p", [Nodes]),
     case ekka_mnesia:is_node_in_cluster() of
         true  -> ignore;
         false -> case find_oldest_node(Nodes) of
@@ -44,7 +43,6 @@ find_oldest_node([Node]) ->
 find_oldest_node(Nodes) ->
    case rpc:multicall(Nodes, ekka_membership, local_member, []) of
        {Members, []} ->
-           ?LOG(info, "Members: ~p", [Members]),
            Member = ekka_membership:oldest(Members), Member#member.node;
        {_Views, BadNodes} ->
             ?LOG(critical, "Bad Nodes found when autocluster: ~p", [BadNodes]),

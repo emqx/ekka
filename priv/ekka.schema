@@ -14,16 +14,15 @@
   {datatype, atom}
 ]}.
 
+%% @doc Clean down node from the cluster
+{mapping, "cluster.autoclean", "ekka.cluster_autoclean", [
+  {datatype, {duration, ms}}
+]}.
+
 %% @doc Cluster autoheal
 {mapping, "cluster.autoheal", "ekka.cluster_autoheal", [
   {datatype, flag},
-  {default, on}
-]}.
-
-%% @doc Clean down node from the cluster
-{mapping, "cluster.clean_down", "ekka.cluster_clean_down", [
-  {datatype, {duration, ms}},
-  {default, "1h"}
+  {default, off}
 ]}.
 
 %%--------------------------------------------------------------------
@@ -102,6 +101,21 @@
   {default, "1m"}
 ]}.
 
+%%--------------------------------------------------------------------
+%% Cluster with K8s
+
+{mapping, "cluster.k8s.addr", "ekka.cluster_discovery", [
+  {datatype, string}
+]}.
+
+{mapping, "cluster.k8s.path", "ekka.cluster_discovery", [
+  {datatype, string}
+]}.
+
+{mapping, "cluster.k8s.app_name", "ekka.cluster_discovery", [
+  {datatype, string}
+]}.
+
 {translation, "ekka.cluster_discovery", fun(Conf) ->
   Strategy = cuttlefish:conf_get("cluster.discovery", Conf),
   Filter  = fun(Opts) -> [{K, V} || {K, V} <- Opts, V =/= undefined] end,
@@ -126,6 +140,10 @@
                  [{addr, string:tokens(cuttlefish:conf_get("cluster.etcd.addr", Conf), ",")},
                   {prefix, cuttlefish:conf_get("cluster.etcd.prefix", Conf, "emq")},
                   {node_ttl, cuttlefish:conf_get("cluster.etcd.node_ttl", Conf, 60)}];
+               (k8s) ->
+                 [{addr, cuttlefish:conf_get("cluster.k8s.addr", Conf)},
+                  {path, cuttlefish:conf_get("cluster.k8s.path", Conf)},
+                  {app_name, cuttlefish:conf_get("cluster.k8s.app_name", Conf)}];
                (manual) ->
                  [ ]
             end,
