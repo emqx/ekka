@@ -20,11 +20,14 @@
 
 -export([bootstrap/0, maybe_join/1, maybe_register/0, maybe_unregister/0]).
 
--define(LOG(Level, Format, Args), lager:Level("Ekka(Autocluster): " ++ Format, Args)).
+-define(LOG(Level, Format, Args), lager:Level("Ekka(AutoCluster): " ++ Format, Args)).
 
 -spec(bootstrap() -> ok | ignore).
 bootstrap() ->
-    with_strategy(fun(Mod, Options) -> maybe_join(Mod:nodelist(Options)) end).
+    with_strategy(
+      fun(Mod, Options) ->
+          maybe_join([N || N <- Mod:nodelist(Options), N =/= node()])
+      end).
 
 maybe_join([]) ->
     ignore;
