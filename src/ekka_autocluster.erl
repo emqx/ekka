@@ -33,6 +33,7 @@ maybe_join([]) ->
     ignore;
 
 maybe_join(Nodes) ->
+    ?LOG(info, "Join ~p", [Nodes]),
     case ekka_mnesia:is_node_in_cluster() of
         true  -> ignore;
         false -> case find_oldest_node(Nodes) of

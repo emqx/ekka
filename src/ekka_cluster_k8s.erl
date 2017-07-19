@@ -34,12 +34,13 @@ nodelist(Options) ->
     end.
 
 extract_addresses(Json) ->
-  case maps:get(<<"addresses">>, maps:get(<<"subsets">>, Json), undefined) of
+  [Subsets|_] = maps:get(<<"subsets">>, Json),
+  case maps:get(<<"addresses">>, Subsets, undefined) of
     undefined -> [];
     Addresses -> [extract_ip(A) || A <- Addresses]
   end.
 
-extract_ip(A) -> maps:get("ip", A).
+extract_ip(A) -> binary_to_list(maps:get(<<"ip">>, A)).
 
 register(_Options) ->
     ignore.

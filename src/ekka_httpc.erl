@@ -24,6 +24,7 @@
 
 get(Addr, Path, Params) ->
     Req = {build_url(Addr, Path, Params), []},
+    io:format("Req: ~p~n", [Req]),
     parse_response(httpc:request(get, Req, [{autoredirect, true}], [])).
 
 post(Addr, Path, Params) ->
@@ -61,7 +62,8 @@ percent_encode(B) when is_binary(B) ->
 parse_response({ok, {{_, Code, _}, _Headers, Body}}) ->
     parse_response({ok, Code, Body});
 parse_response({ok, 200, Body}) ->
-    {ok, jsx:decode(Body, [return_maps])};
+    io:format("~p~n", [Body]),
+    {ok, jsx:decode(iolist_to_binary(Body), [return_maps])};
 parse_response({ok, 201, Body}) ->
     {ok, jsx:decode(Body, [return_maps])};
 parse_response({ok, 204, _Body}) ->
