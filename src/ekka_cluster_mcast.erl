@@ -102,7 +102,7 @@ handle_call(discover, From, State = #state{sock = Sock, addr = Addr, ports = Por
     lists:foreach(fun(Port) ->
                     udp_send(Sock, Addr, Port, handshake(Cookie))
                   end, Ports),
-    erlang:send_after(5000, self(), {reply, discover, From}),
+    erlang:send_after(3000, self(), {reply, discover, From}),
     {noreply, State};
 
 handle_call(Req, _From, State) ->
@@ -114,7 +114,7 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info({reply, discover, From}, State = #state{seen = Seen}) ->
-    gen_server:reply(From, Seen),
+    gen_server:reply(From, [node() | Seen]),
     {noreply, State#state{seen = []}};
 
 handle_info({udp, Sock, Ip, InPort, Data}, State = #state{sock = Sock, cookie = Cookie,seen = Seen}) ->

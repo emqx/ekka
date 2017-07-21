@@ -31,7 +31,7 @@ start(Callback) ->
             ok -> 
                 discover_and_join(Mod, Options);
             ignore ->
-                timer:sleep(rand:uniform(5000)),
+                timer:sleep(rand:uniform(3000)),
                 discover_and_join(Mod, Options);
             {error, Reason} ->
                 ?LOG(error, "AutoCluster stopped for lock error: ~p", [Reason])
