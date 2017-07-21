@@ -20,24 +20,27 @@
 
 -export([init/0, check/1]).
 
--record(?MODULE, {period, timer}).
+-record(?MODULE, {expiry, timer}).
 
 init() ->
     case ekka:env(cluster_autoclean) of
-        undefined -> undefined;
-        Period    -> sched(#?MODULE{period = Period})
+        {ok, Expiry} -> timer_backoff(#?MODULE{expiry = Expiry});
+        undefined    -> undefined
     end.
 
-sched(State = #?MODULE{period = Period}) ->
-    State#?MODULE{timer = erlang:send_after(Period div 2, self(), autoclean)}.
+timer_backoff(State = #?MODULE{expiry = Expiry}) ->
+    State#?MODULE{timer = erlang:send_after(Expiry div 4, self(), autoclean)}.
 
-check(State = #?MODULE{period = Period}) ->
-    [maybe_clean(Member, Period) || Member <- ekka_membership:members(down)],
-    sched(State).
+check(State = #?MODULE{expiry = Expiry}) ->
+    [maybe_clean(Member, Expiry) || Member <- ekka_membership:members(down)],
+    timer_backoff(State).
 
 maybe_clean(#member{node = Node, ltime = LTime}, Expiry) ->
-    case timer:now_diff(erlang:timestamp(), LTime) > Expiry of
-        true  -> ekka_mnesia:force_remove(Node);
+    case expired(LTime, Expiry) of
+        true  -> ekka_cluster:force_leave(Node);
         false -> ok
     end.
+
+expired(LTime, Expiry) ->
+    timer:now_diff(erlang:timestamp(), LTime) div 1000 > Expiry.
 

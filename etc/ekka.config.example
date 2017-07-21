@@ -4,6 +4,5 @@
         {cluster_discovery,{mcast,[{addr,{239,192,0,1}},
                                    {ports,[4369,4370]},
                                    {iface,{0,0,0,0}},
-                                   {heartbeat,1000},
-                                   {ttl,1},
+                                   {ttl, 255},
                                    {loop,true}]}}]}].

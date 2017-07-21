@@ -23,11 +23,11 @@
 -import(proplists, [get_value/2, get_value/3]).
 
 %% Cluster strategy Callbacks
--export([nodelist/1, register/1, unregister/1]).
+-export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
 
 -export([start_link/1]).
 
-%% gen_server callbacks
+%% gen_server Callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -40,29 +40,45 @@
                 | {recbuf, pos_integer()}
                 | {buffer, pos_integer()}).
 
--record(state, {sock, addr, ports, seen}).
+-record(state, {sock, addr, ports, cookie, seen}).
 
 -define(SERVER, ?MODULE).
 
 -define(LOG(Level, Format, Args),
         lager:Level("Ekka(Mcast): " ++ Format, Args)).
 
--spec(nodelist(list(option())) -> list(node())).
-nodelist(Options) ->
+discover(Options) ->
     Server = case whereis(?SERVER) of
-                 false -> {ok, Pid} = ekka_cluster_sup:start_child(?SERVER, Options), Pid;
-                 Pid   -> Pid
+                 Pid when is_pid(Pid) -> Pid;
+                 undefined -> ensure_mcast_started(Options)
              end,
-    gen_server:call(Server, nodelist, 60000).
+    gen_server:call(Server, discover, 60000).
+
+ensure_mcast_started(Options) ->
+    case ekka_cluster_sup:start_child(?SERVER, Options) of
+        {ok, Pid} -> Pid;
+        {error, {already_started, Pid}} -> Pid
+    end.
+
+lock(_Options) ->
+    ignore.
+    
+unlock(_Options) ->
+    ignore.
 
 register(_Options) ->
     ignore.
     
 unregister(_Options) ->
-    ok.
+    ignore.
 
+-spec(start_link(list(option())) -> {ok, pid()} | ignore | {error, term()}).
 start_link(Options) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
+
+%%%===================================================================
+%%% gen_server Callbacks
+%%%===================================================================
 
 init(Options) ->
     Addr  = get_value(addr, Options),
@@ -75,17 +91,18 @@ init(Options) ->
                           {multicast_loop, Loop},
                           {add_membership, {Addr, Iface}}]) of
         {ok, Sock} ->
-            {ok, #state{sock = Sock, addr = Addr, ports = Ports, seen = []}};
+            {ok, #state{sock = Sock, addr = Addr, ports = Ports,
+                        cookie = erlang:phash2(erlang:get_cookie()),
+                        seen = []}};
         {error, Error} ->
             {stop, Error}
     end.
 
-handle_call(nodelist, From, State = #state{sock = Sock, addr = Addr, ports = Ports}) ->
-    Ping = {ping, node(), cookie_hash()},
+handle_call(discover, From, State = #state{sock = Sock, addr = Addr, ports = Ports, cookie = Cookie}) ->
     lists:foreach(fun(Port) ->
-                    udp_send(Sock, Addr, Port, Ping)
+                    udp_send(Sock, Addr, Port, handshake(Cookie))
                   end, Ports),
-    erlang:send_after(5000, self(), {reply, nodelist, From}),
+    erlang:send_after(5000, self(), {reply, discover, From}),
     {noreply, State};
 
 handle_call(Req, _From, State) ->
@@ -96,32 +113,33 @@ handle_cast(Msg, State) ->
     ?LOG(error, "Unexpected msg: ~p", [Msg]),
     {noreply, State}.
 
-handle_info({reply, nodelist, From}, State = #state{seen = Seen}) ->
+handle_info({reply, discover, From}, State = #state{seen = Seen}) ->
     gen_server:reply(From, Seen),
     {noreply, State#state{seen = []}};
 
-handle_info({udp, Sock, Ip, InPort, Data}, State = #state{sock = Sock, seen = Seen}) ->
+handle_info({udp, Sock, Ip, InPort, Data}, State = #state{sock = Sock, cookie = Cookie,seen = Seen}) ->
     inet:setopts(Sock, [{active, 1}]),
-    MyCookie = cookie_hash(),
+    Cluster = ekka:env(cluster_name, ekka),
     {noreply, try binary_to_term(Data) of
-                   {_Tag, Node, _Cookie} when Node =:= node() ->
+                  {handshake, Node, _Cluster, _Cookie} when Node =:= node() ->
+                      State;
+                  {handshake, Node, Cluster, Cookie} ->
+                      case lists:member(Node, Seen) of
+                          false -> udp_send(Sock, Ip, InPort, handshake(Cookie));
+                          true  -> ok
+                      end,
+                      State#state{seen = lists:usort([Node | Seen])};
+                  Handshake = {handshake, _Node, _Cluster, _Cookie} ->
+                       ?LOG(warning, "Unexpected ~p", [Handshake]),
                        State;
-                   {ping, Node, Cookie} when Cookie == MyCookie ->
-                       udp_send(Sock, Ip, InPort, {pong, node(), MyCookie}),
-                       State#state{seen = lists:usort([Node | Seen])};
-                   {pong, Node, Cookie} when Cookie == MyCookie ->
-                       State#state{seen = lists:usort([Node | Seen])};
-                   {_Tag, Node, Cookie} ->
-                       ?LOG(warning, "Node ~s found with different cookie: ~p", [Node, Cookie]),
-                       State;
-                   OtherData ->
-                       ?LOG(error, "Unexpected data received: ~p", [OtherData]),
+                  Term ->
+                       ?LOG(error, "Unexpected term: ~p", [Term]),
                        State
-               catch
-                   error:badarg ->
-                       ?LOG(error, "Corrupt Data: ~p", [Data]),
-                       State
-               end};
+              catch
+                  error:badarg ->
+                      ?LOG(error, "Corrupt Data: ~p", [Data]),
+                      State
+              end};
 
 handle_info({udp_closed, Sock}, State = #state{sock = Sock}) ->
     {stop, udp_closed, State};
@@ -157,6 +175,6 @@ udp_open([Port|Ports], Options) ->
 udp_send(Sock, Addr, Port, Term) ->
     gen_udp:send(Sock, Addr, Port, term_to_binary(Term)).
 
-cookie_hash() ->
-    erlang:phash2(erlang:get_cookie()).
+handshake(Cookie) ->
+    {handshake, node(), ekka:env(cluster_name, ekka), Cookie}.
 

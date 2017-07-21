@@ -18,33 +18,87 @@
 
 -behaviour(ekka_cluster_strategy).
 
-%% Cluster strategy Callbacks
--export([nodelist/1, register/1, unregister/1]).
+-import(proplists, [get_value/2, get_value/3]).
 
-nodelist(Options) ->
-    Addr = proplists:get_value(addr, Options),
-    Path = proplists:get_value(path, Options),
-    AppName = proplists:get_value(app_name, Options, "ekka"),
-    case ekka_httpc:get(Addr, Path, []) of
+%% Cluster strategy callbacks.
+-export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
+
+-define(SERVICE_ACCOUNT_PATH, "/var/run/secrets/kubernetes.io/serviceaccount/").
+
+-define(LOG(Level, Format, Args), lager:Level("Ekka(k8s): " ++ Format, Args)).
+
+%%%===================================================================
+%%% ekka_cluster_strategy Callbacks
+%%%===================================================================
+
+discover(Options) ->
+    Server  = get_value(apiserver, Options),
+    Service = get_value(service_name, Options),
+    App = get_value(app_name, Options, "ekka"),
+    AddrType = get_value(address_type, Options, ip),
+    case k8s_service_get(Server, Service) of
         {ok, Response} ->
-            Nodes = [list_to_atom(AppName ++ "@" ++ Ip) || Ip <- extract_addresses(Response)],
-            [Node || Node <- Nodes, ekka_node:is_aliving(Node)];
+            Addresses = extract_addresses(AddrType, Response),
+            ?LOG(info, "Addresses: ~p", [Addresses]),
+            [list_to_atom(App ++ "@" ++ binary_to_list(Addr)) || Addr <- Addresses];
         {error, Error} ->
-            lager:error("Ekka(k8s): nodelist error - ~p", [Error]), []
+            ?LOG(error, "Discovery error - ~p", [Error]), []
     end.
 
-extract_addresses(Json) ->
-  [Subsets|_] = maps:get(<<"subsets">>, Json),
-  case maps:get(<<"addresses">>, Subsets, undefined) of
-    undefined -> [];
-    Addresses -> [extract_ip(A) || A <- Addresses]
-  end.
+lock(_Options) ->
+    ignore.
 
-extract_ip(A) -> binary_to_list(maps:get(<<"ip">>, A)).
+unlock(_Options) ->
+    ignore.
 
 register(_Options) ->
     ignore.
 
 unregister(_Options) ->
     ok.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+k8s_service_get(Server, Service) ->
+    Headers = [{"Authorization", "Bearer " ++ token()}],
+    HttpOpts = case filelib:is_file(cert_path()) of
+                   true  -> [{ssl, [{cacertfile, cert_path()}]}];
+                   false -> [{ssl, [{verify, verify_none}]}]
+               end,
+    ekka_httpc:get(Server, service_path(Service), [], Headers, HttpOpts).
+
+service_path(Service) ->
+    lists:concat(["api/v1/namespaces/", namespace(), "/endpoints/", Service]).
+
+namespace() ->
+    binary_to_list(trim(read_file("namespace", <<"default">>))).
+
+token() ->
+    binary_to_list(trim(read_file("token", <<"">>))).
+
+cert_path() -> ?SERVICE_ACCOUNT_PATH ++ "/ca.crt".
+
+read_file(Name, Default) ->
+    case file:read_file(?SERVICE_ACCOUNT_PATH ++ Name) of
+        {ok, Data}     -> Data;
+        {error, Error} -> ?LOG(error, "Cannot read ~s: ~p", [Name, Error]),
+                          Default
+    end.
+
+trim(S) -> binary:replace(S, <<"\n">>, <<>>).
+
+extract_addresses(Type, Response) ->
+    lists:flatten(
+      [[ extract_host(Type, Addr)
+         || Addr <- maps:get(<<"addresses">>, Subset, [])]
+            || Subset <- maps:get(<<"subsets">>, Response, [])]).
+
+extract_host(ip, Addr) ->
+    maps:get(<<"ip">>, Addr);
+
+extract_host(dns, Addr) ->
+    Ip = binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>),
+    iolist_to_binary([Ip, ".", namespace(), ".pod.cluster.local"]).
 

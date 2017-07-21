@@ -6,14 +6,14 @@
 ## Cluster name
 cluster.name = ekka
 
-## Cluster discovery strategy: manual | static | mcast | dns | etcd
-cluster.discovery = k8s
+## Cluster discovery strategy: manual | static | mcast | dns | etcd | k8s
+cluster.discovery = etcd
 
 ## Cluster Autoheal: on | off
 cluster.autoheal = on
 
 ## Clean down node of the cluster
-## cluster.autoclean = 0h
+cluster.autoclean = 5m
 
 ##--------------------------------------------------------------------
 ## Cluster with static node list
@@ -29,7 +29,7 @@ cluster.mcast.ports = 4369,4370
 
 cluster.mcast.iface = 0.0.0.0
 
-cluster.mcast.ttl = 2
+cluster.mcast.ttl = 255
 
 cluster.mcast.loop = on
 
@@ -43,20 +43,22 @@ cluster.dns.app  = emqx
 ##--------------------------------------------------------------------
 ## Cluster with Etcd
 
-cluster.etcd.addr = http://127.0.0.1:2367
+cluster.etcd.server = http://127.0.0.1:2379
 
 cluster.etcd.prefix = ekkacluster
 
-cluster.etcd.node_ttl = 1h
+cluster.etcd.node_ttl = 1m
 
 ##--------------------------------------------------------------------
 ## Cluster with k8s
 
-cluster.k8s.addr = http://10.110.111.204:8080
+cluster.k8s.apiserver = http://10.110.111.204:8080
 
-cluster.k8s.path = api/v1/namespaces/default/endpoints/emqttd
+cluster.k8s.service_name = ekka
 
-cluster.k8s.app_name = emq
+## Address Type: ip | dns
+cluster.k8s.address_type = ip
 
-##cluster.k8s.service = ekka
+## The Erlang application name 
+cluster.k8s.app_name = ekka
 

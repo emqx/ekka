@@ -19,22 +19,25 @@
 -behaviour(ekka_cluster_strategy).
 
 %% Cluster strategy Callbacks
--export([nodelist/1, register/1, unregister/1]).
+-export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
 
--type(option() :: {name, string()} | {app, atom()}).
-
--spec(nodelist(list(option())) -> list(node())).
-nodelist(Options) ->
+discover(Options) ->
     Name = proplists:get_value(name, Options),
-    App = proplists:get_value(app, Options),
+    App  = proplists:get_value(app, Options),
     [node_name(App, IP) || IP <- inet_res:lookup(Name, in, a)].
 
 node_name(App, IP) ->
     list_to_atom(App ++ "@" ++ inet_parse:ntoa(IP)).
 
+lock(_Options) ->
+    ignore.
+
+unlock(_Options) ->
+    ignore.
+
 register(_Options) ->
     ignore.
-    
+
 unregister(_Options) ->
-    ok.
+    ignore.
 

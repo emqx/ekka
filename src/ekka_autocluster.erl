@@ -18,22 +18,53 @@
 
 -include("ekka.hrl").
 
--export([bootstrap/0, maybe_join/1, maybe_register/0, maybe_unregister/0]).
+-export([start/1]).
 
--define(LOG(Level, Format, Args), lager:Level("Ekka(AutoCluster): " ++ Format, Args)).
+-define(LOG(Level, Format, Args),
+        lager:Level("Ekka(AutoCluster): " ++ Format, Args)).
 
--spec(bootstrap() -> ok | ignore).
-bootstrap() ->
+-spec(start(Callback :: fun() | mfa()) -> any()).
+start(Callback) ->
     with_strategy(
       fun(Mod, Options) ->
-          maybe_join([N || N <- Mod:nodelist(Options), N =/= node()])
-      end).
+        case Mod:lock(Options) of
+            ok -> 
+                discover_and_join(Mod, Options);
+            ignore ->
+                timer:sleep(rand:uniform(5000)),
+                discover_and_join(Mod, Options);
+            {error, Reason} ->
+                ?LOG(error, "AutoCluster stopped for lock error: ~p", [Reason])
+        end,
+        Mod:unlock(Options)
+      end),
+    run_callback(Callback).
+
+with_strategy(Fun) ->
+    case ekka:env(cluster_discovery) of
+        {ok, {manual, _}} ->
+            ignore;
+        {ok, {Strategy, Options}} ->
+            Fun(strategy_module(Strategy), Options);
+        undefined ->
+            ignore
+    end.
+
+strategy_module(Strategy) ->
+    case code:is_loaded(Strategy) of
+        {file, _} -> Strategy; %% Provider?
+        false     -> list_to_atom("ekka_cluster_" ++  atom_to_list(Strategy))
+    end.
+
+discover_and_join(Mod, Options) ->
+    Nodes = Mod:discover(Options),
+    maybe_join([N || N <- Nodes, ekka_node:is_aliving(N)]),
+    Mod:register(Options).
 
 maybe_join([]) ->
     ignore;
 
 maybe_join(Nodes) ->
-    ?LOG(info, "Join ~p", [Nodes]),
     case ekka_mnesia:is_node_in_cluster() of
         true  -> ignore;
         false -> case find_oldest_node(Nodes) of
@@ -49,29 +80,12 @@ find_oldest_node(Nodes) ->
        {Members, []} ->
            Member = ekka_membership:oldest(Members), Member#member.node;
        {_Views, BadNodes} ->
-            ?LOG(critical, "Bad Nodes found when autocluster: ~p", [BadNodes]),
+            ?LOG(error, "Bad Nodes found when autocluster: ~p", [BadNodes]),
             false
    end.
 
-maybe_register() ->
-    with_strategy(fun(Mod, Options) -> Mod:register(Options) end).
-
-maybe_unregister() ->
-    with_strategy(fun(Mod, Options) -> Mod:unregister(Options) end).
-
-with_strategy(Fun) ->
-    case application:get_env(ekka, cluster_discovery) of
-        {ok, {manual, _}} ->
-            ignore;
-        {ok, {Strategy, Options}} ->
-            Fun(strategy_module(Strategy), Options);
-        undefined ->
-            ignore
-    end.
-
-strategy_module(Strategy) ->
-    case code:is_loaded(Strategy) of
-        {file, _} -> Strategy; %% Provider?
-        false     -> list_to_atom("ekka_cluster_" ++  atom_to_list(Strategy))
-    end.
+run_callback(Fun) when is_function(Fun) ->
+    Fun();
+run_callback({M, F, A}) ->
+    erlang:apply(M, F, A).
 

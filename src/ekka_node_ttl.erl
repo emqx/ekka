@@ -14,43 +14,40 @@
 %%% limitations under the License.
 %%%===================================================================
 
--module(ekka_cluster_sup).
+-module(ekka_node_ttl).
 
--behaviour(supervisor).
+-behaviour(gen_statem).
 
 %% API
--export([start_link/0, start_child/2, stop_child/1]).
+-export([start_link/1]).
 
-%% Supervisor callbacks
--export([init/1]).
+%% gen_statem callbacks
+-export([init/1, callback_mode/0, handle_event/4, terminate/3, code_change/4]).
 
--define(SUP, ?MODULE).
+-record(state, {ttl, mfa}).
 
-%%%===================================================================
-%%% API functions
-%%%===================================================================
-
--spec(start_link() -> {ok, pid()} | ignore | {error, term()}).
-start_link() ->
-    supervisor:start_link({local, ?SUP}, ?MODULE, []).
-
-start_child(M, Opts) ->
-    supervisor:start_child(?SUP, child_spec(M, Opts)).
-
-child_spec(M, Opts) ->
-    {M, {M, start_link, [Opts]}, permanent, 5000, worker, [M]}.
-
-stop_child(M) ->
-    case supervisor:terminate_child(?SUP, M) of
-        ok -> supervisor:delete_child(?SUP, M);
-        {error, not_found} -> ok;
-        Error -> Error
-    end.
+start_link([Ttl, MFA]) ->
+    gen_statem:start_link(?MODULE, [Ttl, MFA], []).
 
 %%%===================================================================
-%%% Supervisor callbacks
+%%% gen_statem callbacks
 %%%===================================================================
 
-init([]) ->
-    {ok, {{one_for_one, 10, 60}, []}}.
+init([Ttl, MFA]) ->
+    {ok, alive, #state{ttl = Ttl, mfa = MFA}, Ttl div 2}.
+
+callback_mode() -> handle_event_function.
+
+handle_event(timeout, _Timeout, alive, State = #state{ttl = Ttl, mfa = {M, F, A}}) ->
+    try erlang:apply(M, F, A)
+    catch _:Error ->
+        lager:error("Ttl error: ~p, ~p", [Error, erlang:get_stacktrace()])
+    end,
+    {next_state, alive, State, Ttl div 2}.
+
+terminate(_Reason, _StateName, _State) ->
+    ok.
+
+code_change(_OldVsn, StateName, State, _Extra) ->
+    {ok, StateName, State}.
 
