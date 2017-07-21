@@ -72,13 +72,19 @@ register(Options) ->
     case etcd_set_node_key(Options) of
         {ok, Response} ->
             ?LOG(debug, "Register Response: ~p", [Response]),
-            Ttl = proplists:get_value(node_ttl, Options),
-            MFA = {?MODULE, etcd_set_node_key, [Options]},
-            {ok, _Pid} = ekka_cluster_sup:start_child(ekka_node_ttl, [Ttl, MFA]),
-            ok;
+            ensure_node_ttl(Options);
         {error, Reason} ->
             ?LOG(error, "Register error - ~p", [Reason]),
             {error, Reason}
+    end.
+
+ensure_node_ttl(Options) ->
+    Ttl = proplists:get_value(node_ttl, Options),
+    MFA = {?MODULE, etcd_set_node_key, [Options]},
+    case ekka_cluster_sup:start_child(ekka_node_ttl, [Ttl, MFA]) of
+        {ok, _Pid} -> ok;
+        {error, {already_started, _Pid}} -> ok;
+        Err = {error, _} -> Err
     end.
 
 unregister(Options) ->
