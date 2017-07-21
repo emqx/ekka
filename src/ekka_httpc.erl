@@ -30,7 +30,6 @@ get(Addr, Path, Params, Headers) ->
 
 get(Addr, Path, Params, Headers, HttpOpts) ->
     Req = {build_url(Addr, Path, Params), Headers},
-    io:format("Req: ~p~n", [Req]),
     parse_response(httpc:request(get, Req, [{autoredirect, true} | HttpOpts], [])).
 
 post(Addr, Path, Params) ->
@@ -39,7 +38,6 @@ post(Addr, Path, Params) ->
 
 put(Addr, Path, Params) ->
     Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", urlencode(Params)},
-    io:format("Req: ~p~n", [Req]),
     parse_response(httpc:request(put, Req, [], [])).
 
 delete(Addr, Path, Params) ->
@@ -69,7 +67,6 @@ percent_encode(B) when is_binary(B) ->
 parse_response({ok, {{_, Code, _}, _Headers, Body}}) ->
     parse_response({ok, Code, Body});
 parse_response({ok, 200, Body}) ->
-    io:format("~p~n", [Body]),
     {ok, jsx:decode(iolist_to_binary(Body), [return_maps])};
 parse_response({ok, 201, Body}) ->
     {ok, jsx:decode(iolist_to_binary(Body), [return_maps])};
