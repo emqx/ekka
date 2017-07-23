@@ -22,7 +22,7 @@
 -export([join/1, leave/0, force_leave/1, status/0]).
 
 %% RPC Call for Cluster Management
--export([prepare/1, heal/2, reboot/0]).
+-export([prepare/1, heal/1, reboot/0]).
 
 %% @doc Join the cluster
 -spec(join(node()) -> ok | ignore | {error, any()}).
@@ -72,14 +72,11 @@ force_leave(Node) ->
     end.
 
 %% @doc Heal partitions
--spec(heal(shutdown | reboot, node()) -> ok).
-heal(shutdown, _Coord) ->
-    prepare(heal),
-    ekka_mnesia:ensure_stopped();
-heal(reboot, Coord) ->
-    ekka_mnesia:ensure_started(),
-    ekka_mnesia:connect(Coord),
-    reboot().
+-spec(heal(shutdown | reboot) -> ok).
+heal(shutdown) ->
+    prepare(heal), ekka_mnesia:ensure_stopped();
+heal(reboot) ->
+    ekka_mnesia:ensure_started(), reboot().
 
 %% @doc Prepare to join or leave the cluster.
 -spec(prepare(join | leave) -> ok).
