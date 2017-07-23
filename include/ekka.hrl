@@ -1,6 +1,4 @@
 
--type(cluster_id() :: atom()).
-
 -type(member_status() :: joining | up | healing | leaving | down).
 
 -type(member_address() :: {inet:ip_address(), inet:port_number()}).
