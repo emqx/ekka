@@ -16,46 +16,51 @@
 
 -module(ekka_autocluster).
 
--export([bootstrap/0, maybe_join/1, maybe_register/0, maybe_unregister/0]).
+-include("ekka.hrl").
+
+-export([discover_and_join/1, unregister_node/0, aquire_lock/0, release_lock/0]).
 
 -define(LOG(Level, Format, Args),
-        lager:Level("Ekka(Autocluster): " ++ Format, Args)).
+        lager:Level("Ekka(AutoCluster): " ++ Format, Args)).
 
--spec(bootstrap() -> ok | ignore).
-bootstrap() ->
-    with_strategy(fun(Mod, Options) -> maybe_join(Mod:nodelist(Options)) end).
+-spec(discover_and_join(Fun :: fun() | mfa()) -> any()).
+discover_and_join(Fun) ->
+    with_strategy(
+      fun(Mod, Options) ->
+        case Mod:lock(Options) of
+            ok -> 
+                discover_and_join(Mod, Options),
+                log_error("Unlock", Mod:unlock(Options));
+            ignore ->
+                timer:sleep(rand:uniform(3000)),
+                discover_and_join(Mod, Options);
+            {error, Reason} ->
+                ?LOG(error, "AutoCluster stopped for lock error: ~p", [Reason])
+        end
+      end),
+    run_callback(Fun).
 
-maybe_join([]) ->
-    ignore;
+-spec(unregister_node() -> ok).
+unregister_node() ->
+    with_strategy(
+      fun(Mod, Options) ->
+        log_error("Unregister", Mod:unregister(Options))
+      end).
 
-maybe_join(Nodes) ->
-    case ekka_mnesia:is_node_in_cluster() of
-        true  -> ignore;
-        false -> case find_oldest_node(Nodes) of
-                     false -> ignore;
-                     Node  -> ekka_cluster:join(Node)
-                 end
+-spec(aquire_lock() -> ok | failed).
+aquire_lock() ->
+    case application:get_env(ekka, autocluster_lock) of
+        undefined ->
+            application:set_env(ekka, autocluster_lock, true);
+        {ok, _} -> failed
     end.
 
-find_oldest_node([Node]) ->
-    Node;
-find_oldest_node(Nodes) ->
-   case rpc:multicall(Nodes, ekka_membership, local_member, []) of
-       {Members, []} ->
-           ekka_membership:oldest(Members);
-       {_Views, BadNodes} ->
-            ?LOG(critical, "Bad Nodes found when autocluster: ~p", [BadNodes]),
-            false
-   end.
-
-maybe_register() ->
-    with_strategy(fun(Mod, Options) -> Mod:register(Options) end).
-
-maybe_unregister() ->
-    with_strategy(fun(Mod, Options) -> Mod:unregister(Options) end).
+-spec(release_lock() -> ok).
+release_lock() ->
+    application:unset_env(ekka, autocluster_lock).
 
 with_strategy(Fun) ->
-    case application:get_env(ekka, cluster_discovery) of
+    case ekka:env(cluster_discovery) of
         {ok, {manual, _}} ->
             ignore;
         {ok, {Strategy, Options}} ->
@@ -69,4 +74,47 @@ strategy_module(Strategy) ->
         {file, _} -> Strategy; %% Provider?
         false     -> list_to_atom("ekka_cluster_" ++  atom_to_list(Strategy))
     end.
+
+discover_and_join(Mod, Options) ->
+    case Mod:discover(Options) of
+        {ok, Nodes} ->
+            maybe_join([N || N <- Nodes, ekka_node:is_aliving(N)]),
+            log_error("Register", Mod:register(Options));
+        {error, Reason} ->
+            ?LOG(error, "Discovery error: ~p", [Reason])
+    end.
+
+maybe_join([]) ->
+    ignore;
+
+maybe_join(Nodes) ->
+    case ekka_mnesia:is_node_in_cluster() of
+        true  -> ignore;
+        false -> join_with(find_oldest_node(Nodes))
+    end.
+
+join_with(false) ->
+    ignore;
+join_with(Node) ->
+    ekka_cluster:join(Node).
+
+find_oldest_node([Node]) ->
+    Node;
+find_oldest_node(Nodes) ->
+   case rpc:multicall(Nodes, ekka_membership, local_member, []) of
+       {Members, []} ->
+           Member = ekka_membership:oldest(Members), Member#member.node;
+       {_Views, BadNodes} ->
+            ?LOG(error, "Bad nodes found: ~p", [BadNodes]), false
+   end.
+
+run_callback(Fun) when is_function(Fun) ->
+    Fun();
+run_callback({M, F, A}) ->
+    erlang:apply(M, F, A).
+
+log_error(Format, {error, Reason}) ->
+    ?LOG(error, Format ++ " error: ~p", [Reason]);
+log_error(_Format, _Ok) ->
+    ok.
 

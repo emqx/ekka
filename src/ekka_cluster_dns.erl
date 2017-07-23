@@ -18,28 +18,28 @@
 
 -behaviour(ekka_cluster_strategy).
 
-%% cluster strategy Callbacks
--export([nodelist/1, register/1, unregister/1]).
+-import(proplists, [get_value/2]).
 
--type(option() :: {name, string()} | {app, atom()}).
+%% Cluster strategy Callbacks
+-export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
 
--spec(nodelist(list(option())) -> list(node())).
-nodelist(Options) ->
-    Name = proplists:get_value(name, Options),
-    App = proplists:get_value(app, Options),
-    [node_name(App, IP) || IP <- inet_res:lookup(Name, in, a)].
+discover(Options) ->
+    Name = get_value(name, Options),
+    App  = get_value(app, Options),
+    {ok, [node_name(App, IP) || IP <- inet_res:lookup(Name, in, a)]}.
 
 node_name(App, IP) ->
     list_to_atom(App ++ "@" ++ inet_parse:ntoa(IP)).
 
+lock(_Options) ->
+    ignore.
+
+unlock(_Options) ->
+    ignore.
+
 register(_Options) ->
     ignore.
-    
-unregister(_Options) ->
-    ok.
 
-%%TODO: Get hosts
-%% [extract_host(inet:gethostbyaddr(A)) || A <- inet_res:lookup(Name, in, a)],
-%% extract_host({ok, {hostent, FQDN, _, _, _, _}}) ->
-%%
+unregister(_Options) ->
+    ignore.
 

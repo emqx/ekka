@@ -22,18 +22,14 @@
 
 -export([init/1]).
 
--define(CHILD(M), {M, {M, start_link, []}, permanent, 5000, worker, [M]}).
+-define(CHILD(M, T), {M, {M, start_link, []}, permanent, 5000, T, [M]}).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Membership = ?CHILD(ekka_membership),
-    NodeSup = {ekka_node_sup, {ekka_node_sup, start_link, []},
-               permanent, 5000, supervisor, [ekka_node_sup]},
-    NodeMon = {ekka_node_monitor, {ekka_node_monitor, start_link, []},
-               permanent, 5000, worker, [ekka_node_monitor]},
-    ClusterSup = {ekka_cluster_sup, {ekka_cluster_sup, start_link, []},
-                 permanent, infinity, supervisor, [ekka_cluster_sup]},
-    {ok, {{one_for_all, 10, 100}, [Membership, NodeSup, NodeMon, ClusterSup]}}.
+    Childs = [?CHILD(ekka_cluster_sup, supervisor),
+              ?CHILD(ekka_membership, worker),
+              ?CHILD(ekka_node_monitor, worker)],
+    {ok, {{one_for_all, 10, 100}, Childs}}.
 

@@ -18,14 +18,14 @@
 
 -include("ekka.hrl").
 
-%% Start/Stop
--export([start/0, stop/0]).
+%% Start/Stop, and Env
+-export([start/0, env/1, env/2, stop/0]).
 
 %% Register callback
 -export([callback/1, callback/2]).
 
-%% Env
--export([cluster/0, cookie/0, strategy/0, autoheal/0]).
+%% Autocluster
+-export([autocluster/0, autocluster/2]).
 
 %% Node API
 -export([is_aliving/1, is_running/2]).
@@ -51,6 +51,16 @@ stop() ->
     application:stop(ekka).
 
 %%%-------------------------------------------------------------------
+%%% Env
+%%%-------------------------------------------------------------------
+
+env(Key) ->
+    application:get_env(ekka, Key).
+
+env(Key, Default) ->
+    application:get_env(ekka, Key, Default).
+
+%%%-------------------------------------------------------------------
 %%% Register Callback
 %%%-------------------------------------------------------------------
 
@@ -61,30 +71,39 @@ callback(Name, Fun) ->
     application:set_env(ekka, {callback, Name}, Fun).
 
 %%%-------------------------------------------------------------------
-%%% Env
+%%% Autocluster
 %%%-------------------------------------------------------------------
 
-%% @doc Cluster name.
--spec(cluster() -> atom()).
-cluster() -> env(cluster_name, ekka).
+autocluster() ->
+    autocluster(ekka, fun() -> ok end).
 
-%% @doc Cluster cookie.
--spec(cookie() -> atom()).
-cookie() -> erlang:get_cookie().
+autocluster(App, Fun) ->
+    case ekka_autocluster:aquire_lock() of
+        ok ->
+            spawn(fun() ->
+                    group_leader(whereis(init), self()),
+                    wait_application_ready(App, 5),
+                    try ekka_autocluster:discover_and_join(Fun)
+                    catch
+                        _:Error -> lager:error("Autocluster exception: ~p", [Error])
+                    end,
+                    ekka_autocluster:release_lock()
+                  end);
+        failed ->
+            ignore
+    end.
 
-%% @doc Cluster discovery.
--spec(strategy() -> atom()).
-strategy() -> env(cluster_strategy, epmd).
-
-%% @doc Cluster autoheal.
--spec(autoheal() -> boolean()).
-autoheal() -> env(cluster_autoheal, true).
-
-env(Key, Default) ->
-    application:get_env(ekka, Key, Default).
+wait_application_ready(_App, 0) ->
+    timeout;
+wait_application_ready(App, Retries) ->
+    case ekka_node:is_running(App) of
+        true  -> ok;
+        false -> timer:sleep(1000),
+                 wait_application_ready(App, Retries - 1)
+    end.
 
 %%%-------------------------------------------------------------------
-%%% Membership
+%%% Membership API
 %%%-------------------------------------------------------------------
 
 %% Cluster members

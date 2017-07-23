@@ -18,15 +18,20 @@
 
 -behaviour(ekka_cluster_strategy).
 
--export([nodelist/1, register/1, unregister/1]).
+-export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
 
-nodelist(Options) ->
-    Seeds = proplists:get_value(seeds, Options, []),
-    [Node || Node <- Seeds, Node =/= node(), ekka_node:is_aliving(Node)].
+discover(Options) ->
+    {ok, proplists:get_value(seeds, Options, [])}.
+
+lock(_Options) ->
+    ignore.
+
+unlock(_Options) ->
+    ignore.
 
 register(_Options) ->
     ignore.
 
 unregister(_Options) ->
-    ok.
+    ignore.
 

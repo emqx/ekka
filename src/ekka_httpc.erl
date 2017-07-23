@@ -16,15 +16,21 @@
 
 -module(ekka_httpc).
 
--export([get/3, post/3, put/3, delete/3]).
+-export([get/3, get/4, get/5, post/3, put/3, delete/3]).
 
 -ifdef(TEST).
 -compile(export_all).
 -endif.
 
 get(Addr, Path, Params) ->
-    Req = {build_url(Addr, Path, Params), []},
-    parse_response(httpc:request(get, Req, [{autoredirect, true}], [])).
+    get(Addr, Path, Params, []).
+
+get(Addr, Path, Params, Headers) ->
+    get(Addr, Path, Params, Headers, []).
+
+get(Addr, Path, Params, Headers, HttpOpts) ->
+    Req = {build_url(Addr, Path, Params), Headers},
+    parse_response(httpc:request(get, Req, [{autoredirect, true} | HttpOpts], [])).
 
 post(Addr, Path, Params) ->
     Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", urlencode(Params)},
@@ -61,9 +67,9 @@ percent_encode(B) when is_binary(B) ->
 parse_response({ok, {{_, Code, _}, _Headers, Body}}) ->
     parse_response({ok, Code, Body});
 parse_response({ok, 200, Body}) ->
-    {ok, jsx:decode(Body, [return_maps])};
+    {ok, jsx:decode(iolist_to_binary(Body), [return_maps])};
 parse_response({ok, 201, Body}) ->
-    {ok, jsx:decode(Body, [return_maps])};
+    {ok, jsx:decode(iolist_to_binary(Body), [return_maps])};
 parse_response({ok, 204, _Body}) ->
     {ok, []};
 parse_response({ok, Code, Body}) ->

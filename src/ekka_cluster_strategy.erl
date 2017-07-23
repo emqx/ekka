@@ -20,18 +20,22 @@
 
 -type(options() :: list(proplists:property())).
 
--callback(nodelist(Options :: options()) -> list(node())}).
+-callback(discover(options()) -> {ok, list(node())} | {error, term()}).
 
--callback(register(Options :: options()) -> ok | ignore).
+-callback(lock(options()) -> ok | ignore | {error, term()}).
 
--callback(unregister(Options :: options()) -> ok).
+-callback(unlock(options()) -> ok | ignore | {error, term()}).
+
+-callback(register(options()) -> ok | ignore | {error, term()}).
+
+-callback(unregister(options()) -> ok | ignore | {error, term()}).
 
 -else.
 
 -export([behaviour_info/1]).
 
 behaviour_info(callbacks) ->
-    [{nodelist, 1}, {register, 1}, {unregister, 1}];
+    [{discover, 1}, {lock, 1}, {unlock, 1}, {register, 1}, {unregister, 1}];
 behaviour_info(_Other) ->
     undefined.
 
