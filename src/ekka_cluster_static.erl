@@ -14,22 +14,24 @@
 %%% limitations under the License.
 %%%===================================================================
 
--module(ekka_sup).
+-module(ekka_cluster_static).
 
--behaviour(supervisor).
+-behaviour(ekka_cluster_strategy).
 
--export([start_link/0]).
+-export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
 
--export([init/1]).
+discover(Options) ->
+    {ok, proplists:get_value(seeds, Options, [])}.
 
--define(CHILD(M, T), {M, {M, start_link, []}, permanent, 5000, T, [M]}).
+lock(_Options) ->
+    ignore.
 
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+unlock(_Options) ->
+    ignore.
 
-init([]) ->
-    Childs = [?CHILD(ekka_cluster_sup, supervisor),
-              ?CHILD(ekka_membership, worker),
-              ?CHILD(ekka_node_monitor, worker)],
-    {ok, {{one_for_all, 10, 100}, Childs}}.
+register(_Options) ->
+    ignore.
+
+unregister(_Options) ->
+    ignore.
 

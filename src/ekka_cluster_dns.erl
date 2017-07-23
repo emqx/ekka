@@ -14,5 +14,32 @@
 %%% limitations under the License.
 %%%===================================================================
 
--module(ekka_node_discover).
+-module(ekka_cluster_dns).
+
+-behaviour(ekka_cluster_strategy).
+
+-import(proplists, [get_value/2]).
+
+%% Cluster strategy Callbacks
+-export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
+
+discover(Options) ->
+    Name = get_value(name, Options),
+    App  = get_value(app, Options),
+    {ok, [node_name(App, IP) || IP <- inet_res:lookup(Name, in, a)]}.
+
+node_name(App, IP) ->
+    list_to_atom(App ++ "@" ++ inet_parse:ntoa(IP)).
+
+lock(_Options) ->
+    ignore.
+
+unlock(_Options) ->
+    ignore.
+
+register(_Options) ->
+    ignore.
+
+unregister(_Options) ->
+    ignore.
 

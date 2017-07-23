@@ -23,17 +23,17 @@
 %% API
 -export([start_link/0, partitions/0]).
 
+%% Internal Exports
+-export([cast/2, run_after/2]).
+
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {heartbeat, partitions, autoheal_proc, autoheal_timer}).
+-record(state, {partitions = [], heartbeat, autoheal, autoclean}).
 
 -define(LOG(Level, Format, Args),
         lager:Level("Ekka(Monitor): " ++ Format, Args)).
-
--define(AHLOG(Level, Format, Args),
-        lager:Level("Ekka(Autoheal): " ++ Format, Args)).
 
 -define(SERVER, ?MODULE).
 
@@ -41,8 +41,8 @@
 %%% API
 %%%===================================================================
 
-%% @doc Start the server
--spec(start_link() -> {ok, pid()} | ignore | {error, any()}).
+%% @doc Start the node monitor
+-spec(start_link() -> {ok, pid()} | ignore | {error, term()}).
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
@@ -54,6 +54,10 @@ partitions() ->
 cast(Node, Msg) ->
     gen_server:cast({?SERVER, Node}, Msg).
 
+%% @private
+run_after(Delay, Msg) ->
+    erlang:send_after(Delay, ?SERVER, Msg).
+
 %%%===================================================================
 %%% gen_server Callbacks
 %%%===================================================================
@@ -64,7 +68,8 @@ init([]) ->
     net_kernel:monitor_nodes(true, [{node_type, visible}, nodedown_reason]),
     {ok, _} = mnesia:subscribe(system),
     lists:foreach(fun(N) -> self() ! {nodeup, N, []} end, nodes() -- [node()]),
-    {ok, heartbeat(#state{partitions = []})}.
+    {ok, ensure_heartbeat(#state{autoheal  = ekka_autoheal:init(),
+                                 autoclean = ekka_autoclean:init()})}.
 
 handle_call(partitions, _From, State = #state{partitions = Partitions}) ->
     {reply, Partitions, State};
@@ -91,28 +96,11 @@ handle_cast({confirm, TargetNode, Status}, State) ->
     ?LOG(info,"Confirm ~s ~s", [TargetNode, Status]),
     {noreply, State};
 
-handle_cast({report_partition, _Node}, State = #state{autoheal_proc = Proc})
-    when Proc =/= undefined ->
-    {noreply, State};
+handle_cast(Msg = {report_partition, _Node}, State) ->
+    {noreply, autoheal_handle_msg(Msg, State)};
 
-handle_cast({report_partition, Node}, State = #state{autoheal_timer = TRef}) ->
-    case ekka_membership:leader() =:= node() of
-        true ->
-            ensure_cancel_timer(TRef),
-            TRef1 = erlang:send_after(12000, self(), start_autoheal),
-            {noreply, State#state{autoheal_timer = TRef1}};
-        false ->
-            ?AHLOG(critical, "I am not leader, but received partition report from ~s", [Node]),
-            {noreply, State}
-    end;
-
-handle_cast({run_autoheal, SplitViews}, State = #state{autoheal_proc = undefined}) ->
-    Proc = spawn_link(fun() -> autoheal(SplitViews) end),
-    {noreply, State#state{autoheal_proc = Proc}};
-
-handle_cast({run_autoheal, SplitViews}, State = #state{autoheal_proc = _Proc}) ->
-    ?AHLOG(critical, "Unexpected run_autoheal cast: ~p", [SplitViews]),
-    {noreply, State};
+handle_cast(Msg = {heal_partition, _SplitView}, State) ->
+    {noreply, autoheal_handle_msg(Msg, State)};
 
 handle_cast(Msg, State) ->
     ?LOG(error, "Unexpected cast: ~p", [Msg]),
@@ -124,7 +112,7 @@ handle_info({nodeup, Node, _Info}, State) ->
 
 handle_info({nodedown, Node, _Info}, State) ->
     ekka_membership:node_down(Node),
-    erlang:send_after(5000, self(), {suspect, Node}),
+    run_after(3000, {suspect, Node}),
     {noreply, State};
 
 handle_info({suspect, Node}, State) ->
@@ -147,8 +135,8 @@ handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
 handle_info({mnesia_system_event, {inconsistent_database, Context, Node}},
             State = #state{partitions = Partitions}) ->
     ?LOG(critical, "Network partition detected from node ~s: ~p", [Node, Context]),
-    case ekka:autoheal() of
-        true  -> erlang:send_after(3000, self(), confirm_partition);
+    case ekka_autoheal:enabled() of
+        true  -> run_after(3000, confirm_partition);
         false -> ignore
     end,
     {noreply, State#state{partitions = lists:usort([Node | Partitions])}};
@@ -169,28 +157,12 @@ handle_info(confirm_partition, State = #state{partitions = Partitions}) ->
     Leader = ekka_membership:leader(),
     case ekka_node:is_running(Leader, ekka) of
         true  -> cast(Leader, {report_partition, node()});
-        false -> ?AHLOG(critical, "Leader is down, cannot autoheal the partitions: ~p", [Partitions])
+        false -> ?LOG(critical, "Leader is down, cannot autoheal the partitions: ~p", [Partitions])
     end,
     {noreply, State};
 
-handle_info(start_autoheal, State = #state{autoheal_timer = TRef}) ->
-    ensure_cancel_timer(TRef),
-    case ekka_membership:is_all_alive() of
-        true ->
-            Nodes = ekka_mnesia:cluster_nodes(all),
-            %%TODO: spawn a new process?
-            case rpc:multicall(Nodes, ekka_mnesia, cluster_view, []) of
-                {Views, []} ->
-                    SplitViews = lists:sort(fun compare_view/2, lists:usort(Views)),
-                    cast(coordinator(SplitViews), {run_autoheal, SplitViews});
-                {_Views, BadNodes} ->
-                    ?AHLOG(critical, "Bad Nodes found when autoheal: ~p", [BadNodes])
-            end,
-            {noreply, State};
-        false ->
-            TRef1 = erlang:send_after(12000, self(), start_autoheal),
-            {noreply, State#state{autoheal_timer = TRef1}}
-    end;
+handle_info({autoheal, Msg}, State) ->
+    {noreply, autoheal_handle_msg(Msg, State)};
 
 handle_info(heartbeat, State) ->
     AliveNodes = [N || N <- ekka_mnesia:cluster_nodes(all),
@@ -198,17 +170,20 @@ handle_info(heartbeat, State) ->
     lists:foreach(fun(Node) ->
                     cast(Node, {heartbeat, node()})
                   end, AliveNodes),
-    {noreply, heartbeat(State#state{heartbeat = undefined})};
+    {noreply, ensure_heartbeat(State#state{heartbeat = undefined})};
 
-handle_info({'EXIT', Pid, normal}, State = #state{autoheal_proc = Pid}) ->
-    {noreply, State#state{autoheal_proc = undefined}};
+handle_info(Msg = {'EXIT', Pid, _Reason}, State = #state{autoheal = Autoheal}) ->
+    case ekka_autoheal:proc(Autoheal) of
+        Pid -> {noreply, autoheal_handle_msg(Msg, State)};
+        _   -> {noreply, State}
+    end;
 
-handle_info({'EXIT', Pid, Reason}, State = #state{autoheal_proc = Pid}) ->
-    ?AHLOG(critical, "Autoheal proc crashed: ~s", [Reason]),
-    {noreply, State#state{autoheal_proc = undefined}};
+%% Autoclean Event.
+handle_info(autoclean, State = #state{autoclean = AutoClean}) ->
+    {noreply, State#state{autoclean = ekka_autoclean:check(AutoClean)}};
 
 handle_info(Info, State) ->
-    ?LOG(error, "Unexpected Info: ~p", [Info]),
+    ?LOG(error, "Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -221,44 +196,13 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-heartbeat(State = #state{heartbeat = undefined}) ->
+ensure_heartbeat(State = #state{heartbeat = undefined}) ->
     Interval = rand:uniform(2000) + 2000,
-    State#state{heartbeat = erlang:send_after(Interval, self(), heartbeat)};
+    State#state{heartbeat = run_after(Interval, heartbeat)};
 
-heartbeat(State) ->
+ensure_heartbeat(State) ->
     State.
 
-coordinator([{Nodes, _} | _]) ->
-    ekka_membership:coordinator(Nodes).
-
-compare_view({Running1, _} , {Running2, _}) ->
-    Len1 = length(Running1), Len2 = length(Running2),
-    if
-        Len1 > Len2  -> true;
-        Len1 == Len2 -> lists:member(node(), Running1);
-        true -> false
-    end.
-
-autoheal([]) ->
-    ok;
-autoheal([{_, []}|SpitViews]) ->
-    autoheal(SpitViews);
-autoheal(SpitViews = [{_, Minority}|_]) ->
-    ?AHLOG(info, "Autoheal running: ~p", [SpitViews]),
-    lists:foreach(fun shutdown/1, Minority),
-    timer:sleep(1000),
-    lists:foreach(fun reboot/1, Minority).
-
-shutdown(Node) ->
-    ?AHLOG(info, "Shutdown ~s for autoheal...", [Node]),
-    rpc:call(Node, ekka_cluster, heal, [shutdown]).
-
-reboot(Node) ->
-    ?AHLOG(info, "Reboot ~s for autoheal...", [Node]),
-    rpc:call(Node, ekka_cluster, heal, [reboot]).
-
-ensure_cancel_timer(undefined) ->
-    ok;
-ensure_cancel_timer(TRef) ->
-    erlang:cancel_timer(TRef).
+autoheal_handle_msg(Msg, State = #state{autoheal = Autoheal}) ->
+    State#state{autoheal = ekka_autoheal:handle_msg(Msg, Autoheal)}.
 
