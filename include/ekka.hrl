@@ -10,7 +10,7 @@
                   guid   :: ekka_guid:guid(),
                   status :: member_status(),
                   mnesia :: running | stopped | false,
-                  ltime  :: pos_integer()
+                  ltime  :: erlang:timestamp()
                 }).
 
 -type(member() :: #member{}).

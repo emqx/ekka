@@ -14,22 +14,30 @@
 %%% limitations under the License.
 %%%===================================================================
 
--module(ekka_sup).
+-module(ekka_cluster_strategy).
 
--behaviour(supervisor).
+-ifdef(use_specs).
 
--export([start_link/0]).
+-type(options() :: list(proplists:property())).
 
--export([init/1]).
+-callback(discover(options()) -> {ok, list(node())} | {error, term()}).
 
--define(CHILD(M, T), {M, {M, start_link, []}, permanent, 5000, T, [M]}).
+-callback(lock(options()) -> ok | ignore | {error, term()}).
 
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+-callback(unlock(options()) -> ok | ignore | {error, term()}).
 
-init([]) ->
-    Childs = [?CHILD(ekka_cluster_sup, supervisor),
-              ?CHILD(ekka_membership, worker),
-              ?CHILD(ekka_node_monitor, worker)],
-    {ok, {{one_for_all, 10, 100}, Childs}}.
+-callback(register(options()) -> ok | ignore | {error, term()}).
+
+-callback(unregister(options()) -> ok | ignore | {error, term()}).
+
+-else.
+
+-export([behaviour_info/1]).
+
+behaviour_info(callbacks) ->
+    [{discover, 1}, {lock, 1}, {unlock, 1}, {register, 1}, {unregister, 1}];
+behaviour_info(_Other) ->
+    undefined.
+
+-endif.
 

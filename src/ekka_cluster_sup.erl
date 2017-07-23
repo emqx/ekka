@@ -14,15 +14,12 @@
 %%% limitations under the License.
 %%%===================================================================
 
--module(ekka_node_sup).
+-module(ekka_cluster_sup).
 
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
-
-%% Delegate API
--export([start_delegate/2, delegate/1, delegates/0, stop_delegate/1]).
+-export([start_link/0, start_child/2, stop_child/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -33,37 +30,20 @@
 %%% API functions
 %%%===================================================================
 
+-spec(start_link() -> {ok, pid()} | ignore | {error, term()}).
 start_link() ->
     supervisor:start_link({local, ?SUP}, ?MODULE, []).
 
--spec(start_delegate(node(), [ekka:delegate_option()]) -> {ok, pid()} | {error, any()}).
-start_delegate(Node, Options) ->
-    supervisor:start_child(?SUP, delegate_spec(Node, Options)).
+start_child(M, Args) ->
+    supervisor:start_child(?SUP, child_spec(M, Args)).
 
--spec(delegate_spec(node(), [ekka:delegate_option()]) -> supervisor:child_spec()).
-delegate_spec(Node, Options) ->
-    {{ekka_node, Node}, {ekka_node, delegate, [Node, Options]},
-      permanent, 5000, worker, [ekka_node]}.
+child_spec(M, Args) ->
+    {M, {M, start_link, Args}, permanent, 5000, worker, [M]}.
 
-%% @doc List all delegates
--spec(delegates() -> [{node(), pid()}]).
-delegates() ->
-    [{Node, Pid} || {{ekka_node, Node}, Pid, worker, _}
-                    <- supervisor:which_children(?SUP)].
-
--spec(delegate(node()) -> {ok, pid()} | false).
-delegate(Node) ->
-    case lists:keysearch(Node, 1, delegates()) of
-        {value, {Node, Pid}} -> {ok, Pid};
-        false -> false
-    end.
-
-%% @doc Stop a delegate
--spec(stop_delegate(node()) -> ok | {error, any()}).
-stop_delegate(Node) ->
-    ChildId = {ekka_node, Node},
-    case supervisor:terminate_child(?SUP, ChildId) of
-        ok    -> supervisor:delete_child(?SUP, ChildId);
+stop_child(M) ->
+    case supervisor:terminate_child(?SUP, M) of
+        ok -> supervisor:delete_child(?SUP, M);
+        {error, not_found} -> ok;
         Error -> Error
     end.
 
