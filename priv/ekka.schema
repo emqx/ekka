@@ -26,7 +26,7 @@
 ]}.
 
 %%--------------------------------------------------------------------
-%% Cluster with static node list
+%% Cluster by static node list
 
 {mapping, "cluster.static.seeds", "ekka.cluster_discovery", [
   {datatype, string}
@@ -76,7 +76,7 @@
 ]}.
 
 %%--------------------------------------------------------------------
-%% Cluster with DNS
+%% Cluster by DNS A Record
 
 {mapping, "cluster.dns.name", "ekka.cluster_discovery", [
   {datatype, string}
