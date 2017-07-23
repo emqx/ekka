@@ -20,7 +20,7 @@
 
 -type(options() :: list(proplists:property())).
 
--callback(discover(options()) -> list(node())).
+-callback(discover(options()) -> {ok, list(node())} | {error, term()}).
 
 -callback(lock(options()) -> ok | ignore | {error, term()}).
 

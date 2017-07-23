@@ -17,12 +17,16 @@
 -module(ekka_node).
 
 %% Node API
--export([is_aliving/1, is_running/2, parse_name/1]).
+-export([is_aliving/1, is_running/1, is_running/2, parse_name/1]).
 
 %% @doc Is node aliving?
 -spec(is_aliving(node()) -> boolean()).
 is_aliving(Node) ->
     lists:member(Node, nodes()) orelse net_adm:ping(Node) =:= pong.
+
+-spec(is_running(atom()) -> boolean()).
+is_running(App) ->
+    lists:keymember(App, 1, application:which_applications()).
 
 %% @doc Is the application running?
 -spec(is_running(node(), atom()) -> boolean()).

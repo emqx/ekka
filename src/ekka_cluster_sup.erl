@@ -34,11 +34,11 @@
 start_link() ->
     supervisor:start_link({local, ?SUP}, ?MODULE, []).
 
-start_child(M, Opts) ->
-    supervisor:start_child(?SUP, child_spec(M, Opts)).
+start_child(M, Args) ->
+    supervisor:start_child(?SUP, child_spec(M, Args)).
 
-child_spec(M, Opts) ->
-    {M, {M, start_link, [Opts]}, permanent, 5000, worker, [M]}.
+child_spec(M, Args) ->
+    {M, {M, start_link, Args}, permanent, 5000, worker, [M]}.
 
 stop_child(M) ->
     case supervisor:terminate_child(?SUP, M) of

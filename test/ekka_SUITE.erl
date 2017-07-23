@@ -154,7 +154,7 @@ slave(node, Node) ->
 
 generate_config() ->
     Schema = cuttlefish_schema:files([local_path(["priv", "ekka.schema"])]),
-    Conf = conf_parse:file([local_path(["etc", "ekka.conf.test"])]),
+    Conf = conf_parse:file([local_path(["test", "data", "ekka.manual.conf"])]),
     cuttlefish_generator:map(Schema, Conf).
 
 get_base_dir(Module) ->

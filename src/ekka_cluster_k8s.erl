@@ -32,18 +32,20 @@
 %%%===================================================================
 
 discover(Options) ->
-    Server  = get_value(apiserver, Options),
+    Server = get_value(apiserver, Options),
     Service = get_value(service_name, Options),
     App = get_value(app_name, Options, "ekka"),
     AddrType = get_value(address_type, Options, ip),
     case k8s_service_get(Server, Service) of
         {ok, Response} ->
             Addresses = extract_addresses(AddrType, Response),
-            ?LOG(info, "Addresses: ~p", [Addresses]),
-            [list_to_atom(App ++ "@" ++ binary_to_list(Addr)) || Addr <- Addresses];
-        {error, Error} ->
-            ?LOG(error, "Discovery error - ~p", [Error]), []
+            {ok, [node_name(App, Addr) || Addr <- Addresses]};
+        {error, Reason} ->
+            {error, Reason}
     end.
+
+node_name(App, Addr) ->
+    list_to_atom(App ++ "@" ++ binary_to_list(Addr)).
 
 lock(_Options) ->
     ignore.
@@ -55,7 +57,7 @@ register(_Options) ->
     ignore.
 
 unregister(_Options) ->
-    ok.
+    ignore.
 
 %%%===================================================================
 %%% Internal functions

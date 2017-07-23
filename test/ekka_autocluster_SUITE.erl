@@ -33,19 +33,23 @@ groups() ->
     [{autocluster, [sequence], [t_autocluster_static, t_autocluster_mcast]}].
 
 init_per_testcase(t_autocluster_static, Config) ->
-    application:set_env(ekka, cluster_discovery, {static, strategy_options(static)}),
-    {ok, _} = ekka:start(),
-    ekka_autocluster:bootstrap(),
+    configure_strategy(static),
+    start_ekka_and_cluster(), 
     Config;
 
 init_per_testcase(t_autocluster_mcast, Config) ->
-    application:set_env(ekka, cluster_discovery, {mcast, strategy_options(mcast)}),
-    {ok, _} = ekka:start(),
-    ekka_autocluster:bootstrap(),
+    configure_strategy(mcast),
+    start_ekka_and_cluster(), 
     Config;
 
 init_per_testcase(_TestCase, Config) ->
     Config.
+
+start_ekka_and_cluster() ->
+    {ok, _} = ekka:start(), ekka:autocluster().
+
+configure_strategy(Strategy) ->
+    application:set_env(ekka, cluster_discovery, {Strategy, strategy_options(Strategy)}).
 
 end_per_testcase(_TestCase, _Config) ->
     ekka:stop(),
@@ -64,11 +68,11 @@ t_autocluster_static(Config) ->
 t_autocluster_mcast(Config) ->
     t_autocluster(mcast, Config).
 
-t_autocluster(Strategy, Config) ->
+t_autocluster(Strategy, _Config) ->
     Node1 = start_and_cluster(Strategy, ekka_ct1),
-    timer:sleep(500),
+    timer:sleep(6000),
     Node2 = start_and_cluster(Strategy, ekka_ct2),
-    timer:sleep(500),
+    timer:sleep(6000),
     ?assertEqual(lists:usort(?NODES), lists:usort(ekka_mnesia:running_nodes())),
     remove_and_stop(Node1),
     remove_and_stop(Node2).
@@ -79,7 +83,7 @@ start_and_cluster(Strategy, Name) ->
     rpc:call(Node, application, set_env,
              [ekka, cluster_discovery, {Strategy, strategy_options(Strategy)}]),
     true = ekka:is_running(Node, ekka),
-    rpc:call(Node, ekka_autocluster, bootstrap, []),
+    rpc:call(Node, ekka, autocluster, []),
     Node.
 
 remove_and_stop(Node) ->

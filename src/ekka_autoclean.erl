@@ -29,7 +29,7 @@ init() ->
     end.
 
 timer_backoff(State = #?MODULE{expiry = Expiry}) ->
-    State#?MODULE{timer = erlang:send_after(Expiry div 4, self(), autoclean)}.
+    State#?MODULE{timer = ekka_node_monitor:run_after(Expiry div 4, autoclean)}.
 
 check(State = #?MODULE{expiry = Expiry}) ->
     [maybe_clean(Member, Expiry) || Member <- ekka_membership:members(down)],

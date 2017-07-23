@@ -19,15 +19,15 @@
 -behaviour(gen_statem).
 
 %% API
--export([start_link/1]).
+-export([start_link/2]).
 
 %% gen_statem callbacks
 -export([init/1, callback_mode/0, handle_event/4, terminate/3, code_change/4]).
 
 -record(state, {ttl, mfa}).
 
-start_link([Ttl, MFA]) ->
-    gen_statem:start_link(?MODULE, [Ttl, MFA], []).
+start_link(Ttl, MFA) ->
+    gen_statem:start_link({local, ?MODULE}, ?MODULE, [Ttl, MFA], []).
 
 %%%===================================================================
 %%% gen_statem callbacks
@@ -41,7 +41,7 @@ callback_mode() -> handle_event_function.
 handle_event(timeout, _Timeout, alive, State = #state{ttl = Ttl, mfa = {M, F, A}}) ->
     try erlang:apply(M, F, A)
     catch _:Error ->
-        lager:error("Ttl error: ~p, ~p", [Error, erlang:get_stacktrace()])
+        lager:error("TTL error: ~p, ~p", [Error, erlang:get_stacktrace()])
     end,
     {next_state, alive, State, Ttl div 2}.
 

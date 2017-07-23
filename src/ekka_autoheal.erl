@@ -16,9 +16,9 @@
 
 -module(ekka_autoheal).
 
--export([init/0, enabled/0, handle_msg/2]).
+-export([init/0, enabled/0, proc/1, handle_msg/2]).
 
--record(?MODULE, {proc, timer}).
+-record(?MODULE, {role, proc, timer}).
 
 -define(DELAY, 12000).
 
@@ -28,11 +28,16 @@
 init() ->
     case enabled() of
         false -> undefined;
-        true  -> #?MODULE{} %%TODO:
+        true  -> #?MODULE{}
     end.
 
 enabled() ->
     ekka:env(cluster_autoheal, false).
+
+proc(undefined) ->
+    undefined;
+proc(#?MODULE{proc = Proc}) ->
+    Proc.
 
 handle_msg(Msg, undefined) ->
     ?LOG(error, "Autoheal not enabled! Unexpected msg: ~p", [Msg]), undefined;
@@ -45,38 +50,43 @@ handle_msg({report_partition, Node}, Autoheal = #?MODULE{timer = TRef}) ->
     case ekka_membership:leader() =:= node() of
         true ->
             ensure_cancel_timer(TRef),
-            TRef1 = erlang:send_after(?DELAY, self(), {autoheal, prepare}),
-            Autoheal#?MODULE{timer = TRef1};
+            TRef1 = ekka_node_monitor:run_after(?DELAY, {autoheal, {create_splitview, node()}}),
+            Autoheal#?MODULE{role = leader, timer = TRef1};
         false ->
             ?LOG(critical, "I am not leader, but received partition report from ~s", [Node]),
             Autoheal
     end;
 
-handle_msg(prepare, Autoheal = #?MODULE{timer = TRef}) ->
+handle_msg(Msg = {create_splitview, Node}, Autoheal = #?MODULE{timer = TRef}) when Node =:= node() ->
     ensure_cancel_timer(TRef),
     case ekka_membership:is_all_alive() of
         true ->
             Nodes = ekka_mnesia:cluster_nodes(all),
-            %%TODO: spawn a new process?
             case rpc:multicall(Nodes, ekka_mnesia, cluster_view, []) of
                 {Views, []} ->
                     SplitView = lists:sort(fun compare_view/2, lists:usort(Views)),
-                    ekka_node_monitor:cast(coordinator(SplitView),
-                                           {run_autoheal, SplitView});
+                    ekka_node_monitor:cast(coordinator(SplitView), {heal_partition, SplitView});
                 {_Views, BadNodes} ->
-                    ?LOG(critical, "Bad Nodes found when autoheal: ~p", [BadNodes])
+                    ?LOG(critical, "Bad nodes found when autoheal: ~p", [BadNodes])
             end,
             Autoheal#?MODULE{timer = undefined};
         false ->
-            TRef1 = erlang:send_after(?DELAY, self(), {autoheal, prepare}),
-            Autoheal#?MODULE{timer = TRef1}
+            Autoheal#?MODULE{timer = ekka_node_monitor:run_after(?DELAY, {autoheal, Msg})}
     end;
 
-handle_msg({run, SplitView}, Autoheal = #?MODULE{proc = undefined}) ->
-    Autoheal#?MODULE{proc = spawn_link(fun() -> autoheal(SplitView) end)};
+handle_msg(Msg = {create_splitview, _Node}, Autoheal) ->
+    ?LOG(critical, "I am not leader, but received : ~p", [Msg]),
+    Autoheal;
 
-handle_msg({run, SplitView}, Autoheal= #?MODULE{proc = _Proc}) ->
-    ?LOG(critical, "Unexpected run: ~p", [SplitView]),
+handle_msg({heal_partition, SplitView}, Autoheal = #?MODULE{proc = undefined}) ->
+    Proc = spawn_link(fun() ->
+                          ?LOG(info, "Healing partition: ~p", [SplitView]),
+                          heal_partition(SplitView)
+                      end),
+    Autoheal#?MODULE{role = coordinator, proc = Proc};
+
+handle_msg({heal_partition, SplitView}, Autoheal= #?MODULE{proc = _Proc}) ->
+    ?LOG(critical, "Unexpected heal_partition msg: ~p", [SplitView]),
     Autoheal;
 
 handle_msg({'EXIT', Pid, normal}, Autoheal = #?MODULE{proc = Pid}) ->
@@ -86,7 +96,7 @@ handle_msg({'EXIT', Pid, Reason}, Autoheal = #?MODULE{proc = Pid}) ->
     Autoheal#?MODULE{proc = undefined};
 
 handle_msg(Msg, Autoheal) ->
-    ?LOG(error, "Unexpected msg: ~p, Autoheal: ~p", [Msg, Autoheal]),
+    ?LOG(critical, "Unexpected msg: ~p", [Msg, Autoheal]),
     Autoheal.
 
 compare_view({Running1, _} , {Running2, _}) ->
@@ -100,24 +110,31 @@ compare_view({Running1, _} , {Running2, _}) ->
 coordinator([{Nodes, _} | _]) ->
     ekka_membership:coordinator(Nodes).
 
-autoheal([]) ->
+heal_partition([]) ->
     ok;
-autoheal([{_, []}|SpitViews]) ->
-    autoheal(SpitViews);
-autoheal(SpitViews = [{_, Minority}|_]) ->
-    ?LOG(info, "Autoheal running: ~p", [SpitViews]),
+%% All nodes connected.
+heal_partition([{_, []}]) ->
+    ok;
+%% Partial partitions happened.
+heal_partition([{Nodes, []}|_]) ->
+    reboot_minority(Nodes -- [node()]);
+heal_partition([{Majority, Minority}, {Minority, Majority}]) ->
+    reboot_minority(Minority);
+heal_partition(SplitView) ->
+    ?LOG(critical, "Cannot heal the partitions: ~p", [SplitView]).
+
+reboot_minority(Minority) ->
     lists:foreach(fun shutdown/1, Minority),
-    timer:sleep(1000),
+    timer:sleep(rand:uniform(1000) + 100),
     lists:foreach(fun reboot/1, Minority).
 
 shutdown(Node) ->
-    ?LOG(info, "Shutdown ~s for autoheal...", [Node]),
-    rpc:call(Node, ekka_cluster, heal, [shutdown]).
+    Ret = rpc:call(Node, ekka_cluster, heal, [shutdown]),
+    ?LOG(info, "Shutdown ~s for autoheal: ~p", [Node, Ret]).
 
 reboot(Node) ->
-    ?LOG(info, "Reboot ~s for autoheal...", [Node]),
-
-    rpc:call(Node, ekka_cluster, heal, [reboot]).
+    Ret = rpc:call(Node, ekka_cluster, heal, [reboot]),
+    ?LOG(info, "Reboot ~s for autoheal: ~p", [Node, Ret]).
 
 ensure_cancel_timer(undefined) ->
     ok;

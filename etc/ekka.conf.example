@@ -7,7 +7,7 @@
 cluster.name = ekka
 
 ## Cluster discovery strategy: manual | static | mcast | dns | etcd | k8s
-cluster.discovery = etcd
+cluster.discovery = manual
 
 ## Cluster Autoheal: on | off
 cluster.autoheal = on

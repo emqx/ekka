@@ -23,20 +23,18 @@
 %% Ttl callback
 -export([etcd_set_node_key/1]).
 
--define(LOG(Level, Format, Args),
-        lager:Level("Ekka(etcd): " ++ Format, Args)).
+-define(LOG(Level, Format, Args), lager:Level("Ekka(etcd): " ++ Format, Args)).
 
 %%%===================================================================
 %%% ekka_cluster_strategy Callbacks
 %%%===================================================================
 
 discover(Options) ->
-    NodesPath = nodes_path(config(prefix, Options)),
-    case etcd_get(config(server, Options), NodesPath, [{recursive, true}]) of
+    case etcd_get_nodes_key(Options) of
         {ok, Response} ->
-            extract_nodes(Response);
-        {error, Error} ->
-            ?LOG(error, "Discovery error - ~p", [Error]), []
+            {ok, extract_nodes(Response)};
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 lock(Options) ->
@@ -47,36 +45,48 @@ lock(_Options, 0) ->
 
 lock(Options, Retries) ->
     case etcd_set_lock_key(Options) of
-        {ok, Response} ->
-            ?LOG(debug, "Lock Response: ~p", [Response]),
+        {ok, _Response} ->
             ok;
         {error, {412, _}} ->
             timer:sleep(1000),
             lock(Options, Retries -1);
         {error, Reason} ->
-            ?LOG(error, "Lock Error: ~p", [Reason]),
             {error, Reason}
     end.
 
 unlock(Options) ->
     case etcd_del_lock_key(Options) of
-        {ok, Response} ->
-            ?LOG(debug, "Unlock Response: ~p", [Response]),
+        {ok, _Response} ->
             ok;
         {error, Reason} ->
-            ?LOG(error, "Unlock Error: ~p", [Reason]),
             {error, Reason}
     end.
 
 register(Options) ->
     case etcd_set_node_key(Options) of
-        {ok, Response} ->
-            ?LOG(debug, "Register Response: ~p", [Response]),
+        {ok, _Response} ->
             ensure_node_ttl(Options);
         {error, Reason} ->
-            ?LOG(error, "Register error - ~p", [Reason]),
             {error, Reason}
     end.
+
+unregister(Options) ->
+    ok = ekka_cluster_sup:stop_child(ekka_node_ttl),
+    case etcd_del_node_key(Options) of
+        {ok, _Response} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+extract_nodes([]) ->
+    [];
+extract_nodes(Response) ->
+    [extract_node(V) || V <- maps:get(<<"nodes">>, maps:get(<<"node">>, Response), [])].
 
 ensure_node_ttl(Options) ->
     Ttl = proplists:get_value(node_ttl, Options),
@@ -87,59 +97,37 @@ ensure_node_ttl(Options) ->
         Err = {error, _} -> Err
     end.
 
-unregister(Options) ->
-    ok = ekka_cluster_sup:stop_child(ekka_node_ttl),
-    case etcd_del_node_key(Options) of
-        {ok, Response} ->
-            ?LOG(debug, "Unregister Response: ~p", [Response]),
-            ok;
-        {error, Reason} ->
-            ?LOG(error, "Unregister error - ~p", [Reason]),
-            {error, Reason}
-    end.
+extract_node(V) ->
+    list_to_atom(binary_to_list(lists:last(binary:split(maps:get(<<"key">>, V), <<"/">>, [global])))).
+
+etcd_get_nodes_key(Options) ->
+    NodesPath = nodes_path(config(prefix, Options)),
+    etcd_get(server(Options), NodesPath, [{recursive, true}]).
 
 etcd_set_node_key(Options) ->
     NodePath = node_path(config(prefix, Options)),
     Ttl = config(node_ttl, Options) div 1000,
-    etcd_set(config(server, Options), NodePath, [{ttl, Ttl}]).
+    etcd_set(server(Options), NodePath, [{ttl, Ttl}]).
+
+etcd_del_node_key(Options) ->
+    NodePath = node_path(config(prefix, Options)),
+    etcd_del(server(Options), NodePath, []).
 
 etcd_set_lock_key(Options) ->
     LockPath = lock_path(config(prefix, Options)),
     Values = [{ttl, 30}, {'prevExist', false}, {value, node()}],
-    etcd_set(config(server, Options), LockPath, Values).
-
-etcd_del_node_key(Options) ->
-    NodePath = node_path(config(prefix, Options)),
-    etcd_del(config(server, Options), NodePath, []).
+    etcd_set(server(Options), LockPath, Values).
 
 etcd_del_lock_key(Options) ->
     LockPath = lock_path(config(prefix, Options)),
     Values = [{'prevExist', true}, {'prevValue', node()}],
-    etcd_del(config(server, Options), LockPath, Values).
+    etcd_del(server(Options), LockPath, Values).
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+server(Options) ->
+    config(server, Options).
 
 config(Key, Options) ->
     proplists:get_value(Key, Options).
-
-nodes_path(Prefix) ->
-    with_prefix(Prefix, "/nodes").
-
-node_path(Prefix) ->
-    with_prefix(Prefix, "/nodes/" ++ atom_to_list(node())).
-
-lock_path(Prefix) ->
-    with_prefix(Prefix, "/lock").
-
-extract_nodes([]) ->
-    [];
-extract_nodes(Response) ->
-    [extract_node(V) || V <- maps:get(<<"nodes">>, maps:get(<<"node">>, Response), [])].
-
-extract_node(V) ->
-    list_to_atom(binary_to_list(lists:last(binary:split(maps:get(<<"key">>, V), <<"/">>, [global])))).
 
 etcd_get(Servers, Key, Params) ->
     ekka_httpc:get(rand_addr(Servers), Key, Params).
@@ -150,8 +138,18 @@ etcd_set(Servers, Key, Params) ->
 etcd_del(Servers, Key, Params) ->
     ekka_httpc:delete(rand_addr(Servers), Key, Params).
 
+nodes_path(Prefix) ->
+    with_prefix(Prefix, "/nodes").
+
+node_path(Prefix) ->
+    with_prefix(Prefix, "/nodes/" ++ atom_to_list(node())).
+
+lock_path(Prefix) ->
+    with_prefix(Prefix, "/lock").
+
 with_prefix(Prefix, Path) ->
-    "v2/keys/" ++ Prefix ++ "/" ++ atom_to_list(ekka:env(cluster_name, ekka)) ++ Path.
+    Cluster = atom_to_list(ekka:env(cluster_name, ekka)),
+    lists:concat(["v2/keys/", Prefix, "/", Cluster, Path]).
 
 rand_addr([Addr]) ->
     Addr;

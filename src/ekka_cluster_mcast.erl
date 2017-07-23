@@ -40,25 +40,23 @@
                 | {recbuf, pos_integer()}
                 | {buffer, pos_integer()}).
 
--record(state, {sock, addr, ports, cookie, seen}).
+-record(state, {sock, addr, ports, cookie, seen = []}).
 
 -define(SERVER, ?MODULE).
 
 -define(LOG(Level, Format, Args),
         lager:Level("Ekka(Mcast): " ++ Format, Args)).
 
+%%%===================================================================
+%%% ekka_cluster_strategy Callbacks
+%%%===================================================================
+
 discover(Options) ->
     Server = case whereis(?SERVER) of
                  Pid when is_pid(Pid) -> Pid;
-                 undefined -> ensure_mcast_started(Options)
+                 undefined -> ensure_started(Options)
              end,
     gen_server:call(Server, discover, 60000).
-
-ensure_mcast_started(Options) ->
-    case ekka_cluster_sup:start_child(?SERVER, Options) of
-        {ok, Pid} -> Pid;
-        {error, {already_started, Pid}} -> Pid
-    end.
 
 lock(_Options) ->
     ignore.
@@ -71,6 +69,12 @@ register(_Options) ->
     
 unregister(_Options) ->
     ignore.
+
+ensure_started(Options) ->
+    case ekka_cluster_sup:start_child(?SERVER, [Options]) of
+        {ok, Pid} -> Pid;
+        {error, {already_started, Pid}} -> Pid
+    end.
 
 -spec(start_link(list(option())) -> {ok, pid()} | ignore | {error, term()}).
 start_link(Options) ->
@@ -92,13 +96,12 @@ init(Options) ->
                           {add_membership, {Addr, Iface}}]) of
         {ok, Sock} ->
             {ok, #state{sock = Sock, addr = Addr, ports = Ports,
-                        cookie = erlang:phash2(erlang:get_cookie()),
-                        seen = []}};
+                        cookie = erlang:phash2(erlang:get_cookie())}};
         {error, Error} ->
             {stop, Error}
     end.
 
-handle_call(discover, From, State = #state{sock = Sock, addr = Addr, ports = Ports, cookie = Cookie}) ->
+handle_call(discover, From, State = #state{sock = Sock, addr = Addr,ports = Ports, cookie = Cookie}) ->
     lists:foreach(fun(Port) ->
                     udp_send(Sock, Addr, Port, handshake(Cookie))
                   end, Ports),
@@ -106,15 +109,15 @@ handle_call(discover, From, State = #state{sock = Sock, addr = Addr, ports = Por
     {noreply, State};
 
 handle_call(Req, _From, State) ->
-    ?LOG(error, "Unexpected reqeust: ~p", [Req]),
+    ?LOG(error, "Unexpected call: ~p", [Req]),
     {reply, ignore, State}.
 
 handle_cast(Msg, State) ->
-    ?LOG(error, "Unexpected msg: ~p", [Msg]),
+    ?LOG(error, "Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 handle_info({reply, discover, From}, State = #state{seen = Seen}) ->
-    gen_server:reply(From, [node() | Seen]),
+    gen_server:reply(From, {ok, [node() | Seen]}),
     {noreply, State#state{seen = []}};
 
 handle_info({udp, Sock, Ip, InPort, Data}, State = #state{sock = Sock, cookie = Cookie,seen = Seen}) ->
@@ -137,15 +140,15 @@ handle_info({udp, Sock, Ip, InPort, Data}, State = #state{sock = Sock, cookie = 
                        State
               catch
                   error:badarg ->
-                      ?LOG(error, "Corrupt Data: ~p", [Data]),
+                      ?LOG(error, "Corrupt data: ~p", [Data]),
                       State
-              end};
+              end, hibernate};
 
 handle_info({udp_closed, Sock}, State = #state{sock = Sock}) ->
     {stop, udp_closed, State};
 
 handle_info(Info, State) ->
-    ?LOG(error, "Unexpected Info: ~p", [Info]),
+    ?LOG(error, "Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, #state{sock = Sock}) ->
@@ -158,6 +161,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+handshake(Cookie) ->
+    {handshake, node(), ekka:env(cluster_name, ekka), Cookie}.
+
 udp_open([], _Options) ->
     {error, eaddrinuse};
     
@@ -166,7 +172,7 @@ udp_open([Port|Ports], Options) ->
         {ok, Sock} ->
             {ok, Sock};
         {error, eaddrinuse} ->
-            ?LOG(warning, "Multicast Adddress in use: ~p", [Port]),
+            ?LOG(warning, "Multicast Adddress inuse: ~p", [Port]),
             udp_open(Ports, Options);
         {error, Reason} ->
             {error, Reason}
@@ -174,7 +180,4 @@ udp_open([Port|Ports], Options) ->
 
 udp_send(Sock, Addr, Port, Term) ->
     gen_udp:send(Sock, Addr, Port, term_to_binary(Term)).
-
-handshake(Cookie) ->
-    {handshake, node(), ekka:env(cluster_name, ekka), Cookie}.
 
