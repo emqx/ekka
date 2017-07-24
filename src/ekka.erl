@@ -43,12 +43,12 @@
 %%% Start/Stop
 %%%-------------------------------------------------------------------
 
+-spec(start() -> ok).
 start() ->
-    ekka_mnesia:start(),
-    application:ensure_all_started(ekka).
+    ekka_mnesia:start(), {ok, _Apps} = application:ensure_all_started(ekka), ok.
 
-stop() ->
-    application:stop(ekka).
+-spec(stop() -> ok).
+stop() -> application:stop(ekka).
 
 %%%-------------------------------------------------------------------
 %%% Env
