@@ -28,7 +28,6 @@
 -spec(join(node()) -> ok | ignore | {error, any()}).
 join(Node) when Node =:= node() ->
     ignore;
-
 join(Node) when is_atom(Node) ->
     case {ekka_mnesia:is_node_in_cluster(Node), ekka_node:is_running(Node, ekka)} of
         {false, true} ->
@@ -50,10 +49,9 @@ leave() ->
     end.
 
 %% @doc Force a node leave from cluster.
--spec(force_leave(node()) -> ok | ignore | {error, any()}).
+-spec(force_leave(node()) -> ok | ignore | {error, term()}).
 force_leave(Node) when Node =:= node() ->
     ignore;
-
 force_leave(Node) ->
     case ekka_mnesia:is_node_in_cluster(Node)
          andalso rpc:call(Node, ?MODULE, prepare, [leave]) of
@@ -72,14 +70,14 @@ force_leave(Node) ->
     end.
 
 %% @doc Heal partitions
--spec(heal(shutdown | reboot) -> ok).
+-spec(heal(shutdown | reboot) -> ok | {error, term()}).
 heal(shutdown) ->
     prepare(heal), ekka_mnesia:ensure_stopped();
 heal(reboot) ->
     ekka_mnesia:ensure_started(), reboot().
 
 %% @doc Prepare to join or leave the cluster.
--spec(prepare(join | leave) -> ok).
+-spec(prepare(join | leave) -> ok | {error, term()}).
 prepare(Action) ->
     ekka_membership:announce(Action),
     case ekka:callback(prepare) of
@@ -88,7 +86,7 @@ prepare(Action) ->
     end.
 
 %% @doc Reboot after join or leave cluster.
--spec(reboot() -> ok).
+-spec(reboot() -> ok | {error, term()}).
 reboot() ->
     case ekka:callback(reboot) of
         {ok, Reboot} -> Reboot();
