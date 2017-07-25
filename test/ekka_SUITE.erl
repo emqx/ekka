@@ -57,9 +57,9 @@ cluster_test(_Config) ->
     wait_running(Z),
     true = ekka:is_running(Z, ekka),
     Node = node(),
-    {ok, _} = rpc:call(Z, ekka_cluster, join, [Node]),
+    ok  = rpc:call(Z, ekka_cluster, join, [Node]),
     [Z, Node] = lists:sort(mnesia:system_info(running_db_nodes)),
-    {ok, _} = rpc:call(Z, ekka_cluster, leave, []),
+    ok = rpc:call(Z, ekka_cluster, leave, []),
     [Node] = lists:sort(mnesia:system_info(running_db_nodes)),
     ok = slave:stop(Z).
 
@@ -76,16 +76,16 @@ cluster_join(_Config) ->
     %% case2
     {error, {node_down, _}} = ekka:join(N),
     %% case3
-    {ok, _Started} = ekka:join(Z),
+    ok = ekka:join(Z),
     Cluster = ekka_cluster:status(),
     [Z, Node] = proplists:get_value(running_nodes, Cluster),
     %% case4
-    {ok, _} = ekka:join(Z1),
+    ok = ekka:join(Z1),
     Cluster1 = ekka_cluster:status(),
     [Z1, Node] = proplists:get_value(running_nodes, Cluster1),
     true = rpc:call(Z, ekka, is_running, [Z, ekka]),
     %% case4
-    {ok, _} = rpc:call(Z, ekka, join, [Z1]),
+    ok = rpc:call(Z, ekka, join, [Z1]),
     ?assertEqual(3, length(proplists:get_value(running_nodes, ekka_cluster:status()))),
     %% case5
     slave:stop(Z),
@@ -99,10 +99,10 @@ cluster_leave(_Config) ->
     Z = slave(ekka, cluster_leave_z),
     wait_running(Z),
     {error, node_not_in_cluster} = ekka_cluster:leave(),
-    {ok, _} = ekka_cluster:join(Z),
+    ok = ekka_cluster:join(Z),
     Node = node(),
     [Z, Node] = ekka_mnesia:running_nodes(),
-    {ok, _} = ekka_cluster:leave(),
+    ok = ekka_cluster:leave(),
     [Node] = ekka_mnesia:running_nodes(),
     slave:stop(Z).
 
@@ -111,19 +111,19 @@ cluster_remove(_Config) ->
     wait_running(Z),
     Node = node(),
     ignore = ekka_cluster:force_leave(Node),
-    {ok, _} = ekka_cluster:join(Z),
+    ok = ekka_cluster:join(Z),
     [Z, Node] = ekka_mnesia:running_nodes(),
-    {ok, _} = ekka_cluster:force_leave(Z),
+    ok = ekka_cluster:force_leave(Z),
     [Node] = ekka_mnesia:running_nodes(),
     slave:stop(Z).
 
 cluster_remove2(_Config) ->
     Z = slave(ekka, cluster_remove2_z),
     wait_running(Z),
-    {ok, _} = ekka_cluster:join(Z),
+    ok = ekka_cluster:join(Z),
     Node = node(),
     [Z, Node] = ekka_mnesia:running_nodes(),
-    {ok, _} = ekka_cluster:force_leave(Z),
+    ok = ekka_cluster:force_leave(Z),
     ok = rpc:call(Z, ekka_mnesia, ensure_stopped, []),
     [Node] = ekka_mnesia:running_nodes(),
     slave:stop(Z).
@@ -154,7 +154,7 @@ slave(node, Node) ->
 
 generate_config() ->
     Schema = cuttlefish_schema:files([local_path(["priv", "ekka.schema"])]),
-    Conf = conf_parse:file([local_path(["test", "data", "ekka.manual.conf"])]),
+    Conf = conf_parse:file([local_path(["etc", "ekka.conf.example"])]),
     cuttlefish_generator:map(Schema, Conf).
 
 get_base_dir(Module) ->
