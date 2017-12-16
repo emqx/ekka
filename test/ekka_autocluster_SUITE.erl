@@ -30,7 +30,13 @@ all() ->
     [{group, autocluster}].
 
 groups() ->
-    [{autocluster, [sequence], [t_autocluster_static, t_autocluster_mcast]}].
+    [{autocluster, [sequence],
+     [t_autocluster_static,
+      t_autocluster_mcast,
+      t_autocluster_dns,
+      t_autocluster_etcd,
+      t_autocluster_k8s
+     ]}].
 
 init_per_testcase(t_autocluster_static, Config) ->
     configure_strategy(static),
@@ -42,11 +48,17 @@ init_per_testcase(t_autocluster_mcast, Config) ->
     start_ekka_and_cluster(), 
     Config;
 
+init_per_testcase(t_autocluster_dns, Config) ->
+    configure_strategy(dns),
+    start_ekka_and_cluster(),
+    Config;
+
 init_per_testcase(_TestCase, Config) ->
     Config.
 
 start_ekka_and_cluster() ->
-    {ok, _} = ekka:start(), ekka:autocluster().
+    ok = ekka:start(),
+    ekka:autocluster().
 
 configure_strategy(Strategy) ->
     application:set_env(ekka, cluster_discovery, {Strategy, strategy_options(Strategy)}).
@@ -60,13 +72,25 @@ strategy_options(static) ->
 
 strategy_options(mcast) ->
     [{addr, {239,192,0,1}}, {ports, [4369,4370,4371]},
-     {iface, {0,0,0,0}}, {ttl,1}, {loop,true}].
+     {iface, {0,0,0,0}}, {ttl,1}, {loop,true}];
+
+strategy_options(dns) ->
+    [{name,"localhost"},{app,"ekka_ct"}].
 
 t_autocluster_static(Config) ->
     t_autocluster(static, Config).
 
 t_autocluster_mcast(Config) ->
     t_autocluster(mcast, Config).
+
+t_autocluster_dns(Config) ->
+    t_autocluster(dns, Config).
+
+t_autocluster_etcd(Config) ->
+    ok.
+
+t_autocluster_k8s(Config) ->
+    ok.
 
 t_autocluster(Strategy, _Config) ->
     Node1 = start_and_cluster(Strategy, ekka_ct1),
