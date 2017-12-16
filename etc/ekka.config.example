@@ -15,13 +15,11 @@
 %%                      {node_ttl, 60000}
 %%                    ]}},
 
-
 %% Clustering with etcd
 %% {cluster_discovery, {etcd, [
-%%                       {name, "localhost"},
-%%                       {service_name, ekka},
-%%                       {address_type, ip},
-%%                       {app_name, ekka}
+%%                       {server, ["http://127.0.0.1:2379"]},
+%%                       {prefix, "ekkacluster"},
+%%                       {node_ttl, 60000}
 %%                     ]}},
 
 %% Clustering on k8s
