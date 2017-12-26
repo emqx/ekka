@@ -33,6 +33,11 @@ discover(Options) ->
     case etcd_get_nodes_key(Options) of
         {ok, Response} ->
             {ok, extract_nodes(Response)};
+        {error, {404, _}} ->
+            case ensure_nodes_path(Options) of
+                {ok, _} -> discover(Options);
+                Error   -> Error
+            end;
         {error, Reason} ->
             {error, Reason}
     end.
@@ -100,28 +105,26 @@ ensure_node_ttl(Options) ->
 extract_node(V) ->
     list_to_atom(binary_to_list(lists:last(binary:split(maps:get(<<"key">>, V), <<"/">>, [global])))).
 
+ensure_nodes_path(Options) ->
+    etcd_set(server(Options), nodes_path(Options), [{dir, true}]).
+
 etcd_get_nodes_key(Options) ->
-    NodesPath = nodes_path(config(prefix, Options)),
-    etcd_get(server(Options), NodesPath, [{recursive, true}]).
+    etcd_get(server(Options), nodes_path(Options), [{recursive, true}]).
 
 etcd_set_node_key(Options) ->
-    NodePath = node_path(config(prefix, Options)),
     Ttl = config(node_ttl, Options) div 1000,
-    etcd_set(server(Options), NodePath, [{ttl, Ttl}]).
+    etcd_set(server(Options), node_path(Options), [{ttl, Ttl}]).
 
 etcd_del_node_key(Options) ->
-    NodePath = node_path(config(prefix, Options)),
-    etcd_del(server(Options), NodePath, []).
+    etcd_del(server(Options), node_path(Options), []).
 
 etcd_set_lock_key(Options) ->
-    LockPath = lock_path(config(prefix, Options)),
     Values = [{ttl, 30}, {'prevExist', false}, {value, node()}],
-    etcd_set(server(Options), LockPath, Values).
+    etcd_set(server(Options), lock_path(Options), Values).
 
 etcd_del_lock_key(Options) ->
-    LockPath = lock_path(config(prefix, Options)),
     Values = [{'prevExist', true}, {'prevValue', node()}],
-    etcd_del(server(Options), LockPath, Values).
+    etcd_del(server(Options), lock_path(Options), Values).
 
 server(Options) ->
     config(server, Options).
@@ -138,14 +141,15 @@ etcd_set(Servers, Key, Params) ->
 etcd_del(Servers, Key, Params) ->
     ekka_httpc:delete(rand_addr(Servers), Key, Params).
 
-nodes_path(Prefix) ->
-    with_prefix(Prefix, "/nodes").
 
-node_path(Prefix) ->
-    with_prefix(Prefix, "/nodes/" ++ atom_to_list(node())).
+nodes_path(Options) ->
+    with_prefix(config(prefix, Options), "/nodes").
 
-lock_path(Prefix) ->
-    with_prefix(Prefix, "/lock").
+node_path(Options) ->
+    with_prefix(config(prefix, Options), "/nodes/" ++ atom_to_list(node())).
+
+lock_path(Options) ->
+    with_prefix(config(prefix, Options), "/lock").
 
 with_prefix(Prefix, Path) ->
     Cluster = atom_to_list(ekka:env(cluster_name, ekka)),

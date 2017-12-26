@@ -1,6 +1,6 @@
 {application,ekka,
              [{description,"Autocluster and Autoheal for EMQ"},
-              {vsn,"0.2"},
+              {vsn,"0.3"},
               {modules,[]},
               {env, [
                 {cluster_autoheal, true},
@@ -8,5 +8,5 @@
                 {cluster_discovery, {manual, []}}
               ]},
               {registered,[ekka_sup,ekka_membership,ekka_cluster_sup,ekka_node_monitor]},
-              {applications,[kernel,stdlib,mnesia,lager]},
+              {applications,[kernel,stdlib,mnesia,inets,lager]},
               {mod,{ekka_app,[]}}]}.
