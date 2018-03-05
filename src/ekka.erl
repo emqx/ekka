@@ -1,5 +1,5 @@
 %%%===================================================================
-%%% Copyright (c) 2013-2017 EMQ Enterprise, Inc. (http://emqtt.io)
+%%% Copyright (c) 2013-2018 EMQ Enterprise, Inc. All Rights Reserved.
 %%%
 %%% Licensed under the Apache License, Version 2.0 (the "License");
 %%% you may not use this file except in compliance with the License.
@@ -34,25 +34,26 @@
 -export([join/1, leave/0, force_leave/1]).
 
 %% Membership
--export([local_member/0, members/0, status/0]).
+-export([local_member/0, members/0, nodelist/0, status/0]).
 
 %% Monitor membership events
 -export([monitor/1, unmonitor/1]).
 
-%%%-------------------------------------------------------------------
-%%% Start/Stop
-%%%-------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Start/Stop
+%%--------------------------------------------------------------------
 
 -spec(start() -> ok).
 start() ->
     ekka_mnesia:start(), {ok, _Apps} = application:ensure_all_started(ekka), ok.
 
 -spec(stop() -> ok).
-stop() -> application:stop(ekka).
+stop() ->
+    application:stop(ekka).
 
-%%%-------------------------------------------------------------------
-%%% Env
-%%%-------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Env
+%%--------------------------------------------------------------------
 
 env(Key) ->
     application:get_env(ekka, Key).
@@ -60,9 +61,9 @@ env(Key) ->
 env(Key, Default) ->
     application:get_env(ekka, Key, Default).
 
-%%%-------------------------------------------------------------------
-%%% Register Callback
-%%%-------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Register Callback
+%%--------------------------------------------------------------------
 
 callback(Name) ->
     application:get_env(ekka, {callback, Name}).
@@ -70,9 +71,9 @@ callback(Name) ->
 callback(Name, Fun) ->
     application:set_env(ekka, {callback, Name}, Fun).
 
-%%%-------------------------------------------------------------------
-%%% Autocluster
-%%%-------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Autocluster
+%%--------------------------------------------------------------------
 
 autocluster() ->
     autocluster(ekka, fun() -> ok end).
@@ -102,25 +103,32 @@ wait_application_ready(App, Retries) ->
                  wait_application_ready(App, Retries - 1)
     end.
 
-%%%-------------------------------------------------------------------
-%%% Membership API
-%%%-------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Membership API
+%%--------------------------------------------------------------------
 
 %% Cluster members
 -spec(members() -> list(member())).
-members() -> ekka_membership:members().
+members() ->
+    ekka_membership:members().
 
 %% Local member
 -spec(local_member() -> member()).
-local_member() -> ekka_membership:local_member().
+local_member() ->
+    ekka_membership:local_member().
+
+%% Node List
+-spec(nodelist() -> list(node())).
+nodelist() ->
+    ekka_membership:nodelist().
 
 %% Status of the cluster
 status() ->
     [{members, members()}, {partitions, ekka_node_monitor:partitions()}].
 
-%%%-------------------------------------------------------------------
-%%% Node API
-%%%-------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Node API
+%%--------------------------------------------------------------------
 
 %% @doc Is node aliving?
 -spec(is_aliving(node()) -> boolean()).
@@ -132,9 +140,9 @@ is_aliving(Node) ->
 is_running(Node, App) ->
     ekka_node:is_running(Node, App).
 
-%%%-------------------------------------------------------------------
-%%% Cluster API
-%%%-------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Cluster API
+%%--------------------------------------------------------------------
 
 %% @doc Join the cluster
 -spec(join(node()) -> ok | ignore | {error, any()}).
@@ -151,9 +159,9 @@ leave() ->
 force_leave(Node) ->
     ekka_cluster:force_leave(Node).
 
-%%%-------------------------------------------------------------------
-%%% Monitor membership events
-%%%-------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Monitor membership events
+%%--------------------------------------------------------------------
 
 %%TODO:
 
