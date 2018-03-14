@@ -23,7 +23,8 @@
 -export([start_link/0]).
 
 %% Members API
--export([local_member/0, lookup_member/1, members/0, members/1, oldest/1]).
+-export([local_member/0, lookup_member/1, members/0, members/1,
+         is_member/1, oldest/1]).
 
 -export([leader/0, nodelist/0, coordinator/0, coordinator/1]).
 
@@ -67,6 +68,10 @@ local_member() ->
 -spec(lookup_member(node()) -> member() | false).
 lookup_member(Node) ->
     case ets:lookup(membership, Node) of [M] -> M; [] -> false end.
+
+-spec(is_member(node()) -> boolean()).
+is_member(Node) ->
+    ets:member(membership, Node).
 
 -spec(members() -> [member()]).
 members() ->

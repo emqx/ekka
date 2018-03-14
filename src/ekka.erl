@@ -34,7 +34,7 @@
 -export([join/1, leave/0, force_leave/1]).
 
 %% Membership
--export([local_member/0, members/0, nodelist/0, status/0]).
+-export([local_member/0, members/0, is_member/1, nodelist/0, status/0]).
 
 %% Monitor membership events
 -export([monitor/1, unmonitor/1]).
@@ -116,6 +116,11 @@ members() ->
 -spec(local_member() -> member()).
 local_member() ->
     ekka_membership:local_member().
+
+%% Is node a member?
+-spec(is_member(node()) -> boolean()).
+is_member(Node) ->
+    ekka_membership:is_member(Node).
 
 %% Node List
 -spec(nodelist() -> list(node())).
