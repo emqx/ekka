@@ -102,14 +102,20 @@ aquire(Name, Resource, all) when is_atom(Name) ->
     aquire_locks(ekka_membership:nodelist(up), Name, lock_obj(Resource)).
 
 aquire_locks(Nodes, Name, LockObj) ->
-    {ResL, BadNodes} = rpc:multicall(Nodes, ?MODULE, aquire_lock, [Name, LockObj]),
-    case (not lists:member(false, ResL)) of
-        true  -> {true, Nodes -- BadNodes};
-        false -> rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
-                 {false, Nodes -- BadNodes}
+    case lists:member(node(), Nodes)
+         andalso check_local_lock(Name, LockObj) of
+        true ->
+            {ResL, BadNodes} = rpc:multicall(Nodes, ?MODULE, aquire_lock, [Name, LockObj]),
+            case (not lists:member(false, ResL)) of
+                true  -> {true, Nodes -- BadNodes};
+                false -> rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
+                         {false, Nodes -- BadNodes}
+            end;
+        false ->
+            {false, [node()]}
     end.
 
-aquire_lock(Name, Lock = #lock{resource = Resource, owner = Owner}) ->
+aquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
     Pos = #lock.counter,
     try ets:update_counter(Name, Resource, [{Pos, 0}, {Pos, 1, 1, 1}]) of
         [0, 1] -> true;
@@ -121,7 +127,14 @@ aquire_lock(Name, Lock = #lock{resource = Resource, owner = Owner}) ->
             end
     catch
         error:badarg ->
-            ets:insert_new(Name, Lock)
+            ets:insert_new(Name, LockObj)
+    end.
+
+check_local_lock(Name, #lock{resource = Resource, owner = Owner}) ->
+    case ets:lookup(Name, Resource) of
+        [#lock{owner = Owner1}] when Owner1 =/= Owner ->
+            false;
+        _Other -> true
     end.
 
 lock_obj(Resource) ->
