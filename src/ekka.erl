@@ -1,5 +1,5 @@
 %%%===================================================================
-%%% Copyright (c) 2013-2018 EMQ Enterprise, Inc. All Rights Reserved.
+%%% Copyright (c) 2013-2018 EMQ Inc. All Rights Reserved.
 %%%
 %%% Licensed under the Apache License, Version 2.0 (the "License");
 %%% you may not use this file except in compliance with the License.
@@ -38,6 +38,9 @@
 
 %% Monitor membership events
 -export([monitor/1, unmonitor/1]).
+
+%% Locker API
+-export([lock/1, lock/2, unlock/1, unlock/2]).
 
 %%--------------------------------------------------------------------
 %% Start/Stop
@@ -84,7 +87,8 @@ autocluster(App, Fun) ->
             spawn(fun() ->
                     group_leader(whereis(init), self()),
                     wait_application_ready(App, 5),
-                    try ekka_autocluster:discover_and_join(Fun)
+                    try
+                        ekka_autocluster:discover_and_join(Fun)
                     catch
                         _:Error -> lager:error("Autocluster exception: ~p", [Error])
                     end,
@@ -175,4 +179,24 @@ monitor(membership) ->
 
 unmonitor(membership) ->
     ekka_membership:monitor(false).
+
+%%--------------------------------------------------------------------
+%% Locker API
+%%--------------------------------------------------------------------
+
+-spec(lock(ekka_locker:resource()) -> boolean()).
+lock(Resource) ->
+    ekka_locker:aquire(Resource).
+
+-spec(lock(ekka_locker:resource(), ekka_locker:lock_type()) -> boolean()).
+lock(Resource, Type) ->
+    ekka_locker:aquire(ekka_locker, Resource, Type).
+
+-spec(unlock(ekka_locker:resource()) -> boolean()).
+unlock(Resource) ->
+    ekka_locker:release(Resource).
+
+-spec(unlock(ekka_locker:resource(), ekka_locker:lock_type()) -> boolean()).
+unlock(Resource, Type) ->
+    ekka_locker:release(ekka_locker, Resource, Type).
 

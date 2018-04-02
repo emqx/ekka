@@ -14,7 +14,7 @@
 %%% limitations under the License.
 %%%===================================================================
 
--module(ekka_sup).
+-module(ekka_locker_sup).
 
 -behaviour(supervisor).
 
@@ -26,11 +26,7 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Childs = [child(ekka_cluster_sup, supervisor),
-              child(ekka_membership, worker),
-              child(ekka_node_monitor, worker),
-              child(ekka_locker_sup, supervisor)],
-    {ok, {{one_for_all, 0, 3600}, Childs}}.
+    Locker = {ekka_locker, {ekka_locker, start_link, []},
+              permanent, 2000, worker, [ekka_locker]},
+    {ok, {{one_for_one, 100, 3600}, [Locker]}}.
 
-child(Mod, Type) ->
-    {Mod, {Mod, start_link, []}, permanent, 5000, Type, [Mod]}.

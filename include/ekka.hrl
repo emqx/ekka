@@ -6,6 +6,7 @@
 -record(member, { node   :: node(),
                   addr   :: member_address(),
                   guid   :: ekka_guid:guid(),
+                  hash   :: pos_integer(),
                   status :: member_status(),
                   mnesia :: running | stopped | false,
                   ltime  :: erlang:timestamp()
