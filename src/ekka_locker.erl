@@ -103,7 +103,7 @@ aquire(Name, Resource, all) when is_atom(Name) ->
 
 aquire_locks(Nodes, Name, LockObj) ->
     case lists:member(node(), Nodes)
-         andalso check_local_lock(Name, LockObj) of
+         andalso check_local(Name, LockObj) of
         true ->
             {ResL, BadNodes} = rpc:multicall(Nodes, ?MODULE, aquire_lock, [Name, LockObj]),
             case (not lists:member(false, ResL)) of
@@ -121,7 +121,7 @@ aquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
         [0, 1] -> true;
         [1, 1] ->
             case ets:lookup(Name, Resource) of
-                [#lock{owner = Owner1}] when Owner1 =:= Owner ->
+                [#lock{owner = Owner}] ->
                     true;
                 _Other -> false
             end
@@ -130,11 +130,12 @@ aquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
             ets:insert_new(Name, LockObj)
     end.
 
-check_local_lock(Name, #lock{resource = Resource, owner = Owner}) ->
+check_local(Name, #lock{resource = Resource, owner = Owner}) ->
     case ets:lookup(Name, Resource) of
-        [#lock{owner = Owner1}] when Owner1 =/= Owner ->
-            false;
-        _Other -> true
+        [#lock{owner = Owner}] ->
+            true;
+        [_Lock] -> false;
+        []      -> true
     end.
 
 lock_obj(Resource) ->
@@ -171,7 +172,7 @@ release_locks(Nodes, Name, LockObj) ->
 
 release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
     case ets:lookup(Name, Resource) of
-        [Lock = #lock{owner = Owner1}] when Owner1 =:= Owner ->
+        [Lock = #lock{owner = Owner}] ->
             ets:delete_object(Name, Lock);
         [_Lock] -> false;
         []      -> false
@@ -218,7 +219,7 @@ handle_info({'DOWN', _MRef, process, DownPid, _Reason},
             lists:foreach(
               fun(Resource) ->
                   case ets:lookup(Tab, Resource) of
-                      [Lock = #lock{owner = Owner}] when Owner =:= DownPid ->
+                      [Lock = #lock{owner = OwnerPid}] when OwnerPid =:= DownPid ->
                           ets:delete_object(Tab, Lock);
                       _ -> ok
                   end
