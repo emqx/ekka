@@ -40,7 +40,7 @@
 -export([monitor/1, unmonitor/1]).
 
 %% Locker API
--export([lock/1, lock/2, unlock/1, unlock/2]).
+-export([lock/1, lock/2, lock/3, unlock/1, unlock/2]).
 
 %%--------------------------------------------------------------------
 %% Start/Stop
@@ -184,13 +184,19 @@ unmonitor(membership) ->
 %% Locker API
 %%--------------------------------------------------------------------
 
--spec(lock(ekka_locker:resource()) -> boolean()).
+-spec(lock(ekka_locker:resource()) -> ekka_locker:lock_result()).
 lock(Resource) ->
     ekka_locker:aquire(Resource).
 
--spec(lock(ekka_locker:resource(), ekka_locker:lock_type()) -> boolean()).
+-spec(lock(ekka_locker:resource(), ekka_locker:lock_type())
+      -> ekka_locker:lock_result()).
 lock(Resource, Type) ->
     ekka_locker:aquire(ekka_locker, Resource, Type).
+
+-spec(lock(ekka_locker:resource(), ekka_locker:lock_type(), ekka_locker:piggyback())
+      -> ekka_locker:lock_result()).
+lock(Resource, Type, Piggyback) ->
+    ekka_locker:aquire(ekka_locker, Resource, Type, Piggyback).
 
 -spec(unlock(ekka_locker:resource()) -> boolean()).
 unlock(Resource) ->

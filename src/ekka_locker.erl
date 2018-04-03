@@ -23,10 +23,11 @@
 %% for test cases
 -export([stop/0, stop/1]).
 
--export([aquire/1, aquire/2, aquire/3, release/1, release/2, release/3]).
+-export([aquire/1, aquire/2, aquire/3, aquire/4]).
+-export([release/1, release/2, release/3]).
 
 %% for rpc call
--export([aquire_lock/2, release_lock/2]).
+-export([aquire_lock/2, aquire_lock/3, release_lock/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -36,7 +37,11 @@
 
 -type(lock_type() :: local | leader | quorum | all).
 
--export_type([resource/0, lock_type/0]).
+-type(lock_result() :: {boolean, [node() | {node(), any()}]}).
+
+-type(piggyback() :: mfa()).
+
+-export_type([resource/0, lock_type/0, lock_result/0, piggyback/0]).
 
 -record(lock, {resource :: resource(),
                owner    :: pid(),
@@ -80,40 +85,51 @@ stop(Name) ->
 aquire(Resource) ->
     aquire(?SERVER, Resource).
 
--spec(aquire(atom(), resource()) -> {boolean(), [node()]}).
+-spec(aquire(atom(), resource()) -> lock_result()).
 aquire(Name, Resource) when is_atom(Name) ->
     aquire(Name, Resource, local).
 
--spec(aquire(atom(), resource(), lock_type()) -> {boolean(), [node()]}).
-aquire(Name, Resource, local) when is_atom(Name) ->
-    {aquire_lock(Name, lock_obj(Resource)), [node()]};
-aquire(Name, Resource, leader) when is_atom(Name)->
-    Leader = ekka:leader(),
-    case rpc:call(Leader, ?MODULE, aquire_lock, [Name, lock_obj(Resource)]) of
-        {badrpc, _Reason} ->
-            {false, [Leader]};
-        Res ->
-            {Res, [Leader]}
+-spec(aquire(atom(), resource(), lock_type()) -> lock_result()).
+aquire(Name, Resource, Type) ->
+    aquire(Name, Resource, Type, undefined).
+
+-spec(aquire(atom(), resource(), lock_type(), piggyback()) -> lock_result()).
+aquire(Name, Resource, local, Piggyback) when is_atom(Name) ->
+    aquire_lock(Name, lock_obj(Resource), Piggyback);
+aquire(Name, Resource, leader, Piggyback) when is_atom(Name)->
+    Leader = ekka_membership:leader(),
+    case rpc:call(Leader, ?MODULE, aquire_lock,
+                  [Name, lock_obj(Resource), Piggyback]) of
+        Err = {badrpc, _Reason} ->
+            {false, [{Leader, Err}]};
+        Res -> Res
     end;
-aquire(Name, Resource, quorum) when is_atom(Name) ->
-    aquire_locks(ekka_ring:find_nodes(Resource), Name, lock_obj(Resource));
+aquire(Name, Resource, quorum, Piggyback) when is_atom(Name) ->
+    aquire_locks(ekka_ring:find_nodes(Resource),
+                 Name, lock_obj(Resource), Piggyback);
 
-aquire(Name, Resource, all) when is_atom(Name) ->
-    aquire_locks(ekka_membership:nodelist(up), Name, lock_obj(Resource)).
+aquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
+    aquire_locks(ekka_membership:nodelist(up),
+                 Name, lock_obj(Resource), Piggyback).
 
-aquire_locks(Nodes, Name, LockObj) ->
+aquire_locks(Nodes, Name, LockObj, Piggyback) ->
     case lists:member(node(), Nodes)
          andalso check_local(Name, LockObj) of
         true ->
-            {ResL, BadNodes} = rpc:multicall(Nodes, ?MODULE, aquire_lock, [Name, LockObj]),
-            case (not lists:member(false, ResL)) of
-                true  -> {true, Nodes -- BadNodes};
-                false -> rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
-                         {false, Nodes -- BadNodes}
+            {ResL, _BadNodes}
+                = rpc:multicall(Nodes, ?MODULE, aquire_lock, [Name, LockObj, Piggyback]),
+            case merge_results(ResL) of
+                Res = {true, _}  -> Res;
+                Res = {false, _} ->
+                    rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
+                    Res
             end;
         false ->
             {false, [node()]}
     end.
+
+aquire_lock(Name, LockObj, Piggyback) ->
+    {aquire_lock(Name, LockObj), [with_piggyback(node(), Piggyback)]}.
 
 aquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
     Pos = #lock.counter,
@@ -138,27 +154,33 @@ check_local(Name, #lock{resource = Resource, owner = Owner}) ->
         []      -> true
     end.
 
+with_piggyback(Node, undefined) ->
+    Node;
+with_piggyback(Node, {M, F, Args}) ->
+    {Node, erlang:apply(M, F, Args)}.
+
 lock_obj(Resource) ->
     #lock{resource = Resource,
           owner    = self(),
           counter  = 1,
           created  = os:timestamp()}.
 
--spec(release(resource()) -> {boolean(), [node()]}).
+-spec(release(resource()) -> lock_result()).
 release(Resource) ->
     release(?SERVER, Resource).
 
--spec(release(atom(), resource()) -> {boolean(), [node()]}).
+-spec(release(atom(), resource()) -> lock_result()).
 release(Name, Resource) ->
     release(Name, Resource, local).
 
--spec(release(atom(), resource(), lock_type()) -> {boolean(), [node()]}).
+-spec(release(atom(), resource(), lock_type()) -> lock_result()).
 release(Name, Resource, local) ->
     {release_lock(Name, lock_obj(Resource)), [node()]};
 release(Name, Resource, leader) ->
-    case rpc:call(ekka:leader(), ?MODULE, release, [Name, lock_obj(Resource)]) of
-        {badrpc, _Reason} ->
-            false;
+    Leader = ekka_membership:leader(),
+    case rpc:call(Leader, ?MODULE, release_lock, [Name, lock_obj(Resource)]) of
+        Err = {badrpc, _Reason} ->
+            {false, [{Leader, Err}]};
         Res -> Res
     end;
 release(Name, Resource, quorum) ->
@@ -167,16 +189,28 @@ release(Name, Resource, all) ->
     release_locks(ekka_membership:nodelist(up), Name, lock_obj(Resource)).
 
 release_locks(Nodes, Name, LockObj) ->
-    {ResL, BadNodes} = rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
-    {not lists:member(false, ResL), Nodes -- BadNodes}.
+    {ResL, _BadNodes} = rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
+    merge_results(ResL).
 
 release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
-    case ets:lookup(Name, Resource) of
-        [Lock = #lock{owner = Owner}] ->
-            ets:delete_object(Name, Lock);
-        [_Lock] -> false;
-        []      -> false
-    end.
+    Res = case ets:lookup(Name, Resource) of
+              [Lock = #lock{owner = Owner}] ->
+                  ets:delete_object(Name, Lock);
+              [_Lock] -> false;
+              []      -> false
+          end,
+    {Res, [node()]}.
+
+merge_results(ResL) ->
+    merge_results(ResL, [], []).
+merge_results([], Succ, []) ->
+    {true, Succ};
+merge_results([], _, Failed) ->
+    {false, Failed};
+merge_results([{true, Res}|ResL], Succ, Failed) ->
+    merge_results(ResL, [Res|Succ], Failed);
+merge_results([{false, Res}|ResL], Succ, Failed) ->
+    merge_results(ResL, Succ, [Res|Failed]).
 
 %%%===================================================================
 %%% gen_server callbacks
