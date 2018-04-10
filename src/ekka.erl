@@ -31,6 +31,7 @@
 -export([is_aliving/1, is_running/2]).
 
 %% Cluster API
+-export([cluster_name/0]).
 -export([join/1, leave/0, force_leave/1]).
 
 %% Membership
@@ -156,6 +157,10 @@ is_running(Node, App) ->
 %%--------------------------------------------------------------------
 %% Cluster API
 %%--------------------------------------------------------------------
+
+-spec(cluster_name() -> cluster()).
+cluster_name() ->
+    env(cluster_name, undefined).
 
 %% @doc Join the cluster
 -spec(join(node()) -> ok | ignore | {error, any()}).

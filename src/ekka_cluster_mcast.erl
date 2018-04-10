@@ -162,7 +162,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 handshake(Cookie) ->
-    {handshake, node(), ekka:env(cluster_name, ekka), Cookie}.
+    {handshake, node(), ekka:env(cluster_name, undefined), Cookie}.
 
 udp_open([], _Options) ->
     {error, eaddrinuse};
