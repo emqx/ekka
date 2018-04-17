@@ -1,6 +1,6 @@
 {application,ekka,
              [{description,"Autocluster and Autoheal for EMQ"},
-              {vsn,"0.2.2"},
+              {vsn,"0.3"},
               {modules,[]},
               {env, [
                 {cluster_autoheal, true},

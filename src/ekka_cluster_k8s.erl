@@ -1,5 +1,5 @@
 %%%===================================================================
-%%% Copyright (c) 2013-2017 EMQ Enterprise, Inc. (http://emqtt.io)
+%%% Copyright (c) 2013-2018 EMQ Enterprise, Inc. All Rights Reserved.
 %%%
 %%% Licensed under the Apache License, Version 2.0 (the "License");
 %%% you may not use this file except in compliance with the License.
@@ -36,9 +36,10 @@ discover(Options) ->
     Service = get_value(service_name, Options),
     App = get_value(app_name, Options, "ekka"),
     AddrType = get_value(address_type, Options, ip),
-    case k8s_service_get(Server, Service) of
+    Namespace = get_value(namespace, Options, "default"),
+    case k8s_service_get(Server, Service, Namespace) of
         {ok, Response} ->
-            Addresses = extract_addresses(AddrType, Response),
+            Addresses = extract_addresses(AddrType, Response, Namespace),
             {ok, [node_name(App, Addr) || Addr <- Addresses]};
         {error, Reason} ->
             {error, Reason}
@@ -63,19 +64,19 @@ unregister(_Options) ->
 %%% Internal functions
 %%%===================================================================
 
-k8s_service_get(Server, Service) ->
+k8s_service_get(Server, Service, Namespace) ->
     Headers = [{"Authorization", "Bearer " ++ token()}],
     HttpOpts = case filelib:is_file(cert_path()) of
                    true  -> [{ssl, [{cacertfile, cert_path()}]}];
                    false -> [{ssl, [{verify, verify_none}]}]
                end,
-    ekka_httpc:get(Server, service_path(Service), [], Headers, HttpOpts).
+    ekka_httpc:get(Server, service_path(Service, Namespace), [], Headers, HttpOpts).
 
-service_path(Service) ->
-    lists:concat(["api/v1/namespaces/", namespace(), "/endpoints/", Service]).
+service_path(Service, Namespace) ->
+    lists:concat(["api/v1/namespaces/", Namespace, "/endpoints/", Service]).
 
-namespace() ->
-    binary_to_list(trim(read_file("namespace", <<"default">>))).
+% namespace() ->
+%     binary_to_list(trim(read_file("namespace", <<"default">>))).
 
 token() ->
     binary_to_list(trim(read_file("token", <<"">>))).
@@ -91,16 +92,16 @@ read_file(Name, Default) ->
 
 trim(S) -> binary:replace(S, <<"\n">>, <<>>).
 
-extract_addresses(Type, Response) ->
+extract_addresses(Type, Response, Namespace) ->
     lists:flatten(
-      [[ extract_host(Type, Addr)
+      [[ extract_host(Type, Addr, Namespace)
          || Addr <- maps:get(<<"addresses">>, Subset, [])]
             || Subset <- maps:get(<<"subsets">>, Response, [])]).
 
-extract_host(ip, Addr) ->
+extract_host(ip, Addr, _) ->
     maps:get(<<"ip">>, Addr);
 
-extract_host(dns, Addr) ->
+extract_host(dns, Addr, Namespace) ->
     Ip = binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>),
-    iolist_to_binary([Ip, ".", namespace(), ".pod.cluster.local"]).
+    iolist_to_binary([Ip, ".", Namespace, ".pod.cluster.local"]).
 
