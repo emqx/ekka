@@ -14,23 +14,24 @@
 %%% limitations under the License.
 %%%===================================================================
 
--module(ekka_sup).
+-module(ekka_locker_SUITE).
 
--behaviour(supervisor).
+-include_lib("eunit/include/eunit.hrl").
 
--export([start_link/0]).
+-compile(export_all).
 
--export([init/1]).
+all() ->
+    [{group, locker}].
 
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+groups() ->
+    [{locker, [], [aquire_local]}].
 
-init([]) ->
-    Childs = [child(ekka_cluster_sup, supervisor),
-              child(ekka_membership, worker),
-              child(ekka_node_monitor, worker),
-              child(ekka_locker_sup, supervisor)],
-    {ok, {{one_for_all, 0, 3600}, Childs}}.
+aquire_local(_Conf) ->
+    Node = node(),
+    {ok, Locker} = ekka_locker:start_link(test_locker),
+    ?assertEqual({true, [Node]}, ekka_locker:aquire(test_locker, resource1)),
+    ?assertEqual({true, [Node]}, ekka_locker:aquire(test_locker, resource1)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(test_locker, resource1)),
+    ?assertEqual({false, [Node]}, ekka_locker:release(test_locker, resource1)),
+    ekka_locker:stop(Locker).
 
-child(Mod, Type) ->
-    {Mod, {Mod, start_link, []}, permanent, 5000, Type, [Mod]}.

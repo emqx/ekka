@@ -1,5 +1,5 @@
 %%%===================================================================
-%%% Copyright (c) 2013-2018 EMQ Enterprise, Inc. All Rights Reserved.
+%%% Copyright (c) 2013-2018 EMQ Inc. All Rights Reserved.
 %%%
 %%% Licensed under the Apache License, Version 2.0 (the "License");
 %%% you may not use this file except in compliance with the License.
@@ -162,7 +162,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 handshake(Cookie) ->
-    {handshake, node(), ekka:env(cluster_name, ekka), Cookie}.
+    {handshake, node(), ekka:env(cluster_name, undefined), Cookie}.
 
 udp_open([], _Options) ->
     {error, eaddrinuse};

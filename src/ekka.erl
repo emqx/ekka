@@ -1,5 +1,5 @@
 %%%===================================================================
-%%% Copyright (c) 2013-2018 EMQ Enterprise, Inc. All Rights Reserved.
+%%% Copyright (c) 2013-2018 EMQ Inc. All Rights Reserved.
 %%%
 %%% Licensed under the Apache License, Version 2.0 (the "License");
 %%% you may not use this file except in compliance with the License.
@@ -31,13 +31,18 @@
 -export([is_aliving/1, is_running/2]).
 
 %% Cluster API
+-export([cluster_name/0]).
 -export([join/1, leave/0, force_leave/1]).
 
 %% Membership
--export([local_member/0, members/0, is_member/1, nodelist/0, status/0]).
+-export([nodelist/0, nodelist/1]).
+-export([local_member/0, members/0, is_member/1, status/0]).
 
 %% Monitor membership events
 -export([monitor/1, unmonitor/1]).
+
+%% Locker API
+-export([lock/1, lock/2, lock/3, unlock/1, unlock/2]).
 
 %%--------------------------------------------------------------------
 %% Start/Stop
@@ -84,7 +89,8 @@ autocluster(App, Fun) ->
             spawn(fun() ->
                     group_leader(whereis(init), self()),
                     wait_application_ready(App, 5),
-                    try ekka_autocluster:discover_and_join(Fun)
+                    try
+                        ekka_autocluster:discover_and_join(Fun)
                     catch
                         _:Error -> lager:error("Autocluster exception: ~p", [Error])
                     end,
@@ -122,10 +128,13 @@ local_member() ->
 is_member(Node) ->
     ekka_membership:is_member(Node).
 
-%% Node List
+%% Node list
 -spec(nodelist() -> list(node())).
 nodelist() ->
     ekka_membership:nodelist().
+
+nodelist(Status) ->
+    ekka_membership:nodelist(Status).
 
 %% Status of the cluster
 status() ->
@@ -148,6 +157,10 @@ is_running(Node, App) ->
 %%--------------------------------------------------------------------
 %% Cluster API
 %%--------------------------------------------------------------------
+
+-spec(cluster_name() -> cluster()).
+cluster_name() ->
+    env(cluster_name, undefined).
 
 %% @doc Join the cluster
 -spec(join(node()) -> ok | ignore | {error, any()}).
@@ -175,4 +188,30 @@ monitor(membership) ->
 
 unmonitor(membership) ->
     ekka_membership:monitor(false).
+
+%%--------------------------------------------------------------------
+%% Locker API
+%%--------------------------------------------------------------------
+
+-spec(lock(ekka_locker:resource()) -> ekka_locker:lock_result()).
+lock(Resource) ->
+    ekka_locker:aquire(Resource).
+
+-spec(lock(ekka_locker:resource(), ekka_locker:lock_type())
+      -> ekka_locker:lock_result()).
+lock(Resource, Type) ->
+    ekka_locker:aquire(ekka_locker, Resource, Type).
+
+-spec(lock(ekka_locker:resource(), ekka_locker:lock_type(), ekka_locker:piggyback())
+      -> ekka_locker:lock_result()).
+lock(Resource, Type, Piggyback) ->
+    ekka_locker:aquire(ekka_locker, Resource, Type, Piggyback).
+
+-spec(unlock(ekka_locker:resource()) -> boolean()).
+unlock(Resource) ->
+    ekka_locker:release(Resource).
+
+-spec(unlock(ekka_locker:resource(), ekka_locker:lock_type()) -> boolean()).
+unlock(Resource, Type) ->
+    ekka_locker:release(ekka_locker, Resource, Type).
 

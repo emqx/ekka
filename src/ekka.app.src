@@ -8,5 +8,5 @@
                 {cluster_discovery, {manual, []}}
               ]},
               {registered,[ekka_sup,ekka_membership,ekka_cluster_sup,ekka_node_monitor]},
-              {applications,[kernel,stdlib,mnesia,inets,lager]},
+              {applications,[kernel,stdlib,mnesia,inets]},
               {mod,{ekka_app,[]}}]}.

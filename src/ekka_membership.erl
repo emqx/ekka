@@ -1,5 +1,5 @@
 %%%===================================================================
-%%% Copyright (c) 2013-2018 EMQ Enterprise, Inc. All Rights Reserved.
+%%% Copyright (c) 2013-2018 EMQ Inc. All Rights Reserved.
 %%%
 %%% Licensed under the Apache License, Version 2.0 (the "License");
 %%% you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@
 -export([local_member/0, lookup_member/1, members/0, members/1,
          is_member/1, oldest/1]).
 
--export([leader/0, nodelist/0, coordinator/0, coordinator/1]).
+-export([leader/0, nodelist/0, nodelist/1, coordinator/0, coordinator/1]).
 
 -export([is_all_alive/0]).
 
@@ -107,6 +107,10 @@ compare(M1, M2) ->
 nodelist() ->
     [Node || #member{node = Node} <- members()].
 
+-spec(nodelist(up | down) -> [node()]).
+nodelist(Status) ->
+    [Node || #member{node = Node} <- members(Status)].
+
 -spec(is_all_alive() -> boolean()).
 is_all_alive() ->
     length(ekka_mnesia:cluster_nodes(all) -- [node() | nodes()]) == 0.
@@ -176,14 +180,17 @@ init([]) ->
                           true  -> running;
                           false -> stopped
                       end,
-    LocalMember = #member{node = node(), guid = ekka_guid:gen(),
-                          status = up, mnesia = IsMnesiaRunning,
-                          ltime = erlang:timestamp()},
+    LocalMember = with_hash(#member{node = node(), guid = ekka_guid:gen(),
+                                    status = up, mnesia = IsMnesiaRunning,
+                                    ltime = erlang:timestamp()}),
     ets:insert(membership, LocalMember),
     lists:foreach(fun(Node) ->
                       spawn(?MODULE, ping, [Node, LocalMember])
                   end, ekka_mnesia:cluster_nodes(all) -- [node()]),
     {ok, #state{monitors = [], events = []}}.
+
+with_hash(Member = #member{node = Node, guid = Guid}) ->
+    Member#member{hash = erlang:phash2({Node, Guid}, trunc(math:pow(2, 32) - 1))}.
 
 handle_call({monitor, Pid, true}, _From, State = #state{monitors = Monitors}) ->
     case lists:keymember(Pid, 1, Monitors) of
