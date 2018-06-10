@@ -60,13 +60,13 @@ discover(Options) ->
 
 lock(_Options) ->
     ignore.
-    
+
 unlock(_Options) ->
     ignore.
 
 register(_Options) ->
     ignore.
-    
+
 unregister(_Options) ->
     ignore.
 
@@ -166,7 +166,7 @@ handshake(Cookie) ->
 
 udp_open([], _Options) ->
     {error, eaddrinuse};
-    
+
 udp_open([Port|Ports], Options) ->
     case gen_udp:open(Port, [binary, {active, 10}, {reuseaddr, true} | Options]) of
         {ok, Sock} ->

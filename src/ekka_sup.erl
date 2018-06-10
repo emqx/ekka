@@ -32,5 +32,19 @@ init([]) ->
               child(ekka_locker_sup, supervisor)],
     {ok, {{one_for_all, 0, 3600}, Childs}}.
 
-child(Mod, Type) ->
-    {Mod, {Mod, start_link, []}, permanent, 5000, Type, [Mod]}.
+child(Mod, worker) ->
+    #{id       => Mod,
+      start    => {Mod, start_link, []},
+      restart  => permanent,
+      shutdown => 5000,
+      type     => worker,
+      modules  => [Mod]};
+
+child(Mod, supervisor) ->
+     #{id       => Mod,
+       start    => {Mod, start_link, []},
+       restart  => permanent,
+       shutdown => infinity,
+       type     => supervisor,
+       modules  => [Mod]}.
+

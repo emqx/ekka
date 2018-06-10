@@ -159,7 +159,7 @@ cluster_status() ->
 -spec(cluster_status(node()) -> running | stopped | false).
 cluster_status(Node) ->
     case is_node_in_cluster(Node) of
-        true  -> 
+        true  ->
             case lists:member(Node, running_nodes()) of
                 true  -> running;
                 false -> stopped
@@ -279,7 +279,7 @@ wait_for(start) ->
         stopping -> {error, mnesia_unexpectedly_stopping};
         starting -> timer:sleep(1000), wait_for(start)
     end;
- 
+
 wait_for(stop) ->
     case mnesia:system_info(is_running) of
         no       -> ok;

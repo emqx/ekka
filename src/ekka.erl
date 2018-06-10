@@ -84,29 +84,10 @@ autocluster() ->
     autocluster(ekka, fun() -> ok end).
 
 autocluster(App, Fun) ->
-    case ekka_autocluster:aquire_lock() of
-        ok ->
-            spawn(fun() ->
-                    group_leader(whereis(init), self()),
-                    wait_application_ready(App, 5),
-                    try
-                        ekka_autocluster:discover_and_join(Fun)
-                    catch
-                        _:Error -> lager:error("Autocluster exception: ~p", [Error])
-                    end,
-                    ekka_autocluster:release_lock()
-                  end);
-        failed ->
-            ignore
-    end.
-
-wait_application_ready(_App, 0) ->
-    timeout;
-wait_application_ready(App, Retries) ->
-    case ekka_node:is_running(App) of
-        true  -> ok;
-        false -> timer:sleep(1000),
-                 wait_application_ready(App, Retries - 1)
+    case env(cluster_enable, true)
+         andalso ekka_autocluster:enabled() of
+        true  -> ekka_autocluster:run(App, Fun);
+        false -> ignore
     end.
 
 %%--------------------------------------------------------------------
