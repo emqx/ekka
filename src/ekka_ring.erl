@@ -48,7 +48,7 @@ find_nodes(Key) ->
 find_nodes(Key, Count) ->
     find_nodes(Key, Count, ring()).
 
-find_nodes(Key, Count, Ring) -> 
+find_nodes(Key, Count, Ring) ->
     [N || #member{node = N} <- next_members(phash(Key), Count, Ring)].
 
 next_members(_Hash, Count, Ring) when Count >= length(Ring) ->

@@ -8,6 +8,12 @@
   {datatype, atom}
 ]}.
 
+%% @doc Cluster enable
+{mapping, "cluster.enable", "ekka.cluster_enable", [
+  {default, on},
+  {datatype, flag}
+]}.
+
 %% @doc Cluster discovery
 {mapping, "cluster.discovery", "ekka.cluster_discovery", [
   {default, manual},
