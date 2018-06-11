@@ -20,14 +20,15 @@
 
 -export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
 
-%% Ttl callback
+%% TTL callback
 -export([etcd_set_node_key/1]).
 
--define(LOG(Level, Format, Args), lager:Level("Ekka(etcd): " ++ Format, Args)).
+-define(LOG(Level, Format, Args),
+        lager:Level("Ekka(etcd): " ++ Format, Args)).
 
-%%%===================================================================
-%%% ekka_cluster_strategy Callbacks
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% ekka_cluster_strategy callbacks
+%%--------------------------------------------------------------------
 
 discover(Options) ->
     case etcd_get_nodes_key(Options) of
@@ -84,9 +85,9 @@ unregister(Options) ->
             {error, Reason}
     end.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% Internal functions
+%%--------------------------------------------------------------------
 
 extract_nodes([]) ->
     [];
@@ -140,7 +141,6 @@ etcd_set(Servers, Key, Params) ->
 
 etcd_del(Servers, Key, Params) ->
     ekka_httpc:delete(rand_addr(Servers), Key, Params).
-
 
 nodes_path(Options) ->
     with_prefix(config(prefix, Options), "/nodes").

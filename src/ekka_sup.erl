@@ -26,11 +26,11 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Childs = [child(ekka_cluster_sup, supervisor),
-              child(ekka_membership, worker),
-              child(ekka_node_monitor, worker),
-              child(ekka_locker_sup, supervisor)],
-    {ok, {{one_for_all, 0, 3600}, Childs}}.
+    {ok, {{one_for_all, 0, 3600},
+          [child(ekka_cluster_sup, supervisor),
+           child(ekka_membership, worker),
+           child(ekka_node_monitor, worker),
+           child(ekka_locker_sup, supervisor)]}}.
 
 child(Mod, worker) ->
     #{id       => Mod,

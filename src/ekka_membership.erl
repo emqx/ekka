@@ -53,9 +53,9 @@
 
 -define(SERVER, ?MODULE).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% API
+%%--------------------------------------------------------------------
 
 -spec(start_link() -> {ok, pid()} | ignore | {error, any()}).
 start_link() ->
@@ -233,7 +233,7 @@ handle_cast({node_up, Node}, State) ->
             Member = case lookup(Node) of
                        [M] -> M#member{status = up};
                        []  -> #member{node = Node, status = up}
-                     end, 
+                     end,
             insert(Member#member{mnesia = ekka_mnesia:cluster_status(Node)});
         false -> ignore
     end,
@@ -335,9 +335,9 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% Internal functions
+%%--------------------------------------------------------------------
 
 lookup(Node) ->
     ets:lookup(membership, Node).

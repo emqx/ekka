@@ -24,32 +24,30 @@
 %% Supervisor callbacks
 -export([init/1]).
 
--define(SUP, ?MODULE).
-
-%%%===================================================================
-%%% API functions
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% API functions
+%%--------------------------------------------------------------------
 
 -spec(start_link() -> {ok, pid()} | ignore | {error, term()}).
 start_link() ->
-    supervisor:start_link({local, ?SUP}, ?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 start_child(M, Args) ->
-    supervisor:start_child(?SUP, child_spec(M, Args)).
+    supervisor:start_child(?MODULE, child_spec(M, Args)).
 
 child_spec(M, Args) ->
     {M, {M, start_link, Args}, permanent, 5000, worker, [M]}.
 
 stop_child(M) ->
-    case supervisor:terminate_child(?SUP, M) of
-        ok -> supervisor:delete_child(?SUP, M);
+    case supervisor:terminate_child(?MODULE, M) of
+        ok -> supervisor:delete_child(?MODULE, M);
         {error, not_found} -> ok;
         Error -> Error
     end.
 
-%%%===================================================================
-%%% Supervisor callbacks
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% Supervisor callbacks
+%%--------------------------------------------------------------------
 
 init([]) ->
     {ok, {{one_for_one, 10, 100}, []}}.

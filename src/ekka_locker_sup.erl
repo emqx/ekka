@@ -26,7 +26,11 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Locker = {ekka_locker, {ekka_locker, start_link, []},
-              permanent, 2000, worker, [ekka_locker]},
+    Locker = #{id       => ekka_locker,
+               start    => {ekka_locker, start_link, []},
+               restart  => permanent,
+               shutdown => 5000,
+               type     => worker,
+               modules  => [ekka_locker]},
     {ok, {{one_for_one, 100, 3600}, [Locker]}}.
 

@@ -46,9 +46,9 @@
 -define(LOG(Level, Format, Args),
         lager:Level("Ekka(Mcast): " ++ Format, Args)).
 
-%%%===================================================================
-%%% ekka_cluster_strategy Callbacks
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% ekka_cluster_strategy callbacks
+%%--------------------------------------------------------------------
 
 discover(Options) ->
     Server = case whereis(?SERVER) of
@@ -79,9 +79,9 @@ ensure_started(Options) ->
 start_link(Options) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
 
-%%%===================================================================
-%%% gen_server Callbacks
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% gen_server callbacks
+%%--------------------------------------------------------------------
 
 init(Options) ->
     Addr  = get_value(addr, Options),
@@ -156,9 +156,9 @@ terminate(_Reason, #state{sock = Sock}) ->
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% Internal functions
+%%--------------------------------------------------------------------
 
 handshake(Cookie) ->
     {handshake, node(), ekka:env(cluster_name, undefined), Cookie}.
