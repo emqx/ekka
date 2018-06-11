@@ -17,6 +17,7 @@
 -module(ekka_test).
 
 -compile(export_all).
+-compile(nowarn_export_all).
 
 start_slave(node, Node) ->
     {ok, N} = slave:start(host(), Node, ebin_path()),

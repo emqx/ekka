@@ -17,11 +17,10 @@
 -module(ekka_autocluster_SUITE).
 
 -compile(export_all).
+-compile(nowarn_export_all).
 
 -include("ekka.hrl").
-
 -include_lib("eunit/include/eunit.hrl").
-
 -include_lib("common_test/include/ct.hrl").
 
 -define(NODES, ['ekka_ct@127.0.0.1', 'ekka_ct1@127.0.0.1', 'ekka_ct2@127.0.0.1']).
