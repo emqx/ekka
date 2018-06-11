@@ -175,7 +175,7 @@ release(Name, Resource) ->
 
 -spec(release(atom(), resource(), lock_type()) -> lock_result()).
 release(Name, Resource, local) ->
-    {release_lock(Name, lock_obj(Resource)), [node()]};
+    release_lock(Name, lock_obj(Resource));
 release(Name, Resource, leader) ->
     Leader = ekka_membership:leader(),
     case rpc:call(Leader, ?MODULE, release_lock, [Name, lock_obj(Resource)]) of
