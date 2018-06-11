@@ -25,7 +25,7 @@
 -export([callback/1, callback/2]).
 
 %% Autocluster
--export([autocluster/0, autocluster/2]).
+-export([autocluster/0, autocluster/1]).
 
 %% Node API
 -export([is_aliving/1, is_running/2]).
@@ -81,12 +81,12 @@ callback(Name, Fun) ->
 %%--------------------------------------------------------------------
 
 autocluster() ->
-    autocluster(ekka, fun() -> ok end).
+    autocluster(ekka).
 
-autocluster(App, Fun) ->
+autocluster(App) ->
     case env(cluster_enable, true)
          andalso ekka_autocluster:enabled() of
-        true  -> ekka_autocluster:run(App, Fun);
+        true  -> ekka_autocluster:run(App);
         false -> ignore
     end.
 
@@ -161,8 +161,6 @@ force_leave(Node) ->
 %%--------------------------------------------------------------------
 %% Monitor membership events
 %%--------------------------------------------------------------------
-
-%%TODO:
 
 monitor(membership) ->
     ekka_membership:monitor(true).

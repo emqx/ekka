@@ -18,10 +18,9 @@
 
 -include("ekka.hrl").
 
--export([enabled/0, run/2, unregister_node/0]).
+-export([enabled/0, run/1, unregister_node/0]).
 -export([aquire_lock/1, release_lock/1]).
 
--define(RETRY_INTERVAL, 15000).
 -define(LOG(Level, Format, Args),
         lager:Level("Ekka(AutoCluster): " ++ Format, Args)).
 
@@ -34,16 +33,15 @@ enabled() ->
         undefined -> false
     end.
 
--spec(run(atom(), fun() | mfa()) -> any()).
-run(App, Fun) ->
+-spec(run(atom()) -> any()).
+run(App) ->
     case aquire_lock(App) of
         ok ->
             spawn(fun() ->
                       group_leader(whereis(init), self()),
                       wait_application_ready(App, 10),
                       try
-                          discover_and_join(),
-                          run_callback(Fun)
+                          discover_and_join()
                       catch
                           _:Error ->
                               lager:error("Autocluster error: ~p~n~p",
@@ -51,13 +49,7 @@ run(App, Fun) ->
                       after
                           release_lock(App)
                       end,
-                      %% Check if the node joined cluster?
-                      case ekka_mnesia:is_node_in_cluster() of
-                          true  -> ok;
-                          false -> ?LOG(info, "Run autocluster again...", []),
-                                   timer:sleep(?RETRY_INTERVAL),
-                                   run(App, Fun)
-                      end
+                      maybe_run_again(App)
                   end);
         failed -> ignore
     end.
@@ -69,6 +61,14 @@ wait_application_ready(App, Retries) ->
         true  -> ok;
         false -> timer:sleep(1000),
                  wait_application_ready(App, Retries - 1)
+    end.
+
+maybe_run_again(App) ->
+    %% Check if the node joined cluster?
+    case ekka_mnesia:is_node_in_cluster() of
+        true  -> ok;
+        false -> timer:sleep(15000),
+                 run(App)
     end.
 
 -spec(discover_and_join() -> any()).
@@ -155,11 +155,6 @@ find_oldest_node(Nodes) ->
        {_Views, BadNodes} ->
            ?LOG(error, "Bad nodes found: ~p", [BadNodes]), false
    end.
-
-run_callback(Fun) when is_function(Fun) ->
-    Fun();
-run_callback({M, F, A}) ->
-    erlang:apply(M, F, A).
 
 log_error(Format, {error, Reason}) ->
     ?LOG(error, Format ++ " error: ~p", [Reason]);

@@ -22,12 +22,12 @@
 
 -import(proplists, [get_value/2, get_value/3]).
 
-%% Cluster strategy Callbacks
+%% Cluster strategy callbacks
 -export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
 
 -export([start_link/1]).
 
-%% gen_server Callbacks
+%% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -43,7 +43,6 @@
 -record(state, {sock, addr, ports, cookie, seen = []}).
 
 -define(SERVER, ?MODULE).
-
 -define(LOG(Level, Format, Args),
         lager:Level("Ekka(Mcast): " ++ Format, Args)).
 
