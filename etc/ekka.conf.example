@@ -3,10 +3,16 @@
 ##--------------------------------------------------------------------
 
 ## Cluster name.
+##
+## Value: String
 cluster.name = ekka
 
-## Cluster enabled?
-cluster.enable = true
+## Enable cluster mode.
+##
+## Value: on | off
+##
+## Default: on
+cluster.enable = on
 
 ## Cluster auto-discovery strategy.
 ##
