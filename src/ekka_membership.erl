@@ -175,7 +175,7 @@ call(Req) ->
 %%%===================================================================
 
 init([]) ->
-    ets:new(membership, [ordered_set, protected, named_table, {keypos, 2}]),
+    _ = ets:new(membership, [ordered_set, protected, named_table, {keypos, 2}]),
     IsMnesiaRunning = case lists:member(node(), ekka_mnesia:running_nodes()) of
                           true  -> running;
                           false -> stopped
@@ -183,7 +183,7 @@ init([]) ->
     LocalMember = with_hash(#member{node = node(), guid = ekka_guid:gen(),
                                     status = up, mnesia = IsMnesiaRunning,
                                     ltime = erlang:timestamp()}),
-    ets:insert(membership, LocalMember),
+    true = ets:insert(membership, LocalMember),
     lists:foreach(fun(Node) ->
                       spawn(?MODULE, ping, [Node, LocalMember])
                   end, ekka_mnesia:cluster_nodes(all) -- [node()]),

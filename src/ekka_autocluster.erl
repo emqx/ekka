@@ -44,8 +44,7 @@ run(App) ->
                           discover_and_join()
                       catch
                           _:Error ->
-                              lager:error("Autocluster error: ~p~n~p",
-                                          [Error, erlang:get_stacktrace()])
+                              ?LOG(error, "Discover error: ~p~n~p", [Error, erlang:get_stacktrace()])
                       after
                           release_lock(App)
                       end,
@@ -146,14 +145,19 @@ join_with(Node) when Node =:= node() ->
 join_with(Node) ->
     ekka_cluster:join(Node).
 
-%%find_oldest_node([Node]) ->
-%%    Node;
+find_oldest_node([Node]) ->
+    Node;
 find_oldest_node(Nodes) ->
-   case rpc:multicall(Nodes, ekka_membership, local_member, []) of
-       {Members, []} ->
-           Member = ekka_membership:oldest(Members), Member#member.node;
-       {_Views, BadNodes} ->
-           ?LOG(error, "Bad nodes found: ~p", [BadNodes]), false
+    case rpc:multicall(Nodes, ekka_membership, local_member, []) of
+        {ResL, []} ->
+            case [M || M <- ResL, is_record(M, member)] of
+                [] -> ?LOG(error, "Bad members found on nodes ~p: ~p", [Nodes, ResL]),
+                      false;
+                Members ->
+                    (ekka_membership:oldest(Members))#member.node
+            end;
+        {ResL, BadNodes} ->
+            ?LOG(error, "Bad nodes found: ~p, ResL: ", [BadNodes, ResL]), false
    end.
 
 log_error(Format, {error, Reason}) ->
