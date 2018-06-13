@@ -69,8 +69,8 @@ strategy_options(static) ->
     [{seeds, ?NODES}];
 
 strategy_options(mcast) ->
-    [{addr, {239,192,0,1}}, {ports, [4369,4370,4371]},
-     {iface, {0,0,0,0}}, {ttl,1}, {loop,true}];
+    [{addr, {239,192,0,1}}, {ports, [4369,4370,4371,4372,4373]},
+     {iface, {0,0,0,0}}, {ttl,255}, {loop,true}];
 
 strategy_options(dns) ->
     [{name,"localhost"},{app,"ekka_ct"}].
