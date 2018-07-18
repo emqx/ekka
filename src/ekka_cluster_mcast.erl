@@ -120,7 +120,7 @@ handle_info({reply, discover, From}, State = #state{seen = Seen}) ->
 
 handle_info({udp, Sock, Ip, InPort, Data},
             State = #state{sock = Sock, cookie = Cookie, seen = Seen}) ->
-    io:format("Mcast Handshake: ~p~n", [binary_to_term(Data)]),
+    %%io:format("Mcast Handshake: ~p~n", [binary_to_term(Data)]),
     inet:setopts(Sock, [{active, 1}]),
     Cluster = ekka:env(cluster_name, ekka),
     {noreply, try binary_to_term(Data) of
