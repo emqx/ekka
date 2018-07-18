@@ -1,18 +1,16 @@
-%%%===================================================================
-%%% Copyright (c) 2013-2018 EMQ Inc. All Rights Reserved.
-%%%
-%%% Licensed under the Apache License, Version 2.0 (the "License");
-%%% you may not use this file except in compliance with the License.
-%%% You may obtain a copy of the License at
-%%%
-%%%     http://www.apache.org/licenses/LICENSE-2.0
-%%%
-%%% Unless required by applicable law or agreed to in writing, software
-%%% distributed under the License is distributed on an "AS IS" BASIS,
-%%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%%% See the License for the specific language governing permissions and
-%%% limitations under the License.
-%%%===================================================================
+%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 
 -module(ekka_autocluster).
 
@@ -21,16 +19,14 @@
 -export([enabled/0, run/1, unregister_node/0]).
 -export([aquire_lock/1, release_lock/1]).
 
--define(LOG(Level, Format, Args),
-        lager:Level("Ekka(AutoCluster): " ++ Format, Args)).
+-define(LOG(Level, Format, Args), lager:Level("Ekka(AutoCluster): " ++ Format, Args)).
 
 -spec(enabled() -> boolean()).
 enabled() ->
     case ekka:env(cluster_discovery) of
-        {ok, {manual, _}} ->
-            false;
-        {ok, _}   -> true;
-        undefined -> false
+        {ok, {manual, _}} -> false;
+        {ok, _Strategy}   -> true;
+        undefined         -> false
     end.
 
 -spec(run(atom()) -> any()).
@@ -43,8 +39,8 @@ run(App) ->
                       try
                           discover_and_join()
                       catch
-                          _:Error ->
-                              ?LOG(error, "Discover error: ~p~n~p", [Error, erlang:get_stacktrace()])
+                          _:Error:Stacktrace ->
+                              ?LOG(error, "Discover error: ~p~n~p", [Error, Stacktrace])
                       after
                           release_lock(App)
                       end,
