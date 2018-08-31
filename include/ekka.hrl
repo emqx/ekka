@@ -6,7 +6,7 @@
 -type(member_address() :: {inet:ip_address(), inet:port_number()}).
 
 -record(member, { node   :: node(),
-                  addr   :: member_address(),
+                  addr   :: undefined | member_address(),
                   guid   :: ekka_guid:guid(),
                   hash   :: pos_integer(),
                   status :: member_status(),
@@ -14,4 +14,3 @@
                   ltime  :: erlang:timestamp() }).
 
 -type(member() :: #member{}).
-
