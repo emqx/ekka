@@ -188,11 +188,10 @@ lock(Resource, Type) ->
 lock(Resource, Type, Piggyback) ->
     ekka_locker:aquire(ekka_locker, Resource, Type, Piggyback).
 
--spec(unlock(ekka_locker:resource()) -> boolean()).
+-spec(unlock(ekka_locker:resource()) -> ekka_locker:lock_result()).
 unlock(Resource) ->
     ekka_locker:release(Resource).
 
--spec(unlock(ekka_locker:resource(), ekka_locker:lock_type()) -> boolean()).
+-spec(unlock(ekka_locker:resource(), ekka_locker:lock_type()) -> ekka_locker:lock_result()).
 unlock(Resource, Type) ->
     ekka_locker:release(ekka_locker, Resource, Type).
-
