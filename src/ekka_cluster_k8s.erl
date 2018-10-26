@@ -23,7 +23,7 @@
 
 -define(SERVICE_ACCOUNT_PATH, "/var/run/secrets/kubernetes.io/serviceaccount/").
 
--define(LOG(Level, Format, Args), lager:Level("Ekka(k8s): " ++ Format, Args)).
+-define(LOG(Level, Format, Args), logger:Level("Ekka(k8s): " ++ Format, Args)).
 
 %%--------------------------------------------------------------------
 %% ekka_cluster_strategy callbacks

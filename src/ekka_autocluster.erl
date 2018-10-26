@@ -19,7 +19,7 @@
 -export([enabled/0, run/1, unregister_node/0]).
 -export([aquire_lock/1, release_lock/1]).
 
--define(LOG(Level, Format, Args), lager:Level("Ekka(AutoCluster): " ++ Format, Args)).
+-define(LOG(Level, Format, Args), logger:Level("Ekka(AutoCluster): " ++ Format, Args)).
 
 -spec(enabled() -> boolean()).
 enabled() ->

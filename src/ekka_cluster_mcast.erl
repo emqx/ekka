@@ -42,7 +42,7 @@
 
 -define(SERVER, ?MODULE).
 -define(LOG(Level, Format, Args),
-        lager:Level("Ekka(Mcast): " ++ Format, Args)).
+        logger:Level("Ekka(Mcast): " ++ Format, Args)).
 
 %%--------------------------------------------------------------------
 %% ekka_cluster_strategy callbacks

@@ -40,7 +40,7 @@ handle_event(timeout, _Timeout, alive, State = #state{ttl = Ttl, mfa = {M, F, A}
     try
         erlang:apply(M, F, A)
     catch _:Error:Stacktrace ->
-        lager:error("TTL error: ~p Statcktrace:~n~p", [Error, Stacktrace])
+        logger:error("TTL error: ~p Statcktrace:~n~p", [Error, Stacktrace])
     end,
     {next_state, alive, State, Ttl div 2}.
 

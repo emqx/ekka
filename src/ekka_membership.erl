@@ -47,7 +47,7 @@
 -record(state, {monitors, events}).
 
 -define(LOG(Level, Format, Args),
-        lager:Level("Ekka(Membership): " ++ Format, Args)).
+        logger:Level("Ekka(Membership): " ++ Format, Args)).
 
 -define(SERVER, ?MODULE).
 
