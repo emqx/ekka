@@ -21,7 +21,7 @@
 %% TTL callback
 -export([etcd_set_node_key/1]).
 
--define(LOG(Level, Format, Args), lager:Level("Ekka(etcd): " ++ Format, Args)).
+-define(LOG(Level, Format, Args), logger:Level("Ekka(etcd): " ++ Format, Args)).
 
 %%------------------------------------------------------------------------------
 %% ekka_cluster_strategy callbacks

@@ -31,7 +31,7 @@
 -record(state, {partitions = [], heartbeat, autoheal, autoclean}).
 
 -define(SERVER, ?MODULE).
--define(LOG(Level, Format, Args), lager:Level("Ekka(Monitor): " ++ Format, Args)).
+-define(LOG(Level, Format, Args), logger:Level("Ekka(Monitor): " ++ Format, Args)).
 
 %% @doc Start the node monitor
 -spec(start_link() -> {ok, pid()} | ignore | {error, term()}).
