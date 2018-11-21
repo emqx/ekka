@@ -111,19 +111,13 @@ aquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
                  Name, lock_obj(Resource), Piggyback).
 
 aquire_locks(Nodes, Name, LockObj, Piggyback) ->
-    case lists:member(node(), Nodes)
-         andalso check_local(Name, LockObj) of
-        true ->
-            {ResL, _BadNodes}
-                = rpc:multicall(Nodes, ?MODULE, aquire_lock, [Name, LockObj, Piggyback]),
-            case merge_results(ResL) of
-                Res = {true, _}  -> Res;
-                Res = {false, _} ->
-                    rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
-                    Res
-            end;
-        false ->
-            {false, [node()]}
+    {ResL, _BadNodes}
+        = rpc:multicall(Nodes, ?MODULE, aquire_lock, [Name, LockObj, Piggyback]),
+    case merge_results(ResL) of
+        Res = {true, _}  -> Res;
+        Res = {false, _} ->
+            rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
+            Res
     end.
 
 aquire_lock(Name, LockObj, Piggyback) ->
