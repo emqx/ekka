@@ -25,13 +25,13 @@ all() ->
     [{group, locker}].
 
 groups() ->
-    [{locker, [], [aquire_local]}].
+    [{locker, [], [acquire_local]}].
 
-aquire_local(_Conf) ->
+acquire_local(_Conf) ->
     Node = node(),
     {ok, Locker} = ekka_locker:start_link(test_locker),
-    ?assertEqual({true, [Node]}, ekka_locker:aquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:aquire(test_locker, resource1)),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
     ?assertEqual({true, [Node]}, ekka_locker:release(test_locker, resource1)),
     ?assertEqual({false, [Node]}, ekka_locker:release(test_locker, resource1)),
     ekka_locker:stop(Locker).

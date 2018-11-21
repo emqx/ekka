@@ -21,11 +21,11 @@
 %% for test cases
 -export([stop/0, stop/1]).
 
--export([aquire/1, aquire/2, aquire/3, aquire/4]).
+-export([acquire/1, acquire/2, acquire/3, acquire/4]).
 -export([release/1, release/2, release/3]).
 
 %% for rpc call
--export([aquire_lock/2, aquire_lock/3, release_lock/2]).
+-export([acquire_lock/2, acquire_lock/3, release_lock/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -79,43 +79,42 @@ stop() ->
 stop(Name) ->
     gen_server:call(Name, stop).
 
--spec(aquire(resource()) -> {boolean(), [node()]}).
-aquire(Resource) ->
-    aquire(?SERVER, Resource).
+-spec(acquire(resource()) -> {boolean(), [node()]}).
+acquire(Resource) ->
+    acquire(?SERVER, Resource).
 
--spec(aquire(atom(), resource()) -> lock_result()).
-aquire(Name, Resource) when is_atom(Name) ->
-    aquire(Name, Resource, local).
+-spec(acquire(atom(), resource()) -> lock_result()).
+acquire(Name, Resource) when is_atom(Name) ->
+    acquire(Name, Resource, local).
 
--spec(aquire(atom(), resource(), lock_type()) -> lock_result()).
-aquire(Name, Resource, Type) ->
-    aquire(Name, Resource, Type, undefined).
+-spec(acquire(atom(), resource(), lock_type()) -> lock_result()).
+acquire(Name, Resource, Type) ->
+    acquire(Name, Resource, Type, undefined).
 
--spec(aquire(atom(), resource(), lock_type(), piggyback()) -> lock_result()).
-aquire(Name, Resource, local, Piggyback) when is_atom(Name) ->
-    aquire_lock(Name, lock_obj(Resource), Piggyback);
-aquire(Name, Resource, leader, Piggyback) when is_atom(Name)->
+-spec(acquire(atom(), resource(), lock_type(), piggyback()) -> lock_result()).
+acquire(Name, Resource, local, Piggyback) when is_atom(Name) ->
+    acquire_lock(Name, lock_obj(Resource), Piggyback);
+acquire(Name, Resource, leader, Piggyback) when is_atom(Name)->
     Leader = ekka_membership:leader(),
-    case rpc:call(Leader, ?MODULE, aquire_lock,
+    case rpc:call(Leader, ?MODULE, acquire_lock,
                   [Name, lock_obj(Resource), Piggyback]) of
         Err = {badrpc, _Reason} ->
             {false, [{Leader, Err}]};
         Res -> Res
     end;
-aquire(Name, Resource, quorum, Piggyback) when is_atom(Name) ->
-    aquire_locks(ekka_ring:find_nodes(Resource),
+acquire(Name, Resource, quorum, Piggyback) when is_atom(Name) ->
+    acquire_locks(ekka_ring:find_nodes(Resource),
                  Name, lock_obj(Resource), Piggyback);
 
-aquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
-    aquire_locks(ekka_membership:nodelist(up),
+acquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
+    acquire_locks(ekka_membership:nodelist(up),
                  Name, lock_obj(Resource), Piggyback).
 
-aquire_locks(Nodes, Name, LockObj, Piggyback) ->
-    case lists:member(node(), Nodes)
-         andalso check_local(Name, LockObj) of
+acquire_locks(Nodes, Name, LockObj, Piggyback) ->
+    case check_local(Name, LockObj) of
         true ->
             {ResL, _BadNodes}
-                = rpc:multicall(Nodes, ?MODULE, aquire_lock, [Name, LockObj, Piggyback]),
+                = rpc:multicall(Nodes, ?MODULE, acquire_lock, [Name, LockObj, Piggyback]),
             case merge_results(ResL) of
                 Res = {true, _}  -> Res;
                 Res = {false, _} ->
@@ -126,10 +125,10 @@ aquire_locks(Nodes, Name, LockObj, Piggyback) ->
             {false, [node()]}
     end.
 
-aquire_lock(Name, LockObj, Piggyback) ->
-    {aquire_lock(Name, LockObj), [with_piggyback(node(), Piggyback)]}.
+acquire_lock(Name, LockObj, Piggyback) ->
+    {acquire_lock(Name, LockObj), [with_piggyback(node(), Piggyback)]}.
 
-aquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
+acquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
     Pos = #lock.counter,
     try ets:update_counter(Name, Resource, [{Pos, 0}, {Pos, 1, 1, 1}]) of
         [0, 1] -> true;
