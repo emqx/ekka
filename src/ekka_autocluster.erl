@@ -17,7 +17,7 @@
 -include("ekka.hrl").
 
 -export([enabled/0, run/1, unregister_node/0]).
--export([aquire_lock/1, release_lock/1]).
+-export([acquire_lock/1, release_lock/1]).
 
 -define(LOG(Level, Format, Args), logger:Level("Ekka(AutoCluster): " ++ Format, Args)).
 
@@ -31,7 +31,7 @@ enabled() ->
 
 -spec(run(atom()) -> any()).
 run(App) ->
-    case aquire_lock(App) of
+    case acquire_lock(App) of
         ok ->
             spawn(fun() ->
                       group_leader(whereis(init), self()),
@@ -89,8 +89,8 @@ unregister_node() ->
           log_error("Unregister", Mod:unregister(Options))
       end).
 
--spec(aquire_lock(atom()) -> ok | failed).
-aquire_lock(App) ->
+-spec(acquire_lock(atom()) -> ok | failed).
+acquire_lock(App) ->
     case application:get_env(App, autocluster_lock) of
         undefined ->
             application:set_env(App, autocluster_lock, true);

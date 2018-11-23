@@ -172,17 +172,17 @@ unmonitor(membership) ->
 
 -spec(lock(ekka_locker:resource()) -> ekka_locker:lock_result()).
 lock(Resource) ->
-    ekka_locker:aquire(Resource).
+    ekka_locker:acquire(Resource).
 
 -spec(lock(ekka_locker:resource(), ekka_locker:lock_type())
       -> ekka_locker:lock_result()).
 lock(Resource, Type) ->
-    ekka_locker:aquire(ekka_locker, Resource, Type).
+    ekka_locker:acquire(ekka_locker, Resource, Type).
 
 -spec(lock(ekka_locker:resource(), ekka_locker:lock_type(), ekka_locker:piggyback())
       -> ekka_locker:lock_result()).
 lock(Resource, Type, Piggyback) ->
-    ekka_locker:aquire(ekka_locker, Resource, Type, Piggyback).
+    ekka_locker:acquire(ekka_locker, Resource, Type, Piggyback).
 
 -spec(unlock(ekka_locker:resource()) -> ekka_locker:lock_result()).
 unlock(Resource) ->
