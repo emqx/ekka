@@ -1,18 +1,16 @@
-%%%===================================================================
-%%% Copyright (c) 2013-2018 EMQ Enterprise, Inc. All Rights Reserved.
-%%%
-%%% Licensed under the Apache License, Version 2.0 (the "License");
-%%% you may not use this file except in compliance with the License.
-%%% You may obtain a copy of the License at
-%%%
-%%%     http://www.apache.org/licenses/LICENSE-2.0
-%%%
-%%% Unless required by applicable law or agreed to in writing, software
-%%% distributed under the License is distributed on an "AS IS" BASIS,
-%%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%%% See the License for the specific language governing permissions and
-%%% limitations under the License.
-%%%===================================================================
+%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 
 -module(ekka_cluster_k8s).
 
@@ -25,11 +23,11 @@
 
 -define(SERVICE_ACCOUNT_PATH, "/var/run/secrets/kubernetes.io/serviceaccount/").
 
--define(LOG(Level, Format, Args), lager:Level("Ekka(k8s): " ++ Format, Args)).
+-define(LOG(Level, Format, Args), logger:Level("Ekka(k8s): " ++ Format, Args)).
 
-%%%===================================================================
-%%% ekka_cluster_strategy Callbacks
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% ekka_cluster_strategy callbacks
+%%--------------------------------------------------------------------
 
 discover(Options) ->
     Server = get_value(apiserver, Options),
@@ -60,9 +58,9 @@ register(_Options) ->
 unregister(_Options) ->
     ignore.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% Internal functions
+%%--------------------------------------------------------------------
 
 k8s_service_get(Server, Service, Namespace) ->
     Headers = [{"Authorization", "Bearer " ++ token()}],

@@ -1,18 +1,16 @@
-%%%===================================================================
-%%% Copyright (c) 2013-2018 EMQ Enterprise, Inc. All Rights Reserved.
-%%%
-%%% Licensed under the Apache License, Version 2.0 (the "License");
-%%% you may not use this file except in compliance with the License.
-%%% You may obtain a copy of the License at
-%%%
-%%%     http://www.apache.org/licenses/LICENSE-2.0
-%%%
-%%% Unless required by applicable law or agreed to in writing, software
-%%% distributed under the License is distributed on an "AS IS" BASIS,
-%%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%%% See the License for the specific language governing permissions and
-%%% limitations under the License.
-%%%===================================================================
+%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 
 -module(ekka_mnesia).
 
@@ -32,9 +30,9 @@
 -export([data_dir/0, copy_schema/1, delete_schema/0, del_schema_copy/1,
          create_table/2, copy_table/1, copy_table/2]).
 
-%%%===================================================================
-%%% Start and init mnesia
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% Start and init mnesia
+%%--------------------------------------------------------------------
 
 %% @doc Start mnesia database
 -spec(start() -> ok).
@@ -126,9 +124,9 @@ del_schema_copy(Node) ->
         {aborted, Reason} -> {error, Reason}
     end.
 
-%%%===================================================================
-%%% Cluster mnesia
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% Cluster mnesia
+%%--------------------------------------------------------------------
 
 %% @doc Join the mnesia cluster
 -spec(join_cluster(node()) -> ok).
@@ -159,7 +157,7 @@ cluster_status() ->
 -spec(cluster_status(node()) -> running | stopped | false).
 cluster_status(Node) ->
     case is_node_in_cluster(Node) of
-        true  -> 
+        true  ->
             case lists:member(Node, running_nodes()) of
                 true  -> running;
                 false -> stopped
@@ -279,7 +277,7 @@ wait_for(start) ->
         stopping -> {error, mnesia_unexpectedly_stopping};
         starting -> timer:sleep(1000), wait_for(start)
     end;
- 
+
 wait_for(stop) ->
     case mnesia:system_info(is_running) of
         no       -> ok;

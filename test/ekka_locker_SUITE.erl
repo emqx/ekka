@@ -12,29 +12,25 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(ekka_lib_SUITE).
+-module(ekka_locker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
 
 -compile(export_all).
 -compile(nowarn_export_all).
 
-all() -> [{group, node}].
+all() ->
+    [{group, locker}].
 
 groups() ->
-    [{node, [], [node_is_aliving, node_parse_name]}].
+    [{locker, [], [acquire_local]}].
 
-%%--------------------------------------------------------------------
-%% ekka_node
-%%--------------------------------------------------------------------
-
-node_is_aliving(_) ->
-    io:format("Node: ~p~n", [node()]),
-    true = ekka_node:is_aliving(node()),
-    false = ekka_node:is_aliving('x@127.0.0.1').
-
-node_parse_name(_) ->
-    'a@127.0.0.1' = ekka_node:parse_name("a@127.0.0.1"),
-    'b@127.0.0.1' = ekka_node:parse_name("b").
-
+acquire_local(_Conf) ->
+    Node = node(),
+    {ok, Locker} = ekka_locker:start_link(test_locker),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(test_locker, resource1)),
+    ?assertEqual({false, [Node]}, ekka_locker:release(test_locker, resource1)),
+    ekka_locker:stop(Locker).
 

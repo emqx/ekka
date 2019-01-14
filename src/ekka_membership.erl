@@ -1,18 +1,16 @@
-%%%===================================================================
-%%% Copyright (c) 2013-2018 EMQ Enterprise, Inc. All Rights Reserved.
-%%%
-%%% Licensed under the Apache License, Version 2.0 (the "License");
-%%% you may not use this file except in compliance with the License.
-%%% You may obtain a copy of the License at
-%%%
-%%%     http://www.apache.org/licenses/LICENSE-2.0
-%%%
-%%% Unless required by applicable law or agreed to in writing, software
-%%% distributed under the License is distributed on an "AS IS" BASIS,
-%%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%%% See the License for the specific language governing permissions and
-%%% limitations under the License.
-%%%===================================================================
+%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 
 -module(ekka_membership).
 
@@ -26,7 +24,7 @@
 -export([local_member/0, lookup_member/1, members/0, members/1,
          is_member/1, oldest/1]).
 
--export([leader/0, nodelist/0, coordinator/0, coordinator/1]).
+-export([leader/0, nodelist/0, nodelist/1, coordinator/0, coordinator/1]).
 
 -export([is_all_alive/0]).
 
@@ -49,13 +47,13 @@
 -record(state, {monitors, events}).
 
 -define(LOG(Level, Format, Args),
-        lager:Level("Ekka(Membership): " ++ Format, Args)).
+        logger:Level("Ekka(Membership): " ++ Format, Args)).
 
 -define(SERVER, ?MODULE).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% API
+%%--------------------------------------------------------------------
 
 -spec(start_link() -> {ok, pid()} | ignore | {error, any()}).
 start_link() ->
@@ -106,6 +104,10 @@ compare(M1, M2) ->
 -spec(nodelist() -> [node()]).
 nodelist() ->
     [Node || #member{node = Node} <- members()].
+
+-spec(nodelist(up | down) -> [node()]).
+nodelist(Status) ->
+    [Node || #member{node = Node} <- members(Status)].
 
 -spec(is_all_alive() -> boolean()).
 is_all_alive() ->
@@ -171,19 +173,22 @@ call(Req) ->
 %%%===================================================================
 
 init([]) ->
-    ets:new(membership, [ordered_set, protected, named_table, {keypos, 2}]),
+    _ = ets:new(membership, [ordered_set, protected, named_table, {keypos, 2}]),
     IsMnesiaRunning = case lists:member(node(), ekka_mnesia:running_nodes()) of
                           true  -> running;
                           false -> stopped
                       end,
-    LocalMember = #member{node = node(), guid = ekka_guid:gen(),
-                          status = up, mnesia = IsMnesiaRunning,
-                          ltime = erlang:timestamp()},
-    ets:insert(membership, LocalMember),
+    LocalMember = with_hash(#member{node = node(), guid = ekka_guid:gen(),
+                                    status = up, mnesia = IsMnesiaRunning,
+                                    ltime = erlang:timestamp()}),
+    true = ets:insert(membership, LocalMember),
     lists:foreach(fun(Node) ->
                       spawn(?MODULE, ping, [Node, LocalMember])
                   end, ekka_mnesia:cluster_nodes(all) -- [node()]),
     {ok, #state{monitors = [], events = []}}.
+
+with_hash(Member = #member{node = Node, guid = Guid}) ->
+    Member#member{hash = erlang:phash2({Node, Guid}, trunc(math:pow(2, 32) - 1))}.
 
 handle_call({monitor, Pid, true}, _From, State = #state{monitors = Monitors}) ->
     case lists:keymember(Pid, 1, Monitors) of
@@ -226,7 +231,7 @@ handle_cast({node_up, Node}, State) ->
             Member = case lookup(Node) of
                        [M] -> M#member{status = up};
                        []  -> #member{node = Node, status = up}
-                     end, 
+                     end,
             insert(Member#member{mnesia = ekka_mnesia:cluster_status(Node)});
         false -> ignore
     end,
@@ -328,9 +333,9 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% Internal functions
+%%--------------------------------------------------------------------
 
 lookup(Node) ->
     ets:lookup(membership, Node).

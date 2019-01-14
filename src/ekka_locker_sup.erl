@@ -12,32 +12,23 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(ekka_cluster_dns).
+-module(ekka_locker_sup).
 
--behaviour(ekka_cluster_strategy).
+-behaviour(supervisor).
 
--import(proplists, [get_value/2]).
+-export([start_link/0]).
 
-%% Cluster strategy Callbacks
--export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
+-export([init/1]).
 
-discover(Options) ->
-    Name = get_value(name, Options),
-    App  = get_value(app, Options),
-    {ok, [node_name(App, IP) || IP <- inet_res:lookup(Name, in, a)]}.
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-node_name(App, IP) ->
-    list_to_atom(App ++ "@" ++ inet_parse:ntoa(IP)).
-
-lock(_Options) ->
-    ignore.
-
-unlock(_Options) ->
-    ignore.
-
-register(_Options) ->
-    ignore.
-
-unregister(_Options) ->
-    ignore.
+init([]) ->
+    Locker = #{id       => ekka_locker,
+               start    => {ekka_locker, start_link, []},
+               restart  => permanent,
+               shutdown => 5000,
+               type     => worker,
+               modules  => [ekka_locker]},
+    {ok, {{one_for_one, 100, 3600}, [Locker]}}.
 

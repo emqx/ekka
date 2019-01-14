@@ -25,6 +25,8 @@
 %% Clustering on k8s
 %% {cluster_discovery, {k8s, [
 %%                       {apiserver, "http://10.110.111.204:8080"},
+%%                       {namespace, "default"},
+%%                       {address_type, ip},
 %%                       {app, ekka}
 %%                     ]}},
 

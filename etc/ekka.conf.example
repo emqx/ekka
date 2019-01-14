@@ -1,10 +1,18 @@
-
 ##--------------------------------------------------------------------
 ## Cluster
 ##--------------------------------------------------------------------
 
 ## Cluster name.
+##
+## Value: String
 cluster.name = ekka
+
+## Enable cluster mode.
+##
+## Value: on | off
+##
+## Default: on
+cluster.enable = on
 
 ## Cluster auto-discovery strategy.
 ##
@@ -122,6 +130,11 @@ cluster.autoclean = 5m
 ## Value: String
 ## cluster.k8s.service_name = ekka
 
+## The name space of k8s
+##
+## Value: String
+## cluster.k8s.namespace = default
+
 ## The address type is used to extract host from k8s service.
 ##
 ## Value: ip | dns
@@ -131,3 +144,4 @@ cluster.autoclean = 5m
 ##
 ## Value: String
 ## cluster.k8s.app_name = ekka
+
