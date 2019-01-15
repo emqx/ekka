@@ -45,6 +45,16 @@ cluster.autoheal = on
 ## Default: 5m
 cluster.autoclean = 5m
 
+## Specify the erlang distributed protocol for the cluster.
+##
+## Value: Enum
+##  - inet_tcp: the default; handles TCP streams with IPv4 addressing.
+##  - inet6_tcp: handles TCP with IPv6 addressing.
+##  - inet_tls: using TLS for Erlang Distribution.
+##
+## vm.args: -proto_dist inet_tcp
+cluster.proto_dist = inet_tcp
+
 ##--------------------------------------------------------------------
 ## Cluster using static node list.
 
