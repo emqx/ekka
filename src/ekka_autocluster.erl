@@ -62,7 +62,7 @@ maybe_run_again(App) ->
     %% Check if the node joined cluster?
     case ekka_mnesia:is_node_in_cluster() of
         true  -> ok;
-        false -> timer:sleep(15000),
+        false -> timer:sleep(5000),
                  run(App)
     end.
 
