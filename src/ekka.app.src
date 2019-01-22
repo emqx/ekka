@@ -1,12 +1,26 @@
-{application,ekka,
-             [{description,"Autocluster and Autoheal for EMQ"},
-              {vsn,"0.5.2"},
-              {modules,[]},
-              {env, [
-                {cluster_autoheal, true},
-                {cluster_autoclean, 300000},
-                {cluster_discovery, {manual, []}}
-              ]},
-              {registered,[ekka_sup,ekka_membership,ekka_cluster_sup,ekka_node_monitor]},
-              {applications,[kernel,stdlib,mnesia,inets]},
-              {mod,{ekka_app,[]}}]}.
+{application, ekka,
+ [{description, "Autocluster and Autoheal for EMQ X Broker"},
+  {vsn, "0.5.3"},
+  {mod, {ekka_app,[]}},
+  {registered,
+   [ekka_sup,
+    ekka_membership,
+    ekka_cluster_sup,
+    ekka_node_monitor
+   ]},
+  {applications,
+   [kernel,
+    stdlib,
+    mnesia,
+    inets
+   ]},
+  {env,
+   [{cluster_autoheal, true},
+    {cluster_autoclean, 300000},
+    {cluster_discovery, {manual, []}}
+   ]}
+  {modules, []},
+  {maintainers, ["Feng Lee <feng@emqx.io>"]},
+  {licenses, ["Apache 2.0"]},
+  {links, [{"Github","https://github.com/emqx/ekka"}]}
+ ]}.
