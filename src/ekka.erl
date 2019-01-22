@@ -48,8 +48,16 @@
 
 -spec(start() -> ok).
 start() ->
-    ekka_mnesia:start(),
-    {ok, _Apps} = application:ensure_all_started(ekka), ok.
+    case ekka_mnesia:start() of
+        ok -> ok;
+        {error, {timeout, Tables}} ->
+            logger:error("Mnesia wait_for_tables timeout: ~p", [Tables]),
+            ok;
+        {error, Reason} ->
+            error(Reason)
+    end,
+    {ok, _Apps} = application:ensure_all_started(ekka),
+    ok.
 
 -spec(stop() -> ok).
 stop() ->
