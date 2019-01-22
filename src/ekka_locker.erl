@@ -138,13 +138,13 @@ acquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
             ets:insert_new(Name, LockObj)
     end.
 
-check_local(Name, #lock{resource = Resource, owner = Owner}) ->
-    case ets:lookup(Name, Resource) of
-        [#lock{owner = Owner}] ->
-            true;
-        [_Lock] -> false;
-        []      -> true
-    end.
+%%check_local(Name, #lock{resource = Resource, owner = Owner}) ->
+%%    case ets:lookup(Name, Resource) of
+%%        [#lock{owner = Owner}] ->
+%%            true;
+%%        [_Lock] -> false;
+%%        []      -> true
+%%    end.
 
 with_piggyback(Node, undefined) ->
     Node;
