@@ -118,16 +118,17 @@ handle_info({reply, discover, From}, State = #state{seen = Seen}) ->
     gen_server:reply(From, {ok, [node() | Seen]}),
     {noreply, State#state{seen = []}, hibernate};
 
-handle_info({udp, Sock, Ip, InPort, Data},
-            State = #state{sock = Sock, cookie = Cookie, seen = Seen}) ->
-    %%io:format("Mcast Handshake: ~p~n", [binary_to_term(Data)]),
-    inet:setopts(Sock, [{active, 1}]),
+handle_info({udp, Sock, _Ip, InPort, Data},
+            State = #state{sock = Sock, addr = Addr,
+                           cookie = Cookie, seen = Seen}) ->
+    %%io:format("~s recv handshake from ~p: ~p~n",
+    %%          [node(), {Ip, InPort}, binary_to_term(Data)]),
     Cluster = ekka:env(cluster_name, ekka),
     {noreply, try binary_to_term(Data) of
                   {ping, Node, _Cluster, _Cookie} when Node =:= node() ->
                       State;
                   {ping, Node, Cluster, Cookie} ->
-                      udp_send(Sock, Ip, InPort, pong(Cookie)),
+                      udp_send(Sock, Addr, InPort, pong(Cookie)),
                       State#state{seen = lists:usort([Node | Seen])};
                   {pong, Node, _Cluster, _Cookie} when Node =:= node() ->
                       State;
@@ -143,6 +144,10 @@ handle_info({udp, Sock, Ip, InPort, Data},
                       ?LOG(error, "Corrupt data: ~p", [Data]),
                       State
               end, hibernate};
+
+handle_info({udp_passive, Sock}, State = #state{sock = Sock}) ->
+    inet:setopts(Sock, [{active, 10}]),
+    {noreply, State};
 
 handle_info({udp_closed, Sock}, State = #state{sock = Sock}) ->
     {stop, udp_closed, State};

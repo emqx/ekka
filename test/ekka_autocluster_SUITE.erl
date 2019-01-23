@@ -34,6 +34,13 @@ groups() ->
       t_autocluster_etcd,
       t_autocluster_k8s]}].
 
+init_per_suite(Config) ->
+    application:set_env(ekka, cluster_name, ekka),
+    Config.
+
+end_per_suite(_Config) ->
+    ok.
+
 init_per_testcase(t_autocluster_static, Config) ->
     configure_strategy(static),
     start_ekka_and_cluster(),
