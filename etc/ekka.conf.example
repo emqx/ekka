@@ -117,13 +117,6 @@ cluster.autoclean = 5m
 ## Default: 1m, 1 minute
 ## cluster.etcd.node_ttl = 1m
 
-## Path to the file containing PEM-encoded CA certificates. The CA certificates
-## are used during server authentication and when building the client certificate chain.
-##
-## Value: File
-##
-## cluster.etcd.cacertfile = {{platform_etc_dir}}/certs/ca.pem
-
 ## Path to the file containing the client's certificate
 ##
 ## Value: File
@@ -135,6 +128,13 @@ cluster.autoclean = 5m
 ## Value: File
 ##
 ## cluster.etcd.keyfile = {{platform_etc_dir}}/certs/client-key.pem
+
+## Path to the file containing PEM-encoded CA certificates. The CA certificates
+## are used during server authentication and when building the client certificate chain.
+##
+## Value: File
+##
+## cluster.etcd.cacertfile = {{platform_etc_dir}}/certs/ca.pem
 
 ##--------------------------------------------------------------------
 ## Cluster using Kubernates

@@ -20,9 +20,9 @@
 %%                       {server, ["http://127.0.0.1:2379"]},
 %%                       {prefix, "ekkacluster"},
 %%                       {node_ttl, 60000},
-%%                       {ssl_options, [{cacertfile, "/path/ca.pem"},
-%%                                      {certfile, "path/client.pem"},
-%%                                      {keyfile, "path/client-key.pem"}]}
+%%                       {ssl_options, [{cacertfile, "path/to/ca.pem"},
+%%                                      {certfile, "path/to/client.pem"},
+%%                                      {keyfile, "path/to/client-key.pem"}]}
 %%                     ]}},
 
 %% Clustering on k8s
