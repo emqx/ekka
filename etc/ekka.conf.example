@@ -122,19 +122,19 @@ cluster.autoclean = 5m
 ##
 ## Value: File
 ##
-## cluster.etcd.cacertfile = {{ platform_etc_dir }}/ca.pem
+## cluster.etcd.cacertfile = {{platform_etc_dir}}/ca.pem
 
-## Path to the fiel containing the  client's certificate
+## Path to the file containing the client's certificate
 ##
 ## Value: File
 ##
-## cluster.etcd.certfile = {{ platform_etc_dir }}/client.pem
+## cluster.etcd.certfile = {{platform_etc_dir}}/client.pem
 
-##Path to a file containing the client's private PEM-encoded key.
+## Path to a file containing the client's private PEM-encoded key.
 ##
 ## Value: File
 ##
-## cluster.etcd.keyfile = {{ platform_etc_dir }}/client-key.pem
+## cluster.etcd.keyfile = {{platform_etc_dir}}/client-key.pem
 
 ##--------------------------------------------------------------------
 ## Cluster using Kubernates
