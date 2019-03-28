@@ -19,7 +19,10 @@
 %% {cluster_discovery, {etcd, [
 %%                       {server, ["http://127.0.0.1:2379"]},
 %%                       {prefix, "ekkacluster"},
-%%                       {node_ttl, 60000}
+%%                       {node_ttl, 60000},
+%%                       {ssl_options, [{keyfile, "path/to/client-key.pem"},
+%%                                      {certfile, "path/to/client.pem"},
+%%                                      {cacertfile, "path/to/ca.pem"}]}
 %%                     ]}},
 
 %% Clustering on k8s
