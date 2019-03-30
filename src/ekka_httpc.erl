@@ -14,7 +14,7 @@
 
 -module(ekka_httpc).
 
--export([get/3, get/4, get/5, post/3, put/3, delete/3]).
+-export([get/3, get/4, get/5, post/3, post/4, put/3, put/4, delete/3, delete/4]).
 
 -ifdef(TEST).
 -compile(export_all).
@@ -34,13 +34,25 @@ post(Addr, Path, Params) ->
     Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", urlencode(Params)},
     parse_response(httpc:request(post, Req, [], [])).
 
+post(Addr, Path, Params, HttpOpts) ->
+    Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", urlencode(Params)},
+    parse_response(httpc:request(post, Req, [{autoredirect, true} | HttpOpts], [])).
+
 put(Addr, Path, Params) ->
     Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", urlencode(Params)},
     parse_response(httpc:request(put, Req, [], [])).
 
+put(Addr, Path, Params, HttpOpts) ->
+    Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", urlencode(Params)},
+    parse_response(httpc:request(put, Req, [{autoredirect, true} | HttpOpts], [])).
+
 delete(Addr, Path, Params) ->
     Req = {build_url(Addr, Path, Params), []},
     parse_response(httpc:request(delete, Req, [], [])).
+
+delete(Addr, Path, Params, HttpOpts) ->
+    Req = {build_url(Addr, Path, Params), []},
+    parse_response(httpc:request(delete, Req, HttpOpts, [])).
 
 build_url(Addr, Path) ->
     lists:concat([Addr, "/", Path]).

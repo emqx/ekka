@@ -104,40 +104,44 @@ extract_node(V) ->
     list_to_atom(binary_to_list(lists:last(binary:split(maps:get(<<"key">>, V), <<"/">>, [global])))).
 
 ensure_nodes_path(Options) ->
-    etcd_set(server(Options), nodes_path(Options), [{dir, true}]).
+    etcd_set(server(Options), nodes_path(Options), [{dir, true}], ssl_options(Options)).
 
 etcd_get_nodes_key(Options) ->
-    etcd_get(server(Options), nodes_path(Options), [{recursive, true}]).
+    etcd_get(server(Options), nodes_path(Options), [{recursive, true}], ssl_options(Options)).
 
 etcd_set_node_key(Options) ->
     Ttl = config(node_ttl, Options) div 1000,
-    etcd_set(server(Options), node_path(Options), [{ttl, Ttl}]).
+    etcd_set(server(Options), node_path(Options), [{ttl, Ttl}], ssl_options(Options)).
 
 etcd_del_node_key(Options) ->
-    etcd_del(server(Options), node_path(Options), []).
+    etcd_del(server(Options), node_path(Options), [], ssl_options(Options)).
 
 etcd_set_lock_key(Options) ->
     Values = [{ttl, 30}, {'prevExist', false}, {value, node()}],
-    etcd_set(server(Options), lock_path(Options), Values).
+    etcd_set(server(Options), lock_path(Options), Values, ssl_options(Options)).
 
 etcd_del_lock_key(Options) ->
     Values = [{'prevExist', true}, {'prevValue', node()}],
-    etcd_del(server(Options), lock_path(Options), Values).
+    etcd_del(server(Options), lock_path(Options), Values, ssl_options(Options)).
 
 server(Options) ->
     config(server, Options).
 
+ssl_options(Options) ->
+    SSLOptions = proplists:get_value(ssl_options, Options, []),
+    [{ssl, SSLOptions}].
+
 config(Key, Options) ->
     proplists:get_value(Key, Options).
 
-etcd_get(Servers, Key, Params) ->
-    ekka_httpc:get(rand_addr(Servers), Key, Params).
+etcd_get(Servers, Key, Params, HttpOpts) ->
+    ekka_httpc:get(rand_addr(Servers), Key, Params, HttpOpts).
 
-etcd_set(Servers, Key, Params) ->
-    ekka_httpc:put(rand_addr(Servers), Key, Params).
+etcd_set(Servers, Key, Params, HttpOpts) ->
+    ekka_httpc:put(rand_addr(Servers), Key, Params, HttpOpts).
 
-etcd_del(Servers, Key, Params) ->
-    ekka_httpc:delete(rand_addr(Servers), Key, Params).
+etcd_del(Servers, Key, Params, HttpOpts) ->
+    ekka_httpc:delete(rand_addr(Servers), Key, Params, HttpOpts).
 
 nodes_path(Options) ->
     with_prefix(config(prefix, Options), "/nodes").

@@ -126,11 +126,11 @@ reboot_minority(Minority) ->
 
 shutdown(Node) ->
     Ret = rpc:call(Node, ekka_cluster, heal, [shutdown]),
-    ?LOG(info, "Shutdown ~s for autoheal: ~p", [Node, Ret]).
+    ?LOG(critical, "Shutdown ~s for autoheal: ~p", [Node, Ret]).
 
 reboot(Node) ->
     Ret = rpc:call(Node, ekka_cluster, heal, [reboot]),
-    ?LOG(info, "Reboot ~s for autoheal: ~p", [Node, Ret]).
+    ?LOG(critical, "Reboot ~s for autoheal: ~p", [Node, Ret]).
 
 ensure_cancel_timer(undefined) ->
     ok;
