@@ -1,6 +1,6 @@
 {application, ekka,
  [{description, "Autocluster and Autoheal for EMQ X Broker"},
-  {vsn, "0.5.3"},
+  {vsn, "0.5.4"},
   {mod, {ekka_app,[]}},
   {registered,
    [ekka_sup,
