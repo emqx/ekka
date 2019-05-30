@@ -100,6 +100,6 @@ extract_host(ip, Addr, _) ->
     maps:get(<<"ip">>, Addr);
 
 extract_host(dns, Addr, Namespace) ->
-    Ip = binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>),
+    Ip = binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>, [global]),
     iolist_to_binary([Ip, ".", Namespace, ".pod.cluster.local"]).
 
