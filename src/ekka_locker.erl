@@ -269,7 +269,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %%--------------------------------------------------------------------
 check_lease(Tab, #lease{expiry = Expiry}, Now) ->
-    Spec = ets:fun2ms(fun({_, _, _, _, T} = Resource) when (Now - T) > 15000 -> Resource end),
+    Spec = ets:fun2ms(fun({_, _, _, _, T} = Resource) when (Now - T) > Expiry -> Resource end),
     ets:select(Tab, Spec).
 
 cancel_lease(#lease{timer = TRef}) ->
