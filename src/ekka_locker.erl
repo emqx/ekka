@@ -14,6 +14,8 @@
 
 -module(ekka_locker).
 
+-include_lib("stdlib/include/ms_transform.hrl").
+
 -behaviour(gen_server).
 
 -export([start_link/0, start_link/1, start_link/2]).
@@ -54,7 +56,6 @@
 
 %% 15 seconds by default
 -define(LEASE_TIME, 15000).
-
 %%--------------------------------------------------------------------
 %% API
 %%--------------------------------------------------------------------
@@ -155,7 +156,7 @@ lock_obj(Resource) ->
     #lock{resource = Resource,
           owner    = self(),
           counter  = 1,
-          created  = os:timestamp()}.
+          created  = erlang:system_time(millisecond)}.
 
 -spec(release(resource()) -> lock_result()).
 release(Resource) ->
@@ -234,7 +235,7 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                               _MRef = erlang:monitor(process, Owner),
                               maps:put(Owner, [Resource], MonAcc)
                       end
-                  end, Monitors, check_lease(Tab, Lease, os:timestamp())),
+                  end, Monitors, check_lease(Tab, Lease, erlang:system_time(millisecond))),
     {noreply, State#state{monitors = Monitors1}, hibernate};
 
 handle_info({'DOWN', _MRef, process, DownPid, _Reason},
@@ -267,25 +268,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
-
 check_lease(Tab, #lease{expiry = Expiry}, Now) ->
-    check_lease(Tab, ets:first(Tab), Expiry, Now, []).
-
-check_lease(_Tab, '$end_of_table', _Expiry, _Now, Acc) ->
-    Acc;
-check_lease(Tab, Resource, Expiry, Now, Acc) ->
-    check_lease(Tab, ets:next(Tab, Resource), Expiry, Now,
-                case ets:lookup(Tab, Resource) of
-                    [Lock] ->
-                        case is_expired(Lock, Expiry, Now) of
-                            true  -> [Lock|Acc];
-                            false -> Acc
-                        end;
-                    [] -> Acc
-                end).
-
-is_expired(#lock{created = Created}, Expiry, Now) ->
-    (timer:now_diff(Now, Created) div 1000) > Expiry.
+    Spec = ets:fun2ms(fun({_, _, _, _, T} = Resource) when (Now - T) > 15000 -> Resource end),
+    ets:select(Tab, Spec).
 
 cancel_lease(#lease{timer = TRef}) ->
     timer:cancel(TRef).
