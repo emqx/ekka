@@ -128,8 +128,10 @@ server(Options) ->
     config(server, Options).
 
 ssl_options(Options) ->
-    SSLOptions = proplists:get_value(ssl_options, Options, []),
-    [{ssl, SSLOptions}].
+    case proplists:get_value(ssl_options, Options, []) of
+        [] -> [];
+        SSLOptions -> [{ssl, SSLOptions}]
+    end.
 
 config(Key, Options) ->
     proplists:get_value(Key, Options).
