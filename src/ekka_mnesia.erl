@@ -291,6 +291,6 @@ wait_for(tables) ->
     case mnesia:wait_for_tables(Tables, 150000) of
         ok                   -> ok;
         {error, Reason}      -> {error, Reason};
-        {timeout, BadTables} -> {error, {timetout, BadTables}}
+        {timeout, BadTables} -> {error, {timeout, BadTables}}
     end.
 
