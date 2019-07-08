@@ -126,17 +126,20 @@ acquire_lock(Name, LockObj, Piggyback) ->
 
 acquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
     Pos = #lock.counter,
-    try ets:update_counter(Name, Resource, [{Pos, 0}, {Pos, 1, 1, 1}]) of
-        [0, 1] -> true;
-        [1, 1] ->
+    %% check lock status and set the lock atomically
+    try ets:update_counter(Name, Resource, [{Pos, 0}, {Pos, 1, 1, 1}], LockObj) of
+        [0, 1] -> %% no lock before, lock it
+            true;
+        [1, 1] -> %% has already been locked, either by self or by others
             case ets:lookup(Name, Resource) of
-                [#lock{owner = Owner}] ->
-                    true;
+                [#lock{owner = Owner}] -> true;
                 _Other -> false
             end
     catch
         error:badarg ->
-            ets:insert_new(Name, LockObj)
+            %% While remote node is booting, this might fail because
+            %% the ETS table has not been created at that moment
+            true
     end.
 
 %%check_local(Name, #lock{resource = Resource, owner = Owner}) ->
@@ -155,7 +158,7 @@ with_piggyback(Node, {M, F, Args}) ->
 lock_obj(Resource) ->
     #lock{resource = Resource,
           owner    = self(),
-          counter  = 1,
+          counter  = 0,
           created  = erlang:system_time(millisecond)}.
 
 -spec(release(resource()) -> lock_result()).
