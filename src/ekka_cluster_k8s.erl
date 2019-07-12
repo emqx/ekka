@@ -35,16 +35,20 @@ discover(Options) ->
     App = get_value(app_name, Options, "ekka"),
     AddrType = get_value(address_type, Options, ip),
     Namespace = get_value(namespace, Options, "default"),
+    NodeNameSuffix = case AddrType of
+                         hostname -> get_value(hostname_suffix, Options, "");
+                         _ -> ""
+                     end,
     case k8s_service_get(Server, Service, Namespace) of
         {ok, Response} ->
             Addresses = extract_addresses(AddrType, Response, Namespace),
-            {ok, [node_name(App, Addr) || Addr <- Addresses]};
+            {ok, [node_name(App, Addr, NodeNameSuffix) || Addr <- Addresses]};
         {error, Reason} ->
             {error, Reason}
     end.
 
-node_name(App, Addr) ->
-    list_to_atom(App ++ "@" ++ binary_to_list(Addr)).
+node_name(App, Addr, Suffix) ->
+    list_to_atom(App ++ "@" ++ binary_to_list(Addr) ++ Suffix).
 
 lock(_Options) ->
     ignore.
@@ -98,6 +102,9 @@ extract_addresses(Type, Response, Namespace) ->
 
 extract_host(ip, Addr, _) ->
     maps:get(<<"ip">>, Addr);
+
+extract_host(hostname, Addr, _) ->
+    maps:get(<<"hostname">>, Addr);
 
 extract_host(dns, Addr, Namespace) ->
     Ip = binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>, [global]),
