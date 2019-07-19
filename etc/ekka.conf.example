@@ -164,8 +164,8 @@ cluster.autoclean = 5m
 ## Value: String
 ## cluster.k8s.app_name = ekka
 
-## The suffix added to hostname get from k8s service, only valid if cluster.k8s.address_type set to hostname
+## The suffix added to dns and hostname get from k8s service
 ##
 ## Value: String
-## cluster.k8s.hostname_suffix =
+## cluster.k8s.suffix = pod.cluster.local
 

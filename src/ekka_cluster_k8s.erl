@@ -35,19 +35,22 @@ discover(Options) ->
     App = get_value(app_name, Options, "ekka"),
     AddrType = get_value(address_type, Options, ip),
     Namespace = get_value(namespace, Options, "default"),
-    Suffix = get_value(hostname_suffix, Options, ""),
+    Suffix = get_value(suffix, Options, ""),
     case k8s_service_get(Server, Service, Namespace) of
         {ok, Response} ->
-            Addresses = extract_addresses(AddrType, Response, Namespace),
-            {ok, [node_name(App, Addr, AddrType, Suffix) || Addr <- Addresses]};
+            Addresses = extract_addresses(AddrType, Response),
+            {ok, [node_name(App, Addr, Service, AddrType, Namespace, Suffix) || Addr <- Addresses]};
         {error, Reason} ->
             {error, Reason}
     end.
 
-node_name(App, Addr, hostname, Suffix) when length(Suffix) > 0 ->
-    list_to_atom(App ++ "@" ++ binary_to_list(Addr) ++ Suffix);
+node_name(App, Addr, Service, hostname, Namespace, Suffix) when length(Suffix) > 0 ->
+    lists:concat([App, "@", binary_to_list(Addr), ".", Service, ".", Namespace, ".", Suffix]);
 
-node_name(App, Addr, _, _) ->
+node_name(App, Addr, _Service, dns, Namespace, Suffix) when length(Suffix) > 0 ->
+    lists:concat([App, "@", binary_to_list(Addr), ".", Namespace, ".", Suffix]);
+
+node_name(App, Addr, _, _, _, _) ->
     list_to_atom(App ++ "@" ++ binary_to_list(Addr)).
 
 lock(_Options) ->
@@ -94,19 +97,18 @@ read_file(Name, Default) ->
 
 trim(S) -> binary:replace(S, <<"\n">>, <<>>).
 
-extract_addresses(Type, Response, Namespace) ->
+extract_addresses(Type, Response) ->
     lists:flatten(
-        [[extract_host(Type, Addr, Namespace)
+        [[extract_host(Type, Addr)
             || Addr <- maps:get(<<"addresses">>, Subset, [])]
             || Subset <- maps:get(<<"subsets">>, Response, [])]).
 
-extract_host(ip, Addr, _) ->
+extract_host(ip, Addr) ->
     maps:get(<<"ip">>, Addr);
 
-extract_host(hostname, Addr, _) ->
+extract_host(hostname, Addr) ->
     maps:get(<<"hostname">>, Addr);
 
-extract_host(dns, Addr, Namespace) ->
-    Ip = binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>, [global]),
-    iolist_to_binary([Ip, ".", Namespace, ".pod.cluster.local"]).
+extract_host(dns, Addr) ->
+    binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>, [global]).
 
