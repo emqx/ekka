@@ -45,10 +45,10 @@ discover(Options) ->
     end.
 
 node_name(App, Addr, Service, hostname, Namespace, Suffix) when length(Suffix) > 0 ->
-    lists:concat([App, "@", binary_to_list(Addr), ".", Service, ".", Namespace, ".", Suffix]);
+    list_to_atom(lists:concat([App, "@", binary_to_list(Addr), ".", Service, ".", Namespace, ".", Suffix]));
 
 node_name(App, Addr, _Service, dns, Namespace, Suffix) when length(Suffix) > 0 ->
-    lists:concat([App, "@", binary_to_list(Addr), ".", Namespace, ".", Suffix]);
+    list_to_atom(lists:concat([App, "@", binary_to_list(Addr), ".", Namespace, ".", Suffix]));
 
 node_name(App, Addr, _, _, _, _) ->
     list_to_atom(App ++ "@" ++ binary_to_list(Addr)).
