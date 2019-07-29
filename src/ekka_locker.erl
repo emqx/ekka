@@ -189,11 +189,13 @@ release_locks(Nodes, Name, LockObj) ->
     merge_results(ResL).
 
 release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
-    Res = case ets:lookup(Name, Resource) of
+    Res = try ets:lookup(Name, Resource) of
               [Lock = #lock{owner = Owner}] ->
                   ets:delete_object(Name, Lock);
               [_Lock] -> false;
-              []      -> false
+              []      -> true
+          catch
+              error:badarg -> true
           end,
     {Res, [node()]}.
 
