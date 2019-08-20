@@ -168,11 +168,15 @@ force_leave(Node) ->
 %% Monitor membership events
 %%--------------------------------------------------------------------
 
-monitor(membership) ->
-    ekka_membership:monitor(true).
+monitor(Type)
+  when Type =:= partition;
+       Type =:= membership ->
+    ekka_membership:monitor(Type, true).
 
-unmonitor(membership) ->
-    ekka_membership:monitor(false).
+unmonitor(Type)
+  when Type =:= partition;
+       Type =:= membership ->
+    ekka_membership:monitor(Type, false).
 
 %%--------------------------------------------------------------------
 %% Locker API

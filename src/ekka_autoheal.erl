@@ -77,7 +77,8 @@ handle_msg(Msg = {create_splitview, _Node}, Autoheal) ->
 handle_msg({heal_partition, SplitView}, Autoheal = #?MODULE{proc = undefined}) ->
     Proc = spawn_link(fun() ->
                           ?LOG(info, "Healing partition: ~p", [SplitView]),
-                          heal_partition(SplitView)
+                          HealedNodes = heal_partition(SplitView),
+                          ekka_membership:partition_healed(HealedNodes)
                       end),
     Autoheal#?MODULE{role = coordinator, proc = Proc};
 
@@ -106,23 +107,26 @@ compare_view({Running1, _} , {Running2, _}) ->
 coordinator([{Nodes, _} | _]) ->
     ekka_membership:coordinator(Nodes).
 
+-spec heal_partition(list()) -> list(node()).
 heal_partition([]) ->
-    ok;
+    [];
 %% All nodes connected.
 heal_partition([{_, []}]) ->
-    ok;
+    [];
 %% Partial partitions happened.
 heal_partition([{Nodes, []}|_]) ->
     reboot_minority(Nodes -- [node()]);
 heal_partition([{Majority, Minority}, {Minority, Majority}]) ->
     reboot_minority(Minority);
 heal_partition(SplitView) ->
-    ?LOG(critical, "Cannot heal the partitions: ~p", [SplitView]).
+    ?LOG(critical, "Cannot heal the partitions: ~p", [SplitView]),
+    error({unknown_splitview, SplitView}).
 
 reboot_minority(Minority) ->
     lists:foreach(fun shutdown/1, Minority),
     timer:sleep(rand:uniform(1000) + 100),
-    lists:foreach(fun reboot/1, Minority).
+    lists:foreach(fun reboot/1, Minority),
+    Minority.
 
 shutdown(Node) ->
     Ret = rpc:call(Node, ekka_cluster, heal, [shutdown]),

@@ -29,7 +29,7 @@
 -export([is_all_alive/0]).
 
 %% Monitor API
--export([monitor/1]).
+-export([monitor/2]).
 
 %% Announce API
 -export([announce/1]).
@@ -40,11 +40,16 @@
 %% On Node/Mnesia Status
 -export([node_up/1, node_down/1, mnesia_up/1, mnesia_down/1]).
 
+%% On Cluster Status
+-export([partition_occurred/1, partition_healed/1]).
+
 %% gen_server Callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
 -record(state, {monitors, events}).
+
+-type eventtype() :: partition | membership.
 
 -define(LOG(Level, Format, Args),
         logger:Level("Ekka(Membership): " ++ Format, Args)).
@@ -113,9 +118,9 @@ nodelist(Status) ->
 is_all_alive() ->
     length(ekka_mnesia:cluster_nodes(all) -- [node() | nodes()]) == 0.
 
--spec(monitor(boolean()) -> ok).
-monitor(OnOff) ->
-    call({monitor, self(), OnOff}).
+-spec(monitor(eventtype(), boolean()) -> ok).
+monitor(Type, OnOff) ->
+    call({monitor, {Type, self(), OnOff}}).
 
 -spec(announce(join | leave | heal | {force_leave, node()}) -> ok).
 announce(Action) ->
@@ -156,6 +161,14 @@ mnesia_up(Node) ->
 mnesia_down(Node) ->
     cast({mnesia_down, Node}).
 
+-spec partition_occurred(node()) -> ok.
+partition_occurred(Node) ->
+    cast({partition_occurred, Node}).
+
+-spec partition_healed(node()) -> ok.
+partition_healed(Node) ->
+    cast({partition_healed, Node}).
+
 %% @private
 cast(Msg) ->
     gen_server:cast(?SERVER, Msg).
@@ -190,18 +203,18 @@ init([]) ->
 with_hash(Member = #member{node = Node, guid = Guid}) ->
     Member#member{hash = erlang:phash2({Node, Guid}, trunc(math:pow(2, 32) - 1))}.
 
-handle_call({monitor, Pid, true}, _From, State = #state{monitors = Monitors}) ->
+handle_call({monitor, {Type, Pid, true}}, _From, State = #state{monitors = Monitors}) ->
     case lists:keymember(Pid, 1, Monitors) of
         true  -> reply(ok, State);
         false -> MRef = erlang:monitor(process, Pid),
-                 reply(ok, State#state{monitors = [{Pid, MRef} | Monitors]})
+                 reply(ok, State#state{monitors = [{Pid, MRef, Type} | Monitors]})
     end;
 
-handle_call({monitor, Pid, false}, _From, State = #state{monitors = Monitors}) ->
+handle_call({monitor, {Type, Pid, false}}, _From, State = #state{monitors = Monitors}) ->
     case lists:keyfind(Pid, 1, Monitors) of
         {Pid, MRef} ->
             erlang:demonitor(MRef, [flush]),
-            reply(ok, State#state{monitors = lists:delete({Pid, MRef}, Monitors)});
+            reply(ok, State#state{monitors = lists:delete({Pid, MRef, Type}, Monitors)});
         false ->
             reply(ok, State)
     end;
@@ -314,13 +327,22 @@ handle_cast({mnesia_down, Node}, State) ->
     notify({mnesia, down, Node}, State),
     {noreply, State};
 
+
+handle_cast({partition_occurred, Node}, State) ->
+    notify(partition, {occurred, Node}, State),
+    {noreply, State};
+
+handle_cast({partition_healed, Nodes}, State) ->
+    notify(partition, {healed, Nodes}, State),
+    {noreply, State};
+
 handle_cast(Msg, State) ->
     ?LOG(error, "Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 handle_info({'DOWN', _MRef, process, DownPid, _Reason},
             State = #state{monitors = Monitors}) ->
-    Left = [M || M = {Pid, _} <- Monitors, Pid =/= DownPid],
+    Left = [M || M = {Pid, _, _} <- Monitors, Pid =/= DownPid],
     {noreply, State#state{monitors = Left}};
 
 handle_info(Info, State) ->
@@ -346,6 +368,8 @@ insert(Member) ->
 reply(Reply, State) ->
     {reply, Reply, State}.
 
-notify(Event, #state{monitors = Monitors}) ->
-    [Pid ! {membership, Event} || {Pid, _} <- Monitors].
+notify(Event, State) ->
+    notify(membership, Event, State).
 
+notify(Type, Event, #state{monitors = Monitors}) ->
+    [Pid ! {Type, Event} || {Pid, _, T} <- Monitors, T == Type].

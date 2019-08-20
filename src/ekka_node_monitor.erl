@@ -127,6 +127,7 @@ handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
 handle_info({mnesia_system_event, {inconsistent_database, Context, Node}},
             State = #state{partitions = Partitions}) ->
     ?LOG(critical, "Network partition detected from node ~s: ~p", [Node, Context]),
+    ekka_membership:partition_occurred(Node),
     case ekka_autoheal:enabled() of
         true  -> run_after(3000, confirm_partition);
         false -> ignore
