@@ -77,8 +77,7 @@ handle_msg(Msg = {create_splitview, _Node}, Autoheal) ->
 handle_msg({heal_partition, SplitView}, Autoheal = #?MODULE{proc = undefined}) ->
     Proc = spawn_link(fun() ->
                           ?LOG(info, "Healing partition: ~p", [SplitView]),
-                          HealedNodes = heal_partition(SplitView),
-                          ekka_membership:partition_healed(HealedNodes)
+                          _ = heal_partition(SplitView)
                       end),
     Autoheal#?MODULE{role = coordinator, proc = Proc};
 

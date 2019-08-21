@@ -29,7 +29,7 @@
 -export([is_all_alive/0]).
 
 %% Monitor API
--export([monitor/2]).
+-export([monitor/3]).
 
 %% Announce API
 -export([announce/1]).
@@ -118,9 +118,9 @@ nodelist(Status) ->
 is_all_alive() ->
     length(ekka_mnesia:cluster_nodes(all) -- [node() | nodes()]) == 0.
 
--spec(monitor(eventtype(), boolean()) -> ok).
-monitor(Type, OnOff) ->
-    call({monitor, {Type, self(), OnOff}}).
+-spec(monitor(eventtype(), pid() | function(), boolean()) -> ok).
+monitor(Type, PidOrFun, OnOff) ->
+    call({monitor, {Type, PidOrFun, OnOff}}).
 
 -spec(announce(join | leave | heal | {force_leave, node()}) -> ok).
 announce(Action) ->
@@ -203,21 +203,11 @@ init([]) ->
 with_hash(Member = #member{node = Node, guid = Guid}) ->
     Member#member{hash = erlang:phash2({Node, Guid}, trunc(math:pow(2, 32) - 1))}.
 
-handle_call({monitor, {Type, Pid, true}}, _From, State = #state{monitors = Monitors}) ->
-    case lists:keymember(Pid, 1, Monitors) of
-        true  -> reply(ok, State);
-        false -> MRef = erlang:monitor(process, Pid),
-                 reply(ok, State#state{monitors = [{Pid, MRef, Type} | Monitors]})
-    end;
+handle_call({monitor, {Type, PidOrFun, true}}, _From, State) ->
+    reply(ok, add_monitor({Type, PidOrFun}, State));
 
-handle_call({monitor, {Type, Pid, false}}, _From, State = #state{monitors = Monitors}) ->
-    case lists:keyfind(Pid, 1, Monitors) of
-        {Pid, MRef} ->
-            erlang:demonitor(MRef, [flush]),
-            reply(ok, State#state{monitors = lists:delete({Pid, MRef, Type}, Monitors)});
-        false ->
-            reply(ok, State)
-    end;
+handle_call({monitor, {Type, PidOrFun, false}}, _From, State) ->
+    reply(ok, del_monitor({Type, PidOrFun}, State));
 
 handle_call({announce, Action}, _From, State)
     when Action == join; Action == leave; Action == heal ->
@@ -342,7 +332,7 @@ handle_cast(Msg, State) ->
 
 handle_info({'DOWN', _MRef, process, DownPid, _Reason},
             State = #state{monitors = Monitors}) ->
-    Left = [M || M = {Pid, _, _} <- Monitors, Pid =/= DownPid],
+    Left = [M || M = {{_, Pid}, _} <- Monitors, Pid =/= DownPid],
     {noreply, State#state{monitors = Left}};
 
 handle_info(Info, State) ->
@@ -372,4 +362,30 @@ notify(Event, State) ->
     notify(membership, Event, State).
 
 notify(Type, Event, #state{monitors = Monitors}) ->
-    [Pid ! {Type, Event} || {Pid, _, T} <- Monitors, T == Type].
+    Notify = fun(P) when is_pid(P) ->
+                     P ! {Type, Event};
+                (F) when is_function(F) ->
+                     F({Type, Event})
+             end,
+    [Notify(PidOrFun) || {{T, PidOrFun}, _} <- Monitors, T == Type].
+
+add_monitor({Type, PidOrFun}, S = #state{monitors = Monitors}) ->
+    case lists:keymember({Type, PidOrFun}, 1, Monitors) of
+        true  -> S;
+        false ->
+            MRef = case is_pid(PidOrFun) of
+                       true -> erlang:monitor(process, PidOrFun);
+                       _ -> undefined
+                   end,
+            S#state{monitors = [{{Type, PidOrFun}, MRef} | Monitors]}
+    end.
+
+del_monitor({Type, PidOrFun}, S = #state{monitors = Monitors}) ->
+    case lists:keyfind({Type, PidOrFun}, 1, Monitors) of
+        false -> S;
+        {_, MRef} ->
+            is_pid(PidOrFun) andalso
+                erlang:demonitor(MRef, [flush]),
+            S#state{monitors = lists:delete({{Type, PidOrFun}, MRef}, Monitors)}
+    end.
+ 

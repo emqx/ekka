@@ -38,9 +38,12 @@
 
 %% Monitor membership events
 -export([monitor/1, unmonitor/1]).
+-export([monitor/2, unmonitor/2]).
 
 %% Locker API
 -export([lock/1, lock/2, lock/3, unlock/1, unlock/2]).
+
+-define(IS_MON_TYPE(T), T == membership orelse T == partition).
 
 %%--------------------------------------------------------------------
 %% Start/Stop
@@ -168,15 +171,21 @@ force_leave(Node) ->
 %% Monitor membership events
 %%--------------------------------------------------------------------
 
-monitor(Type)
-  when Type =:= partition;
-       Type =:= membership ->
-    ekka_membership:monitor(Type, true).
+monitor(Type) when ?IS_MON_TYPE(Type) ->
+    ekka_membership:monitor(Type, self(), true).
 
-unmonitor(Type)
-  when Type =:= partition;
-       Type =:= membership ->
-    ekka_membership:monitor(Type, false).
+monitor(Type, Fun)
+  when is_function(Fun),
+       ?IS_MON_TYPE(Type) ->
+    ekka_membership:monitor(Type, Fun, true).
+
+unmonitor(Type) when ?IS_MON_TYPE(Type) ->
+    ekka_membership:monitor(Type, self(), false).
+
+unmonitor(Type, Fun)
+  when is_function(Fun),
+       ?IS_MON_TYPE(Type) ->
+    ekka_membership:monitor(Type, Fun, false).
 
 %%--------------------------------------------------------------------
 %% Locker API
