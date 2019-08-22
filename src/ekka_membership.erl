@@ -388,4 +388,4 @@ del_monitor({Type, PidOrFun}, S = #state{monitors = Monitors}) ->
                 erlang:demonitor(MRef, [flush]),
             S#state{monitors = lists:delete({{Type, PidOrFun}, MRef}, Monitors)}
     end.
- 
+
