@@ -212,3 +212,4 @@ unlock(Resource) ->
 -spec(unlock(ekka_locker:resource(), ekka_locker:lock_type()) -> ekka_locker:lock_result()).
 unlock(Resource, Type) ->
     ekka_locker:release(ekka_locker, Resource, Type).
+

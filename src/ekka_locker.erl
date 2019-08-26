@@ -14,6 +14,8 @@
 
 -module(ekka_locker).
 
+-include_lib("stdlib/include/ms_transform.hrl").
+
 -behaviour(gen_server).
 
 -export([start_link/0, start_link/1, start_link/2]).
@@ -54,7 +56,6 @@
 
 %% 15 seconds by default
 -define(LEASE_TIME, 15000).
-
 %%--------------------------------------------------------------------
 %% API
 %%--------------------------------------------------------------------
@@ -125,17 +126,20 @@ acquire_lock(Name, LockObj, Piggyback) ->
 
 acquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
     Pos = #lock.counter,
-    try ets:update_counter(Name, Resource, [{Pos, 0}, {Pos, 1, 1, 1}]) of
-        [0, 1] -> true;
-        [1, 1] ->
+    %% check lock status and set the lock atomically
+    try ets:update_counter(Name, Resource, [{Pos, 0}, {Pos, 1, 1, 1}], LockObj) of
+        [0, 1] -> %% no lock before, lock it
+            true;
+        [1, 1] -> %% has already been locked, either by self or by others
             case ets:lookup(Name, Resource) of
-                [#lock{owner = Owner}] ->
-                    true;
+                [#lock{owner = Owner}] -> true;
                 _Other -> false
             end
     catch
         error:badarg ->
-            ets:insert_new(Name, LockObj)
+            %% While remote node is booting, this might fail because
+            %% the ETS table has not been created at that moment
+            true
     end.
 
 %%check_local(Name, #lock{resource = Resource, owner = Owner}) ->
@@ -154,8 +158,8 @@ with_piggyback(Node, {M, F, Args}) ->
 lock_obj(Resource) ->
     #lock{resource = Resource,
           owner    = self(),
-          counter  = 1,
-          created  = os:timestamp()}.
+          counter  = 0,
+          created  = erlang:system_time(millisecond)}.
 
 -spec(release(resource()) -> lock_result()).
 release(Resource) ->
@@ -185,11 +189,13 @@ release_locks(Nodes, Name, LockObj) ->
     merge_results(ResL).
 
 release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
-    Res = case ets:lookup(Name, Resource) of
+    Res = try ets:lookup(Name, Resource) of
               [Lock = #lock{owner = Owner}] ->
                   ets:delete_object(Name, Lock);
               [_Lock] -> false;
-              []      -> false
+              []      -> true
+          catch
+              error:badarg -> true
           end,
     {Res, [node()]}.
 
@@ -234,7 +240,7 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                               _MRef = erlang:monitor(process, Owner),
                               maps:put(Owner, [Resource], MonAcc)
                       end
-                  end, Monitors, check_lease(Tab, Lease, os:timestamp())),
+                  end, Monitors, check_lease(Tab, Lease, erlang:system_time(millisecond))),
     {noreply, State#state{monitors = Monitors1}, hibernate};
 
 handle_info({'DOWN', _MRef, process, DownPid, _Reason},
@@ -267,25 +273,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
-
 check_lease(Tab, #lease{expiry = Expiry}, Now) ->
-    check_lease(Tab, ets:first(Tab), Expiry, Now, []).
-
-check_lease(_Tab, '$end_of_table', _Expiry, _Now, Acc) ->
-    Acc;
-check_lease(Tab, Resource, Expiry, Now, Acc) ->
-    check_lease(Tab, ets:next(Tab, Resource), Expiry, Now,
-                case ets:lookup(Tab, Resource) of
-                    [Lock] ->
-                        case is_expired(Lock, Expiry, Now) of
-                            true  -> [Lock|Acc];
-                            false -> Acc
-                        end;
-                    [] -> Acc
-                end).
-
-is_expired(#lock{created = Created}, Expiry, Now) ->
-    (timer:now_diff(Now, Created) div 1000) > Expiry.
+    Spec = ets:fun2ms(fun({_, _, _, _, T} = Resource) when (Now - T) > Expiry -> Resource end),
+    ets:select(Tab, Spec).
 
 cancel_lease(#lease{timer = TRef}) ->
     timer:cancel(TRef).

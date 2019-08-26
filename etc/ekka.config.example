@@ -2,6 +2,7 @@
   {cluster_name, ekka},
   {cluster_autoheal, true},
   {cluster_autoclean, 60000},
+  {proto_dist, inet_tcp},
 
 %% Clustering with static node list
 %% {cluster_discovery, {static, [

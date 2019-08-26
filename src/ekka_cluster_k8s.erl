@@ -35,15 +35,22 @@ discover(Options) ->
     App = get_value(app_name, Options, "ekka"),
     AddrType = get_value(address_type, Options, ip),
     Namespace = get_value(namespace, Options, "default"),
+    Suffix = get_value(suffix, Options, ""),
     case k8s_service_get(Server, Service, Namespace) of
         {ok, Response} ->
-            Addresses = extract_addresses(AddrType, Response, Namespace),
-            {ok, [node_name(App, Addr) || Addr <- Addresses]};
+            Addresses = extract_addresses(AddrType, Response),
+            {ok, [node_name(App, Addr, Service, AddrType, Namespace, Suffix) || Addr <- Addresses]};
         {error, Reason} ->
             {error, Reason}
     end.
 
-node_name(App, Addr) ->
+node_name(App, Addr, Service, hostname, Namespace, Suffix) when length(Suffix) > 0 ->
+    list_to_atom(lists:concat([App, "@", binary_to_list(Addr), ".", Service, ".", Namespace, ".", Suffix]));
+
+node_name(App, Addr, _Service, dns, Namespace, Suffix) when length(Suffix) > 0 ->
+    list_to_atom(lists:concat([App, "@", binary_to_list(Addr), ".", Namespace, ".", Suffix]));
+
+node_name(App, Addr, _, _, _, _) ->
     list_to_atom(App ++ "@" ++ binary_to_list(Addr)).
 
 lock(_Options) ->
@@ -65,7 +72,7 @@ unregister(_Options) ->
 k8s_service_get(Server, Service, Namespace) ->
     Headers = [{"Authorization", "Bearer " ++ token()}],
     HttpOpts = case filelib:is_file(cert_path()) of
-                   true  -> [{ssl, [{cacertfile, cert_path()}]}];
+                   true -> [{ssl, [{cacertfile, cert_path()}]}];
                    false -> [{ssl, [{verify, verify_none}]}]
                end,
     ekka_httpc:get(Server, service_path(Service, Namespace), [], Headers, HttpOpts).
@@ -83,23 +90,25 @@ cert_path() -> ?SERVICE_ACCOUNT_PATH ++ "/ca.crt".
 
 read_file(Name, Default) ->
     case file:read_file(?SERVICE_ACCOUNT_PATH ++ Name) of
-        {ok, Data}     -> Data;
+        {ok, Data} -> Data;
         {error, Error} -> ?LOG(error, "Cannot read ~s: ~p", [Name, Error]),
-                          Default
+            Default
     end.
 
 trim(S) -> binary:replace(S, <<"\n">>, <<>>).
 
-extract_addresses(Type, Response, Namespace) ->
+extract_addresses(Type, Response) ->
     lists:flatten(
-      [[ extract_host(Type, Addr, Namespace)
-         || Addr <- maps:get(<<"addresses">>, Subset, [])]
+        [[extract_host(Type, Addr)
+            || Addr <- maps:get(<<"addresses">>, Subset, [])]
             || Subset <- maps:get(<<"subsets">>, Response, [])]).
 
-extract_host(ip, Addr, _) ->
+extract_host(ip, Addr) ->
     maps:get(<<"ip">>, Addr);
 
-extract_host(dns, Addr, Namespace) ->
-    Ip = binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>, [global]),
-    iolist_to_binary([Ip, ".", Namespace, ".pod.cluster.local"]).
+extract_host(hostname, Addr) ->
+    maps:get(<<"hostname">>, Addr);
+
+extract_host(dns, Addr) ->
+    binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>, [global]).
 
