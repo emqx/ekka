@@ -21,5 +21,6 @@
    ]},
   {modules, []},
   {licenses, ["Apache 2.0"]},
+  {maintainers, ["EMQ X Team <contact@emqx.io>"]},
   {links, [{"Github","https://github.com/emqx/ekka"}]}
  ]}.
