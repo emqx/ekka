@@ -14,33 +14,13 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_autocluster_SUITE).
+-module(ekka_ct).
 
--compile(export_all).
--compile(nowarn_export_all).
+-export([all/1]).
 
--include_lib("eunit/include/eunit.hrl").
-
-all() -> ekka_ct:all(?MODULE).
-
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
-t_unregister_node(_) ->
-    error('TODO').
-
-t_acquire_lock(_) ->
-    error('TODO').
-
-t_release_lock(_) ->
-    error('TODO').
-
-t_run(_) ->
-    error('TODO').
-
-t_enabled(_) ->
-    error('TODO').
+%% @doc Get all the test cases in a CT suite.
+all(Suite) ->
+    lists:usort([F || {F, 1} <- Suite:module_info(exports),
+                      string:substr(atom_to_list(F), 1, 2) == "t_"
+                ]).
 

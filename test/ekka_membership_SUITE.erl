@@ -14,7 +14,7 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_locker_SUITE).
+-module(ekka_membership_SUITE).
 
 -compile(export_all).
 -compile(nowarn_export_all).
@@ -29,24 +29,63 @@ init_per_testcase(_TestCase, Config) ->
 end_per_testcase(_TestCase, Config) ->
     Config.
 
-t_acquire(_) ->
+t_start_link(_) ->
     error('TODO').
 
-t_acquire_lock(_) ->
+t_lookup_member(_) ->
     error('TODO').
 
-t_release(_) ->
+t_coordinator(_) ->
     error('TODO').
 
-t_release_lock(_) ->
+t_ping(_) ->
     error('TODO').
 
-t_acquire_local(_Conf) ->
-    Node = node(),
-    {ok, Locker} = ekka_locker:start_link(test_locker),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ?assertEqual({false, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ekka_locker:stop(Locker).
+t_pong(_) ->
+    error('TODO').
+
+t_node_up(_) ->
+    error('TODO').
+
+t_node_down(_) ->
+    error('TODO').
+
+t_mnesia_up(_) ->
+    error('TODO').
+
+t_mnesia_down(_) ->
+    error('TODO').
+
+t_partition_occurred(_) ->
+    error('TODO').
+
+t_partition_healed(_) ->
+    error('TODO').
+
+t_announce(_) ->
+    error('TODO').
+
+t_leader(_) ->
+    error('TODO').
+
+t_is_all_alive(_) ->
+    error('TODO').
+
+t_oldest(_) ->
+    error('TODO').
+
+t_members(_) ->
+    error('TODO').
+
+t_monitor(_) ->
+    error('TODO').
+
+t_nodelist(_) ->
+    error('TODO').
+
+t_is_member(_) ->
+    error('TODO').
+
+t_local_member(_) ->
+    error('TODO').
 

@@ -14,7 +14,7 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_locker_SUITE).
+-module(ekka_mnesia_SUITE).
 
 -compile(export_all).
 -compile(nowarn_export_all).
@@ -29,24 +29,54 @@ init_per_testcase(_TestCase, Config) ->
 end_per_testcase(_TestCase, Config) ->
     Config.
 
-t_acquire(_) ->
+t_data_dir(_) ->
     error('TODO').
 
-t_acquire_lock(_) ->
+t_create_table(_) ->
     error('TODO').
 
-t_release(_) ->
+t_copy_table(_) ->
     error('TODO').
 
-t_release_lock(_) ->
+t_copy_schema(_) ->
     error('TODO').
 
-t_acquire_local(_Conf) ->
-    Node = node(),
-    {ok, Locker} = ekka_locker:start_link(test_locker),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ?assertEqual({false, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ekka_locker:stop(Locker).
+t_delete_schema(_) ->
+    error('TODO').
+
+t_del_schema_copy(_) ->
+    error('TODO').
+
+t_cluster_view(_) ->
+    error('TODO').
+
+t_connect(_) ->
+    error('TODO').
+
+t_cluster_status(_) ->
+    error('TODO').
+
+t_ensure_stopped(_) ->
+    error('TODO').
+
+t_remove_from_cluster(_) ->
+    error('TODO').
+
+t_leave_cluster(_) ->
+    error('TODO').
+
+t_running_nodes(_) ->
+    error('TODO').
+
+t_join_cluster(_) ->
+    error('TODO').
+
+t_is_node_in_cluster(_) ->
+    error('TODO').
+
+t_cluster_nodes(_) ->
+    error('TODO').
+
+t_start(_) ->
+    error('TODO').
 

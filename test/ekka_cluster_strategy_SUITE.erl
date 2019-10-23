@@ -14,7 +14,7 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_locker_SUITE).
+-module(ekka_cluster_strategy_SUITE).
 
 -compile(export_all).
 -compile(nowarn_export_all).
@@ -29,24 +29,6 @@ init_per_testcase(_TestCase, Config) ->
 end_per_testcase(_TestCase, Config) ->
     Config.
 
-t_acquire(_) ->
+t_behaviour_info(_) ->
     error('TODO').
-
-t_acquire_lock(_) ->
-    error('TODO').
-
-t_release(_) ->
-    error('TODO').
-
-t_release_lock(_) ->
-    error('TODO').
-
-t_acquire_local(_Conf) ->
-    Node = node(),
-    {ok, Locker} = ekka_locker:start_link(test_locker),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ?assertEqual({false, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ekka_locker:stop(Locker).
 

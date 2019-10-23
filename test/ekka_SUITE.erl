@@ -174,3 +174,58 @@ ensure_slave() ->
     EbinDir = local_path(["ebin"]),
     DepsDir = local_path(["deps", "*", "ebin"]),
     "-pa " ++ EbinDir ++ " -pa " ++ DepsDir.
+
+t_env(_) ->
+    error('TODO').
+
+t_callback(_) ->
+    error('TODO').
+
+t_autocluster(_) ->
+    error('TODO').
+
+t_members(_) ->
+    error('TODO').
+
+t_local_member(_) ->
+    error('TODO').
+
+t_is_member(_) ->
+    error('TODO').
+
+t_nodelist(_) ->
+    error('TODO').
+
+t_status(_) ->
+    error('TODO').
+
+t_is_aliving(_) ->
+    error('TODO').
+
+t_is_running(_) ->
+    error('TODO').
+
+t_cluster_name(_) ->
+    error('TODO').
+
+t_join(_) ->
+    error('TODO').
+
+t_leave(_) ->
+    error('TODO').
+
+t_force_leave(_) ->
+    error('TODO').
+
+t_monitor(_) ->
+    error('TODO').
+
+t_unmonitor(_) ->
+    error('TODO').
+
+t_lock(_) ->
+    error('TODO').
+
+t_unlock(_) ->
+    error('TODO').
+

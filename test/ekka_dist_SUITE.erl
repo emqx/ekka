@@ -14,7 +14,7 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_locker_SUITE).
+-module(ekka_dist_SUITE).
 
 -compile(export_all).
 -compile(nowarn_export_all).
@@ -29,24 +29,27 @@ init_per_testcase(_TestCase, Config) ->
 end_per_testcase(_TestCase, Config) ->
     Config.
 
-t_acquire(_) ->
+t_listen(_) ->
     error('TODO').
 
-t_acquire_lock(_) ->
+t_select(_) ->
     error('TODO').
 
-t_release(_) ->
+t_accept(_) ->
     error('TODO').
 
-t_release_lock(_) ->
+t_accept_connection(_) ->
     error('TODO').
 
-t_acquire_local(_Conf) ->
-    Node = node(),
-    {ok, Locker} = ekka_locker:start_link(test_locker),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ?assertEqual({false, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ekka_locker:stop(Locker).
+t_setup(_) ->
+    error('TODO').
+
+t_close(_) ->
+    error('TODO').
+
+t_childspecs(_) ->
+    error('TODO').
+
+t_port(_) ->
+    error('TODO').
 
