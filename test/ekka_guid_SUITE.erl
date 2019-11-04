@@ -14,6 +14,8 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
+%% TODO: generate 1024 guids
+
 -module(ekka_guid_SUITE).
 
 -compile(export_all).
@@ -23,24 +25,21 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
 t_gen(_) ->
-    error('TODO').
+    <<_:128>> = Guid1 = ekka_guid:gen(),
+    <<_:128>> = Guid2 = ekka_guid:gen(),
+    ?assert(Guid2 > Guid1).
 
 t_new(_) ->
-    error('TODO').
+    {Ts1, _NPid, 0} = ekka_guid:new(),
+    {Ts2, _NPid, 0} = ekka_guid:new(),
+    ?assert(Ts2 > Ts1).
 
 t_timestamp(_) ->
-    error('TODO').
+    Ts1 = ekka_guid:timestamp(ekka_guid:gen()),
+    Ts2 = ekka_guid:timestamp(ekka_guid:gen()),
+    ?assert(Ts2 > Ts1).
 
-t_to_hexstr(_) ->
-    error('TODO').
-
-t_from_hexstr(_) ->
-    error('TODO').
+t_to_from_hexstr(_) ->
+    ?assertEqual(Guid = ekka_guid:gen(), ekka_guid:from_hexstr(ekka_guid:to_hexstr(Guid))).
 
