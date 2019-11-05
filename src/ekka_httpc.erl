@@ -16,7 +16,16 @@
 
 -module(ekka_httpc).
 
--export([get/3, get/4, get/5, post/3, post/4, put/3, put/4, delete/3, delete/4]).
+-export([ get/3
+        , get/4
+        , get/5
+        , post/3
+        , post/4
+        , put/3
+        , put/4
+        , delete/3
+        , delete/4
+        ]).
 
 -ifdef(TEST).
 -compile(export_all).
@@ -56,6 +65,7 @@ delete(Addr, Path, Params, HttpOpts) ->
     Req = {build_url(Addr, Path, Params), []},
     parse_response(httpc:request(delete, Req, HttpOpts, [])).
 
+-spec(build_url(string(), string()) -> string()).
 build_url(Addr, Path) ->
     lists:concat([Addr, "/", Path]).
 

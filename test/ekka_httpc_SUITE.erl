@@ -24,20 +24,39 @@
 all() -> ekka_ct:all(?MODULE).
 
 init_per_testcase(_TestCase, Config) ->
+    ok = meck:new(httpc, [non_strict, passthrough, no_history]),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
+    ok = meck:unload(httpc),
     Config.
 
 t_get(_) ->
-    error('TODO').
+    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) ->
+                                             {ok, 200, <<"{\"key\": \"value\"}">>}
+                                     end),
+    {ok, #{<<"key">> := <<"value">>}} = ekka_httpc:get("localhost", "nodes", [{name, <<"node1">>}]).
 
 t_post(_) ->
-    error('TODO').
+    ok = meck:expect(httpc, request, fun(post, _Req, _Opts, _) ->
+                                             {ok, 200, <<"{\"code\": 0}">>}
+                                     end),
+    {ok, #{<<"code">> := 0}} = ekka_httpc:post("localhost", "path", [{name, <<"x">>}]).
 
 t_put(_) ->
-    error('TODO').
+    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
+                                             {ok, 200, <<"{\"code\": 0}">>}
+                                     end),
+    {ok, #{<<"code">> := 0}} = ekka_httpc:put("localhost", "path", [{name, <<"x">>}]).
 
 t_delete(_) ->
-    error('TODO').
+    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
+                                             {ok, 200, <<"{\"code\": 0}">>}
+                                     end),
+    {ok, #{<<"code">> := 0}} = ekka_httpc:delete("localhost", "path", [{name, <<"x">>}]).
+
+t_build_url(_) ->
+   ?assertEqual("localhost/nodes/1", ekka_httpc:build_url("localhost", "nodes/1")),
+   ?assertEqual("localhost/nodes/1?a=b&c=d", ekka_httpc:build_url("localhost", "nodes/1", [{a, b}, {c, d}])),
+   ?assertEqual("localhost/nodes/1?a=b%2Fc%2Fd", ekka_httpc:build_url("localhost", "nodes/1", [{a, "b/c/d"}])).
 

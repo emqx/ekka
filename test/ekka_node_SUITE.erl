@@ -23,18 +23,15 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
 t_parse_name(_) ->
-    error('TODO').
+    'a@127.0.0.1' = ekka_node:parse_name("a@127.0.0.1"),
+    'b@127.0.0.1' = ekka_node:parse_name("b").
 
 t_is_running(_) ->
     error('TODO').
 
 t_is_aliving(_) ->
-    error('TODO').
+    io:format("Node: ~p~n", [node()]),
+    true = ekka_node:is_aliving(node()),
+    false = ekka_node:is_aliving('x@127.0.0.1').
 

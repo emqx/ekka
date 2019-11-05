@@ -18,10 +18,15 @@
 
 -behaviour(ekka_cluster_strategy).
 
--import(proplists, [get_value/2, get_value/3]).
-
 %% Cluster strategy callbacks.
--export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
+-export([ discover/1
+        , lock/1
+        , unlock/1
+        , register/1
+        , unregister/1
+        ]).
+
+-import(proplists, [get_value/2, get_value/3]).
 
 -define(SERVICE_ACCOUNT_PATH, "/var/run/secrets/kubernetes.io/serviceaccount/").
 
@@ -74,7 +79,7 @@ unregister(_Options) ->
 k8s_service_get(Server, Service, Namespace) ->
     Headers = [{"Authorization", "Bearer " ++ token()}],
     HttpOpts = case filelib:is_file(cert_path()) of
-                   true -> [{ssl, [{cacertfile, cert_path()}]}];
+                   true  -> [{ssl, [{cacertfile, cert_path()}]}];
                    false -> [{ssl, [{verify, verify_none}]}]
                end,
     ekka_httpc:get(Server, service_path(Service, Namespace), [], Headers, HttpOpts).
@@ -93,7 +98,8 @@ cert_path() -> ?SERVICE_ACCOUNT_PATH ++ "/ca.crt".
 read_file(Name, Default) ->
     case file:read_file(?SERVICE_ACCOUNT_PATH ++ Name) of
         {ok, Data} -> Data;
-        {error, Error} -> ?LOG(error, "Cannot read ~s: ~p", [Name, Error]),
+        {error, Error} ->
+            ?LOG(error, "Cannot read ~s: ~p", [Name, Error]),
             Default
     end.
 

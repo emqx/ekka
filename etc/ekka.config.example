@@ -31,7 +31,7 @@
 %%                       {apiserver, "http://10.110.111.204:8080"},
 %%                       {namespace, "default"},
 %%                       {address_type, ip},
-%%                       {app, ekka}
+%%                       {app_name, ekka}
 %%                     ]}},
 
 %% Clustering with IP Multicast

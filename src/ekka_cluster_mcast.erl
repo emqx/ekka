@@ -20,16 +20,26 @@
 
 -behaviour(ekka_cluster_strategy).
 
--import(proplists, [get_value/2, get_value/3]).
-
 %% Cluster strategy callbacks
--export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
+-export([ discover/1
+        , lock/1
+        , unlock/1
+        , register/1
+        , unregister/1
+        ]).
 
--export([start_link/1]).
+-export([start_link/1, stop/0]).
 
-%% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+%% gen_server Callbacks
+-export([ init/1
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , terminate/2
+        , code_change/3
+        ]).
+
+-import(proplists, [get_value/2, get_value/3]).
 
 -type(option() :: {addr, inet:ip_address()}
                 | {ports, list(inet:port_number())}
@@ -40,7 +50,13 @@
                 | {recbuf, pos_integer()}
                 | {buffer, pos_integer()}).
 
--record(state, {sock, addr, ports, cookie, seen = []}).
+-record(state, {
+          sock   :: inet:socket(),
+          addr   :: inet:ip_address(),
+          ports  :: list(inet:port_number()),
+          cookie :: integer(),
+          seen   :: list(node())
+         }).
 
 -define(SERVER, ?MODULE).
 -define(LOG(Level, Format, Args),
@@ -75,9 +91,12 @@ ensure_started(Options) ->
         {error, {already_started, Pid}} -> Pid
     end.
 
--spec(start_link(list(option())) -> {ok, pid()} | ignore | {error, term()}).
+-spec(start_link(list(option())) -> {ok, pid()} | {error, term()}).
 start_link(Options) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
+
+-spec(stop() -> ok).
+stop() -> gen_server:stop(?SERVER).
 
 %%--------------------------------------------------------------------
 %% gen_server callbacks
@@ -94,10 +113,10 @@ init(Options) ->
                           {multicast_loop, Loop},
                           {add_membership, {Addr, Iface}}]) of
         {ok, Sock} ->
+            Cookie = erlang:phash2(erlang:get_cookie()),
             {ok, #state{sock = Sock, addr = Addr, ports = Ports,
-                        cookie = erlang:phash2(erlang:get_cookie())}};
-        {error, Error} ->
-            {stop, Error}
+                        cookie = Cookie, seen = []}};
+        {error, Error} -> {stop, Error}
     end.
 
 handle_call(discover, From, State = #state{sock = Sock, addr = Addr,

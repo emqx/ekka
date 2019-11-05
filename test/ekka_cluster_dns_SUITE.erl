@@ -23,24 +23,19 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
 t_discover(_) ->
-    error('TODO').
+    Options = [{name, "localhost"}, {app, "ekka"}],
+    {ok, ['ekka@127.0.0.1']} = ekka_cluster_dns:discover(Options).
 
 t_lock(_) ->
-    error('TODO').
+    ignore = ekka_cluster_dns:lock([]).
 
 t_unlock(_) ->
-    error('TODO').
+    ignore = ekka_cluster_dns:unlock([]).
 
 t_register(_) ->
-    error('TODO').
+    ignore = ekka_cluster_dns:register([]).
 
 t_unregister(_) ->
-    error('TODO').
+    ignore = ekka_cluster_dns:unregister([]).
 

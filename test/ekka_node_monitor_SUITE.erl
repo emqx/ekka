@@ -32,24 +32,6 @@ end_per_testcase(_TestCase, Config) ->
 t_start_link(_) ->
     error('TODO').
 
-t_init(_) ->
-    error('TODO').
-
-t_handle_call(_) ->
-    error('TODO').
-
-t_handle_cast(_) ->
-    error('TODO').
-
-t_handle_info(_) ->
-    error('TODO').
-
-t_terminate(_) ->
-    error('TODO').
-
-t_code_change(_) ->
-    error('TODO').
-
 t_cast(_) ->
     error('TODO').
 
@@ -58,4 +40,9 @@ t_run_after(_) ->
 
 t_partitions(_) ->
     error('TODO').
+
+t_handle_unexpected(_) ->
+    {reply, ignore, state} = ekka_node_monitor:handle_call(req, from, state),
+    {noreply, state} = ekka_node_monitor:handle_cast(msg, state),
+    {noreply, state} = ekka_node_monitor:handle_info(info, state).
 

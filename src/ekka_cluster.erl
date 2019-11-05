@@ -18,13 +18,20 @@
 -module(ekka_cluster).
 
 %% Cluster API
--export([join/1, leave/0, force_leave/1, status/0]).
+-export([ join/1
+        , leave/0
+        , force_leave/1
+        , status/0
+        ]).
 
-%% RPC Call for Cluster Management
--export([prepare/1, heal/1, reboot/0]).
+%% RPC call for Cluster Management
+-export([ prepare/1
+        , heal/1
+        , reboot/0
+        ]).
 
 %% @doc Join the cluster
--spec(join(node()) -> ok | ignore | {error, any()}).
+-spec(join(node()) -> ok | ignore | {error, term()}).
 join(Node) when Node =:= node() ->
     ignore;
 join(Node) when is_atom(Node) ->

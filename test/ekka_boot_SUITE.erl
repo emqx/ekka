@@ -24,8 +24,9 @@
 all() -> ekka_ct:all(?MODULE).
 
 t_apply_module_attributes(_) ->
-    error('TODO').
+    %% Arg is Attribute Name
+    [] =  ekka_boot:apply_module_attributes(Name = x).
 
 t_all_module_attributes(_) ->
-    error('TODO').
+    [{_App, Module, Attrs}] = ekka_boot:all_module_attributes(Name = x).
 

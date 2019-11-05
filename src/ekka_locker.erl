@@ -20,20 +20,40 @@
 
 -behaviour(gen_server).
 
--export([start_link/0, start_link/1, start_link/2]).
+-export([ start_link/0
+        , start_link/1
+        , start_link/2
+        ]).
 
-%% for test cases
+%% For test cases
 -export([stop/0, stop/1]).
 
--export([acquire/1, acquire/2, acquire/3, acquire/4]).
--export([release/1, release/2, release/3]).
+%% Lock APIs
+-export([ acquire/1
+        , acquire/2
+        , acquire/3
+        , acquire/4
+        ]).
 
-%% for rpc call
--export([acquire_lock/2, acquire_lock/3, release_lock/2]).
+-export([ release/1
+        , release/2
+        , release/3
+        ]).
 
-%% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+%% For RPC call
+-export([ acquire_lock/2
+        , acquire_lock/3
+        , release_lock/2
+        ]).
+
+%% gen_server Callbacks
+-export([ init/1
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , terminate/2
+        , code_change/3
+        ]).
 
 -type(resource() :: term()).
 
@@ -43,26 +63,35 @@
 
 -type(piggyback() :: mfa()).
 
--export_type([resource/0, lock_type/0, lock_result/0, piggyback/0]).
+-export_type([ resource/0
+             , lock_type/0
+             , lock_result/0
+             , piggyback/0
+             ]).
 
--record(lock, {resource :: resource(),
-               owner    :: pid(),
-               counter  :: integer(),
-               created  :: erlang:timestamp()}).
+-record(lock, {
+          resource :: resource(),
+          owner    :: pid(),
+          counter  :: integer(),
+          created  :: erlang:timestamp()
+         }).
 
 -record(lease, {expiry, timer}).
 
 -record(state, {locks, lease, monitors}).
 
 -define(SERVER, ?MODULE).
+-define(LOG(Level, Format, Args),
+        logger:Level("Ekka(Locker): " ++ Format, Args)).
 
 %% 15 seconds by default
 -define(LEASE_TIME, 15000).
+
 %%--------------------------------------------------------------------
 %% API
 %%--------------------------------------------------------------------
 
--spec(start_link() -> {ok, pid()} | ignore | {error, any()}).
+-spec(start_link() -> {ok, pid()} | {error, term()}).
 start_link() ->
     start_link(?SERVER).
 
@@ -106,8 +135,9 @@ acquire(Name, Resource, leader, Piggyback) when is_atom(Name)->
         Res -> Res
     end;
 acquire(Name, Resource, quorum, Piggyback) when is_atom(Name) ->
-    acquire_locks(ekka_ring:find_nodes(Resource),
-                 Name, lock_obj(Resource), Piggyback);
+    Ring = ekka_membership:ring(up),
+    Nodes = ekka_ring:find_nodes(Resource, Ring),
+    acquire_locks(Nodes, Name, lock_obj(Resource), Piggyback);
 
 acquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
     acquire_locks(ekka_membership:nodelist(up),
@@ -144,14 +174,6 @@ acquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
             true
     end.
 
-%%check_local(Name, #lock{resource = Resource, owner = Owner}) ->
-%%    case ets:lookup(Name, Resource) of
-%%        [#lock{owner = Owner}] ->
-%%            true;
-%%        [_Lock] -> false;
-%%        []      -> true
-%%    end.
-
 with_piggyback(Node, undefined) ->
     Node;
 with_piggyback(Node, {M, F, Args}) ->
@@ -161,7 +183,8 @@ lock_obj(Resource) ->
     #lock{resource = Resource,
           owner    = self(),
           counter  = 0,
-          created  = erlang:system_time(millisecond)}.
+          created  = erlang:system_time(millisecond)
+         }.
 
 -spec(release(resource()) -> lock_result()).
 release(Resource) ->
@@ -182,7 +205,9 @@ release(Name, Resource, leader) ->
         Res -> Res
     end;
 release(Name, Resource, quorum) ->
-    release_locks(ekka_ring:find_nodes(Resource), Name, lock_obj(Resource));
+    Ring = ekka_membership:ring(up),
+    Nodes = ekka_ring:find_nodes(Resource, Ring),
+    release_locks(Nodes, Name, lock_obj(Resource));
 release(Name, Resource, all) ->
     release_locks(ekka_membership:nodelist(up), Name, lock_obj(Resource)).
 
@@ -226,10 +251,12 @@ init([Name, LeaseTime]) ->
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State};
 
-handle_call(_Request, _From, State) ->
+handle_call(Req, _From, State) ->
+    ?LOG(error, "Unexpected call: ~p", [Req]),
     {reply, ignore, State}.
 
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    ?LOG(error, "Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = Monitors}) ->
@@ -263,7 +290,8 @@ handle_info({'DOWN', _MRef, process, DownPid, _Reason},
             {noreply, State}
     end;
 
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    ?LOG(error, "Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, _State = #state{lease = Lease}) ->
@@ -275,10 +303,10 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
+
 check_lease(Tab, #lease{expiry = Expiry}, Now) ->
     Spec = ets:fun2ms(fun({_, _, _, _, T} = Resource) when (Now - T) > Expiry -> Resource end),
     ets:select(Tab, Spec).
 
-cancel_lease(#lease{timer = TRef}) ->
-    timer:cancel(TRef).
+cancel_lease(#lease{timer = TRef}) -> timer:cancel(TRef).
 

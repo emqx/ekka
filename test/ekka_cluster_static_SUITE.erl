@@ -23,24 +23,19 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
 t_discover(_) ->
-    error('TODO').
+    Options = [{seeds, ['ekka@127.0.0.1']}],
+    {ok, ['ekka@127.0.0.1']} = ekka_cluster_static:discover(Options).
 
 t_lock(_) ->
-    error('TODO').
+    ignore = ekka_cluster_static:lock([]).
 
 t_unlock(_) ->
-    error('TODO').
+    ignore = ekka_cluster_static:unlock([]).
 
 t_register(_) ->
-    error('TODO').
+    ignore = ekka_cluster_static:register([]).
 
 t_unregister(_) ->
-    error('TODO').
+    ignore = ekka_cluster_static:unregister([]).
 

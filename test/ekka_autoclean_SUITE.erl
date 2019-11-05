@@ -23,15 +23,10 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
 t_init(_) ->
     error('TODO').
 
 t_check(_) ->
-    error('TODO').
+    State = ekka_autoclean:init(),
+    ekka_autoclean:check(State).
 

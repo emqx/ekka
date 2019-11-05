@@ -19,19 +19,32 @@
 -compile(export_all).
 -compile(nowarn_export_all).
 
+-include("ekka.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 all() -> ekka_ct:all(?MODULE).
 
 init_per_testcase(_TestCase, Config) ->
+    ok = meck:new(ekka_membership, [non_strict, passthrough, no_history]),
+    ok = meck:expect(ekka_membership, members, fun(up) -> create_nodes(5) end),
     Config.
 
+create_nodes(Num) ->
+    lists:map(fun(I) ->
+                      Node = list_to_atom("node" ++ integer_to_list(I)),
+                      Hash = erlang:phash2(Node, trunc(math:pow(2, 32) - 1)),
+                      #member{node = Node, hash = Hash}
+              end, lists:seq(1, Num)).
+
 end_per_testcase(_TestCase, Config) ->
+    ok = meck:unload(ekka_membership),
     Config.
 
 t_find_node(_) ->
-    error('TODO').
+    ekka_ring:find_node(key, []).
+    %%io:format("Ring: ~p~n", [ekka_ring:ring()]).
 
 t_find_nodes(_) ->
-    error('TODO').
+    ekka_ring:find_nodes(key, 3, []).
+    %%io:format("Ring: ~p~n", [ekka_ring:ring()]).
 

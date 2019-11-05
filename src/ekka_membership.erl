@@ -22,11 +22,24 @@
 
 -export([start_link/0]).
 
-%% Members API
--export([local_member/0, lookup_member/1, members/0, members/1,
-         is_member/1, oldest/1]).
+%% Ring API
+-export([ring/0, ring/1]).
 
--export([leader/0, nodelist/0, nodelist/1, coordinator/0, coordinator/1]).
+%% Members API
+-export([ local_member/0
+        , lookup_member/1
+        , members/0
+        , members/1
+        , is_member/1
+        , oldest/1
+        ]).
+
+-export([ leader/0
+        , nodelist/0
+        , nodelist/1
+        , coordinator/0
+        , coordinator/1
+        ]).
 
 -export([is_all_alive/0]).
 
@@ -40,31 +53,49 @@
 -export([ping/2, pong/2]).
 
 %% On Node/Mnesia Status
--export([node_up/1, node_down/1, mnesia_up/1, mnesia_down/1]).
+-export([ node_up/1
+        , node_down/1
+        , mnesia_up/1
+        , mnesia_down/1
+        ]).
 
 %% On Cluster Status
--export([partition_occurred/1, partition_healed/1]).
+-export([ partition_occurred/1
+        , partition_healed/1
+        ]).
 
 %% gen_server Callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([ init/1
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , terminate/2
+        , code_change/3
+        ]).
 
 -record(state, {monitors, events}).
 
 -type eventtype() :: partition | membership.
 
+-define(SERVER, ?MODULE).
 -define(LOG(Level, Format, Args),
         logger:Level("Ekka(Membership): " ++ Format, Args)).
 
--define(SERVER, ?MODULE).
+-spec(start_link() -> {ok, pid()} | {error, term()}).
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %%--------------------------------------------------------------------
 %% API
 %%--------------------------------------------------------------------
 
--spec(start_link() -> {ok, pid()} | ignore | {error, any()}).
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+-spec(ring() -> [member()]).
+ring() ->
+    lists:keysort(#member.hash, members()).
+
+-spec(ring(up | down) -> [member()]).
+ring(Status) ->
+    lists:keysort(#member.hash, members(Status)).
 
 -spec(local_member() -> member()).
 local_member() ->
@@ -88,11 +119,13 @@ members(Status) ->
 
 %% Get leader node of the members
 -spec(leader() -> node()).
-leader() -> Member = oldest(members()), Member#member.node.
+leader() ->
+    Member = oldest(members()), Member#member.node.
 
 %% Get coordinator node from all the alive members
 -spec(coordinator() -> node()).
-coordinator() -> Member = oldest(members(up)), Member#member.node.
+coordinator() ->
+    Member = oldest(members(up)), Member#member.node.
 
 %% Get Coordinator from nodes
 -spec(coordinator(list(node())) -> node()).

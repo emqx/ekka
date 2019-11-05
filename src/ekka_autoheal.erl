@@ -16,12 +16,17 @@
 
 -module(ekka_autoheal).
 
--export([init/0, enabled/0, proc/1, handle_msg/2]).
+-export([ init/0
+        , enabled/0
+        , proc/1
+        , handle_msg/2
+        ]).
 
 -record(?MODULE, {role, proc, timer}).
 
 -define(DELAY, 12000).
--define(LOG(Level, Format, Args), logger:Level("Ekka(Autoheal): " ++ Format, Args)).
+-define(LOG(Level, Format, Args),
+        logger:Level("Ekka(Autoheal): " ++ Format, Args)).
 
 init() ->
     case enabled() of
