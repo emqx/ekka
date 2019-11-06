@@ -24,27 +24,17 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    ok = meck:new(ekka_membership, [non_strict, passthrough, no_history]),
-    ok = meck:expect(ekka_membership, members, fun(up) -> create_nodes(5) end),
-    Config.
-
-create_nodes(Num) ->
-    lists:map(fun(I) ->
-                      Node = list_to_atom("node" ++ integer_to_list(I)),
-                      Hash = erlang:phash2(Node, trunc(math:pow(2, 32) - 1)),
-                      #member{node = Node, hash = Hash}
-              end, lists:seq(1, Num)).
-
-end_per_testcase(_TestCase, Config) ->
-    ok = meck:unload(ekka_membership),
-    Config.
-
 t_find_node(_) ->
-    ekka_ring:find_node(key, []).
-    %%io:format("Ring: ~p~n", [ekka_ring:ring()]).
+    ?assertEqual(n1, ekka_ring:find_node(key, ring(5))).
 
 t_find_nodes(_) ->
-    ekka_ring:find_nodes(key, 3, []).
-    %%io:format("Ring: ~p~n", [ekka_ring:ring()]).
+    ?assertEqual([n1,n5,n3], ekka_ring:find_nodes(key, ring(5))),
+    ?assertEqual([n1,n5,n3], ekka_ring:find_nodes(key, 3, ring(5))).
+
+ring(N) ->
+    Node = fun(I) -> list_to_atom("n" ++ integer_to_list(I)) end,
+    Hash = fun(I) -> erlang:phash2(I, 4294967295) end,
+    lists:keysort(#member.hash, [#member{node = Node(I),
+                                         hash = Hash(I)
+                                        } || I <- lists:seq(1, N)]).
 
