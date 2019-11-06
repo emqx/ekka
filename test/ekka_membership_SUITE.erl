@@ -24,13 +24,13 @@
 all() -> ekka_ct:all(?MODULE).
 
 init_per_testcase(_TestCase, Config) ->
+    ok = meck:new(ekka_mnesia, [non_strict, passthrough, no_history]),
+    ok = meck:expect(ekka_mnesia, cluster_status, fun(_) -> running end),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
+    ok = meck:unload(ekka_mnesia),
     Config.
-
-t_start_link(_) ->
-    error('TODO').
 
 t_lookup_member(_) ->
     error('TODO').
@@ -88,4 +88,9 @@ t_is_member(_) ->
 
 t_local_member(_) ->
     error('TODO').
+
+with_membership_server(TestFun) ->
+    {ok, _} = ekka_membership:start_link(),
+    TestFun(),
+    ekka_membership:stop().
 

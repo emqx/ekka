@@ -20,7 +20,7 @@
 
 -include("ekka.hrl").
 
--export([start_link/0]).
+-export([start_link/0, stop/0]).
 
 %% Ring API
 -export([ring/0, ring/1]).
@@ -75,7 +75,7 @@
 
 -record(state, {monitors, events}).
 
--type eventtype() :: partition | membership.
+-type(event_type() :: partition | membership).
 
 -define(SERVER, ?MODULE).
 -define(LOG(Level, Format, Args),
@@ -84,6 +84,10 @@
 -spec(start_link() -> {ok, pid()} | {error, term()}).
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+-spec(stop() -> ok).
+stop() ->
+    gen_server:stop(?SERVER).
 
 %%--------------------------------------------------------------------
 %% API
@@ -153,7 +157,7 @@ nodelist(Status) ->
 is_all_alive() ->
     length(ekka_mnesia:cluster_nodes(all) -- [node() | nodes()]) == 0.
 
--spec(monitor(eventtype(), pid() | function(), boolean()) -> ok).
+-spec(monitor(event_type(), pid() | function(), boolean()) -> ok).
 monitor(Type, PidOrFun, OnOff) ->
     call({monitor, {Type, PidOrFun, OnOff}}).
 
@@ -216,9 +220,9 @@ cast(Node, Msg) ->
 call(Req) ->
     gen_server:call(?SERVER, Req).
 
-%%%===================================================================
-%%% gen_server Callbacks
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% gen_server Callbacks
+%%--------------------------------------------------------------------
 
 init([]) ->
     _ = ets:new(membership, [ordered_set, protected, named_table, {keypos, 2}]),
@@ -306,7 +310,6 @@ handle_cast({healing, Node}, State) ->
     notify({node, healing, Node}, State),
     {noreply, State};
 
-
 handle_cast({ping, Member = #member{node = Node}}, State) ->
     pong(Node, local_member()),
     insert(Member#member{mnesia = ekka_mnesia:cluster_status(Node)}),
@@ -351,7 +354,6 @@ handle_cast({mnesia_down, Node}, State) ->
     end,
     notify({mnesia, down, Node}, State),
     {noreply, State};
-
 
 handle_cast({partition_occurred, Node}, State) ->
     notify(partition, {occurred, Node}, State),
@@ -419,8 +421,7 @@ del_monitor({Type, PidOrFun}, S = #state{monitors = Monitors}) ->
     case lists:keyfind({Type, PidOrFun}, 1, Monitors) of
         false -> S;
         {_, MRef} ->
-            is_pid(PidOrFun) andalso
-                erlang:demonitor(MRef, [flush]),
+            is_pid(PidOrFun) andalso erlang:demonitor(MRef, [flush]),
             S#state{monitors = lists:delete({{Type, PidOrFun}, MRef}, Monitors)}
     end.
 
