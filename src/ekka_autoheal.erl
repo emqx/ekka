@@ -22,7 +22,11 @@
         , handle_msg/2
         ]).
 
--record(?MODULE, {role, proc, timer}).
+-record(autoheal, {role, proc, timer}).
+
+-opaque(autoheal() :: #autoheal{}).
+
+-export_type([autoheal/0]).
 
 -define(DELAY, 12000).
 -define(LOG(Level, Format, Args),
@@ -31,7 +35,7 @@
 init() ->
     case enabled() of
         false -> undefined;
-        true  -> #?MODULE{}
+        true  -> #autoheal{}
     end.
 
 enabled() ->
@@ -39,28 +43,29 @@ enabled() ->
 
 proc(undefined) ->
     undefined;
-proc(#?MODULE{proc = Proc}) ->
+proc(#autoheal{proc = Proc}) ->
     Proc.
 
 handle_msg(Msg, undefined) ->
     ?LOG(error, "Autoheal not enabled! Unexpected msg: ~p", [Msg]), undefined;
 
-handle_msg({report_partition, _Node}, Autoheal = #?MODULE{proc = Proc})
+handle_msg({report_partition, _Node}, Autoheal = #autoheal{proc = Proc})
     when Proc =/= undefined ->
     Autoheal;
 
-handle_msg({report_partition, Node}, Autoheal = #?MODULE{timer = TRef}) ->
+handle_msg({report_partition, Node}, Autoheal = #autoheal{timer = TRef}) ->
     case ekka_membership:leader() =:= node() of
         true ->
             ensure_cancel_timer(TRef),
             TRef1 = ekka_node_monitor:run_after(?DELAY, {autoheal, {create_splitview, node()}}),
-            Autoheal#?MODULE{role = leader, timer = TRef1};
+            Autoheal#autoheal{role = leader, timer = TRef1};
         false ->
             ?LOG(critical, "I am not leader, but received partition report from ~s", [Node]),
             Autoheal
     end;
 
-handle_msg(Msg = {create_splitview, Node}, Autoheal = #?MODULE{timer = TRef}) when Node =:= node() ->
+handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{timer = TRef})
+  when Node =:= node() ->
     ensure_cancel_timer(TRef),
     case ekka_membership:is_all_alive() of
         true ->
@@ -72,31 +77,31 @@ handle_msg(Msg = {create_splitview, Node}, Autoheal = #?MODULE{timer = TRef}) wh
                 {_Views, BadNodes} ->
                     ?LOG(critical, "Bad nodes found when autoheal: ~p", [BadNodes])
             end,
-            Autoheal#?MODULE{timer = undefined};
+            Autoheal#autoheal{timer = undefined};
         false ->
-            Autoheal#?MODULE{timer = ekka_node_monitor:run_after(?DELAY, {autoheal, Msg})}
+            Autoheal#autoheal{timer = ekka_node_monitor:run_after(?DELAY, {autoheal, Msg})}
     end;
 
 handle_msg(Msg = {create_splitview, _Node}, Autoheal) ->
     ?LOG(critical, "I am not leader, but received : ~p", [Msg]),
     Autoheal;
 
-handle_msg({heal_partition, SplitView}, Autoheal = #?MODULE{proc = undefined}) ->
+handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined}) ->
     Proc = spawn_link(fun() ->
                           ?LOG(info, "Healing partition: ~p", [SplitView]),
                           _ = heal_partition(SplitView)
                       end),
-    Autoheal#?MODULE{role = coordinator, proc = Proc};
+    Autoheal#autoheal{role = coordinator, proc = Proc};
 
-handle_msg({heal_partition, SplitView}, Autoheal= #?MODULE{proc = _Proc}) ->
+handle_msg({heal_partition, SplitView}, Autoheal= #autoheal{proc = _Proc}) ->
     ?LOG(critical, "Unexpected heal_partition msg: ~p", [SplitView]),
     Autoheal;
 
-handle_msg({'EXIT', Pid, normal}, Autoheal = #?MODULE{proc = Pid}) ->
-    Autoheal#?MODULE{proc = undefined};
-handle_msg({'EXIT', Pid, Reason}, Autoheal = #?MODULE{proc = Pid}) ->
+handle_msg({'EXIT', Pid, normal}, Autoheal = #autoheal{proc = Pid}) ->
+    Autoheal#autoheal{proc = undefined};
+handle_msg({'EXIT', Pid, Reason}, Autoheal = #autoheal{proc = Pid}) ->
     ?LOG(critical, "Autoheal process crashed: ~s", [Reason]),
-    Autoheal#?MODULE{proc = undefined};
+    Autoheal#autoheal{proc = undefined};
 
 handle_msg(Msg, Autoheal) ->
     ?LOG(critical, "Unexpected msg: ~p", [Msg, Autoheal]),

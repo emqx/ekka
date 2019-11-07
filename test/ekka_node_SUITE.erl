@@ -24,14 +24,14 @@
 all() -> ekka_ct:all(?MODULE).
 
 t_parse_name(_) ->
+    io:format("~p~n", [code:get_path()]),
     'a@127.0.0.1' = ekka_node:parse_name("a@127.0.0.1"),
     'b@127.0.0.1' = ekka_node:parse_name("b").
 
 t_is_running(_) ->
-    error('TODO').
+    ?assertNot(ekka_node:is_running(ekka)).
 
 t_is_aliving(_) ->
-    io:format("Node: ~p~n", [node()]),
     true = ekka_node:is_aliving(node()),
     false = ekka_node:is_aliving('x@127.0.0.1').
 

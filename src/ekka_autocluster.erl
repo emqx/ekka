@@ -18,7 +18,7 @@
 
 -include("ekka.hrl").
 
--export([enabled/0, run/1, unregister_node/0]).
+-export([enabled/0 , run/1, unregister_node/0]).
 
 -export([acquire_lock/1, release_lock/1]).
 
@@ -162,6 +162,5 @@ find_oldest_node(Nodes) ->
 
 log_error(Format, {error, Reason}) ->
     ?LOG(error, Format ++ " error: ~p", [Reason]);
-log_error(_Format, _Ok) ->
-    ok.
+log_error(_Format, _Ok) -> ok.
 

@@ -24,20 +24,32 @@
 all() -> ekka_ct:all(?MODULE).
 
 init_per_testcase(_TestCase, Config) ->
+    application:set_env(ekka, cluster_autoheal, true),
+    ok = meck:new(ekka_membership, [non_strict, passthrough, no_history]),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
+    ok = meck:unload(ekka_membership),
+    application:unset_env(ekka, cluster_autoheal),
     Config.
 
 t_init(_) ->
-    error('TODO').
+    ?assertEqual(autoheal, element(1, ekka_autoheal:init())).
 
 t_enabled(_) ->
-    error('TODO').
+    ?assert(ekka_autoheal:enabled()).
 
 t_proc(_) ->
-    error('TODO').
+    undefined = ekka_autoheal:proc(ekka_autoheal:init()).
 
-t_handle_msg(_) ->
-    error('TODO').
+t_handle_report_partition_msg(_) ->
+    ok = meck:expect(ekka_membership, leader, fun() -> node() end),
+    ekka_autoheal:handle_msg({report_partition, node()}, ekka_autoheal:init()).
+
+t_handle_create_splitview_msg(_) ->
+    ok = meck:expect(ekka_membership, is_all_alive, fun() -> true end),
+    ekka_autoheal:handle_msg({create_splitview, node()}, ekka_autoheal:init()).
+
+t_handle_heal_partition_msg(_) ->
+    ekka_autoheal:handle_msg({heal_partition, [node()]}, ekka_autoheal:init()).
 

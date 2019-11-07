@@ -128,6 +128,7 @@ nodelist() ->
 nodelist(Status) ->
     ekka_membership:nodelist(Status).
 
+%% TODO: rename to cluster_info?
 %% Status of the cluster
 status() ->
     [{members, members()}, {partitions, ekka_node_monitor:partitions()}].
@@ -176,9 +177,7 @@ force_leave(Node) ->
 monitor(Type) when ?IS_MON_TYPE(Type) ->
     ekka_membership:monitor(Type, self(), true).
 
-monitor(Type, Fun)
-  when is_function(Fun),
-       ?IS_MON_TYPE(Type) ->
+monitor(Type, Fun) when is_function(Fun), ?IS_MON_TYPE(Type) ->
     ekka_membership:monitor(Type, Fun, true).
 
 unmonitor(Type) when ?IS_MON_TYPE(Type) ->

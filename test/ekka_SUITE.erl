@@ -17,33 +17,26 @@
 -module(ekka_SUITE).
 
 -compile(export_all).
+-compile(nowarn_export_all).
 
 -include("ekka.hrl").
-
 -include_lib("eunit/include/eunit.hrl").
-
 -include_lib("common_test/include/ct.hrl").
-
 -define(CONTENT_TYPE, "application/x-www-form-urlencoded").
 
-all() ->
-     [{group, cluster}].
-
-groups() ->
-    [{cluster, [sequence],
-     [cluster_test,
-      cluster_join,
-      cluster_leave,
-      cluster_remove,
-      cluster_remove2
-     ]}].
+all() -> ekka_ct:all(?MODULE).
 
 init_per_suite(Config) ->
-    NewConfig = generate_config(),
-    Vals = proplists:get_value(ekka, NewConfig),
-    [application:set_env(ekka, Par, Value) || {Par, Value} <- Vals],
+    DataDir = proplists:get_value(data_dir, Config),
+    Envs = proplists:get_value(ekka, generate_envs(DataDir)),
+    [application:set_env(ekka, Par, Val) || {Par, Val} <- Envs],
     application:ensure_all_started(ekka),
     Config.
+
+generate_envs(DataDir) ->
+    Schema = cuttlefish_schema:files([filename:join([DataDir, "ekka.schema"])]),
+    Config = conf_parse:file([filename:join([DataDir, "ekka.conf"])]),
+    cuttlefish_generator:map(Schema, Config).
 
 end_per_suite(_Config) ->
     application:stop(ekka),
@@ -52,180 +45,130 @@ end_per_suite(_Config) ->
 %%--------------------------------------------------------------------
 %% cluster group
 %%--------------------------------------------------------------------
-cluster_test(_Config) ->
-    Z = slave(ekka, cluster_test_z),
-    wait_running(Z),
-    true = ekka:is_running(Z, ekka),
-    Node = node(),
-    ok  = rpc:call(Z, ekka_cluster, join, [Node]),
-    [Z, Node] = lists:sort(mnesia:system_info(running_db_nodes)),
-    ok = rpc:call(Z, ekka_cluster, leave, []),
-    [Node] = lists:sort(mnesia:system_info(running_db_nodes)),
-    ok = slave:stop(Z).
 
-cluster_join(_Config) ->
-    Z = slave(ekka, cluster_join_z),
-    Z1 = slave(ekka, cluster_join_z1),
-    N = slave(node, cluster_join_n),
-    wait_running(Z),
-    true = ekka:is_running(Z, ekka),
-    true = ekka:is_running(Z1, ekka),
-    Node = node(),
+t_cluster(_Config) ->
+    N0 = node(),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ekka_ct:wait_running(N1),
+    true = ekka:is_running(N1, ekka),
+    ok = rpc:call(N1, ekka_cluster, join, [N0]),
+    [N1, N0] = lists:sort(mnesia:system_info(running_db_nodes)),
+    ok = rpc:call(N1, ekka_cluster, leave, []),
+    [N0] = lists:sort(mnesia:system_info(running_db_nodes)),
+    ok = ekka_ct:stop_slave(N1).
+
+t_cluster_join(_Config) ->
+    N0 = node(),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    N2 = ekka_ct:start_slave(ekka, n2),
+    N3 = ekka_ct:start_slave(node, n3),
+    ekka_ct:wait_running(N1),
+    ekka_ct:wait_running(N2),
+    true = ekka:is_running(N1, ekka),
+    true = ekka:is_running(N2, ekka),
     %% case1
-    ignore = ekka:join(Node),
+    ignore = ekka:join(N0),
     %% case2
-    {error, {node_down, _}} = ekka:join(N),
+    {error, {node_down, _}} = ekka:join(N3),
     %% case3
-    ok = ekka:join(Z),
+    ok = ekka:join(N1),
     Cluster = ekka_cluster:status(),
-    [Z, Node] = proplists:get_value(running_nodes, Cluster),
+    [N1, N0] = proplists:get_value(running_nodes, Cluster),
     %% case4
-    ok = ekka:join(Z1),
+    ok = ekka:join(N2),
     Cluster1 = ekka_cluster:status(),
-    [Z1, Node] = proplists:get_value(running_nodes, Cluster1),
-    true = rpc:call(Z, ekka, is_running, [Z, ekka]),
+    [N2, N0] = proplists:get_value(running_nodes, Cluster1),
+    true = rpc:call(N1, ekka, is_running, [N1, ekka]),
     %% case4
-    ok = rpc:call(Z, ekka, join, [Z1]),
+    ok = rpc:call(N1, ekka, join, [N2]),
     ?assertEqual(3, length(proplists:get_value(running_nodes, ekka_cluster:status()))),
     %% case5
-    slave:stop(Z),
+    ekka_ct:stop_slave(N1),
     timer:sleep(100),
     ?assertEqual(2, length(proplists:get_value(running_nodes, ekka_cluster:status()))),
     ?assertEqual(1, length(proplists:get_value(stopped_nodes, ekka_cluster:status()))),
-    slave:stop(N),
-    slave:stop(Z1).
+    ekka_ct:stop_slave(N2),
+    ekka_ct:stop_slave(N3).
 
-cluster_leave(_Config) ->
-    Z = slave(ekka, cluster_leave_z),
-    wait_running(Z),
+t_cluster_leave(_Config) ->
+    N0 = node(),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ekka_ct:wait_running(N1),
     {error, node_not_in_cluster} = ekka_cluster:leave(),
-    ok = ekka_cluster:join(Z),
-    Node = node(),
-    [Z, Node] = ekka_mnesia:running_nodes(),
+    ok = ekka_cluster:join(N1),
+    [N1, N0] = ekka_mnesia:running_nodes(),
     ok = ekka_cluster:leave(),
-    [Node] = ekka_mnesia:running_nodes(),
-    slave:stop(Z).
+    [N0] = ekka_mnesia:running_nodes(),
+    ekka_ct:stop_slave(N1).
 
-cluster_remove(_Config) ->
-    Z = slave(ekka, cluster_remove_z),
-    wait_running(Z),
-    Node = node(),
-    ignore = ekka_cluster:force_leave(Node),
-    ok = ekka_cluster:join(Z),
-    [Z, Node] = ekka_mnesia:running_nodes(),
-    ok = ekka_cluster:force_leave(Z),
-    [Node] = ekka_mnesia:running_nodes(),
-    slave:stop(Z).
+t_cluster_remove(_Config) ->
+    N0 = node(),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ok = ekka_ct:wait_running(N1),
+    ignore = ekka_cluster:force_leave(N0),
+    ok = ekka_cluster:join(N1),
+    [N1, N0] = ekka_mnesia:running_nodes(),
+    ok = ekka_cluster:force_leave(N1),
+    [N0] = ekka_mnesia:running_nodes(),
+    ekka_ct:stop_slave(N0).
 
-cluster_remove2(_Config) ->
-    Z = slave(ekka, cluster_remove2_z),
-    wait_running(Z),
-    ok = ekka_cluster:join(Z),
-    Node = node(),
-    [Z, Node] = ekka_mnesia:running_nodes(),
-    ok = ekka_cluster:force_leave(Z),
-    ok = rpc:call(Z, ekka_mnesia, ensure_stopped, []),
-    [Node] = ekka_mnesia:running_nodes(),
-    slave:stop(Z).
-
-host() -> [_, Host] = string:tokens(atom_to_list(node()), "@"), Host.
-
-wait_running(Node) ->
-    wait_running(Node, 30000).
-
-wait_running(Node, Timeout) when Timeout < 0 ->
-    throw({wait_timeout, Node});
-
-wait_running(Node, Timeout) ->
-    case rpc:call(Node, ekka, is_running, [Node, ekka]) of
-        true  -> ok;
-        false -> timer:sleep(100),
-                 wait_running(Node, Timeout - 100)
-    end.
-
-slave(ekka, Node) ->
-    {ok, Ekka} = slave:start(host(), Node, ensure_slave()),
-    rpc:call(Ekka, application, ensure_all_started, [ekka]),
-    Ekka;
-
-slave(node, Node) ->
-    {ok, N} = slave:start(host(), Node, ensure_slave()),
-    N.
-
-generate_config() ->
-    Schema = cuttlefish_schema:files([local_path(["priv", "ekka.schema"])]),
-    Conf = conf_parse:file([local_path(["etc", "ekka.conf.example"])]),
-    cuttlefish_generator:map(Schema, Conf).
-
-get_base_dir(Module) ->
-    {file, Here} = code:is_loaded(Module),
-    filename:dirname(filename:dirname(Here)).
-
-get_base_dir() ->
-    get_base_dir(?MODULE).
-
-local_path(Components, Module) ->
-    filename:join([get_base_dir(Module) | Components]).
-
-local_path(Components) ->
-    local_path(Components, ?MODULE).
-
-ensure_slave() ->
-    EbinDir = local_path(["ebin"]),
-    DepsDir = local_path(["deps", "*", "ebin"]),
-    "-pa " ++ EbinDir ++ " -pa " ++ DepsDir.
+t_cluster_remove2(_Config) ->
+    N0 = node(),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ok = emqx_ct:wait_running(N1),
+    ok = ekka_cluster:join(N1),
+    [N1, N0] = ekka_mnesia:running_nodes(),
+    ok = ekka_cluster:force_leave(N1),
+    ok = rpc:call(N1, ekka_mnesia, ensure_stopped, []),
+    [N0] = ekka_mnesia:running_nodes(),
+    ekka_ct:stop_slave(N1).
 
 t_env(_) ->
-    error('TODO').
+    {ok, ekka} = ekka:env(cluster_name),
+    {manual, []} = ekka:env(cluster_discovery).
 
 t_callback(_) ->
-    error('TODO').
+    undefined = ekka:callback(shutdown).
 
 t_autocluster(_) ->
-    error('TODO').
+    ekka:autocluster().
 
 t_members(_) ->
-    error('TODO').
+    %% -spec(members() -> list(member())).
+    [] = ekka:members().
 
 t_local_member(_) ->
-    error('TODO').
+    %% -spec(local_member() -> member()).
+    #member{node = Node, status = up} = ekka:local_member(),
+    ?assertEqual(Node, node()).
 
 t_is_member(_) ->
-    error('TODO').
+    %% -spec(is_member(node()) -> boolean()).
+    ?assert(ekka:is_member(node())).
 
 t_nodelist(_) ->
-    error('TODO').
+    %% -spec(nodelist() -> list(node())).
+    ?assertEqual([node()], ekka:nodelist()).
 
 t_status(_) ->
-    error('TODO').
+    %% [{members, members()}, {partitions, ekka_node_monitor:partitions()}].
+    [{members, Members}, {partitions, []}] = ekka:status(),
+    ?assertEqual(1, length(Members)).
 
 t_is_aliving(_) ->
-    error('TODO').
+    %% -spec(is_aliving(node()) -> boolean()).
+    ?assert(ekka:is_aliving(node())).
 
 t_is_running(_) ->
-    error('TODO').
+    %% -spec(is_running(node(), atom()) -> boolean()).
+    ?assert(ekka:is_running(node(), ekka)).
 
 t_cluster_name(_) ->
-    error('TODO').
+    %% -spec(cluster_name() -> cluster()).
+    ekka = ekka:cluster_name().
 
-t_join(_) ->
-    error('TODO').
-
-t_leave(_) ->
-    error('TODO').
-
-t_force_leave(_) ->
-    error('TODO').
-
-t_monitor(_) ->
-    error('TODO').
-
-t_unmonitor(_) ->
-    error('TODO').
-
-t_lock(_) ->
-    error('TODO').
-
-t_unlock(_) ->
-    error('TODO').
+t_lock_unlock(_) ->
+    {true, Nodes} = ekka:lock(resource),
+    {true, Nodes} = ekka:unlock(resource),
+    ?assertEqual(Nodes, [node()]).
 

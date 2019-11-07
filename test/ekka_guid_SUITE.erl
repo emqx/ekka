@@ -14,8 +14,6 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
-%% TODO: generate 1024 guids
-
 -module(ekka_guid_SUITE).
 
 -compile(export_all).

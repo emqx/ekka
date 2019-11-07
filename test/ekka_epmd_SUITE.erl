@@ -23,21 +23,16 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
 t_start_link(_) ->
-    error('TODO').
+    ignore = ekka_epmd:start_link().
 
 t_register_node(_) ->
-    error('TODO').
+    {ok, X} = ekka_epmd:register_node('n@127.0.0.1', 4370),
+    ?assert(is_integer(X) and (1 =< X) and (X =< 3)).
 
 t_port_please(_) ->
-    error('TODO').
+    ?assertEqual({port, 4370, 5}, ekka_epmd:port_please('n@127.0.0.1', {127,0,0,1})).
 
 t_names(_) ->
-    error('TODO').
+    ?assertEqual({error, address}, ekka_epmd:names()).
 

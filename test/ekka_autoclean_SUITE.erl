@@ -23,10 +23,8 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-t_init(_) ->
-    error('TODO').
-
 t_check(_) ->
-    State = ekka_autoclean:init(),
-    ekka_autoclean:check(State).
+    application:set_env(ekka, cluster_autoclean, 4000),
+    ekka_autoclean:check(ekka_autoclean:init()),
+    application:unset_env(ekka, cluster_autoclean).
 

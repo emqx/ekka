@@ -21,7 +21,16 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-record(test_table, {key, val}).
+
 all() -> ekka_ct:all(?MODULE).
+
+init_per_suite(Config) ->
+    ok = ekka_mnesia:start(),
+    Config.
+
+end_per_suite(_Config) ->
+    ekka_mnesia:ensure_stopped().
 
 init_per_testcase(_TestCase, Config) ->
     Config.
@@ -30,53 +39,56 @@ end_per_testcase(_TestCase, Config) ->
     Config.
 
 t_data_dir(_) ->
-    error('TODO').
+    ekka_mnesia:data_dir().
 
 t_create_table(_) ->
-    error('TODO').
-
-t_copy_table(_) ->
-    error('TODO').
+    ok = ekka_mnesia:create_table(test_table, [
+            {type, set}, {disc_copies, [node()]},
+            {record_name, test_table},
+            {attributes, record_info(fields, test_table)}]),
+    ok = ekka_mnesia:copy_table(test_table, disc_copies).
 
 t_copy_schema(_) ->
-    error('TODO').
+    ok = ekka_mnesia:copy_schema(node()).
 
 t_delete_schema(_) ->
-    error('TODO').
+    ok = ekka_mnesia:delete_schema().
 
 t_del_schema_copy(_) ->
-    error('TODO').
+    ok = ekka_mnesia:del_schema_copy(node()).
 
 t_cluster_view(_) ->
-    error('TODO').
+    [] = ekka_mnesia:cluster_view().
 
 t_connect(_) ->
-    error('TODO').
+    %% -spec(connect(node()) -> ok | {error, any()}).
+    ok.
 
 t_cluster_status(_) ->
-    error('TODO').
-
-t_ensure_stopped(_) ->
-    error('TODO').
+    %% -spec(cluster_status(node()) -> running | stopped | false).
+    ok.
 
 t_remove_from_cluster(_) ->
-    error('TODO').
+    %% -spec(remove_from_cluster(node()) -> ok | {error, any()}).
+    ok.
 
 t_leave_cluster(_) ->
-    error('TODO').
+    %% -spec(leave_cluster(node()) -> ok | {error, any()}).
+    ok.
 
 t_running_nodes(_) ->
+    %% -spec(running_nodes() -> list(node())).
     error('TODO').
 
 t_join_cluster(_) ->
+    %% -spec(join_cluster(node()) -> ok).
     error('TODO').
 
 t_is_node_in_cluster(_) ->
+    %% -spec(is_node_in_cluster(node()) -> boolean()).
     error('TODO').
 
 t_cluster_nodes(_) ->
-    error('TODO').
-
-t_start(_) ->
+    %% -spec(cluster_nodes(all | running | stopped) -> [node()]).
     error('TODO').
 

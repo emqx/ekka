@@ -232,7 +232,8 @@ init([]) ->
                       end,
     LocalMember = with_hash(#member{node = node(), guid = ekka_guid:gen(),
                                     status = up, mnesia = IsMnesiaRunning,
-                                    ltime = erlang:timestamp()}),
+                                    ltime = erlang:timestamp()
+                                   }),
     true = ets:insert(membership, LocalMember),
     lists:foreach(fun(Node) ->
                       spawn(?MODULE, ping, [Node, LocalMember])

@@ -25,13 +25,13 @@ all(Suite) ->
                       string:substr(atom_to_list(F), 1, 2) == "t_"
                 ]).
 
-start_slave(node, Node) ->
-    {ok, N} = slave:start(host(), Node, ebin_path()),
-    N;
-start_slave(ekka, Node) ->
-    {ok, Ekka} = slave:start(host(), Node, ebin_path()),
-    rpc:call(Ekka, application, ensure_all_started, [ekka]),
-    Ekka.
+start_slave(node, Name) ->
+    {ok, Node} = slave:start(host(), Name, ebin_path()),
+    Node;
+start_slave(ekka, Name) ->
+    {ok, Node} = slave:start(host(), Name, ebin_path()),
+    rpc:call(Node, ekka, start, []),
+    Node.
 
 wait_running(Node) ->
     wait_running(Node, 30000).
@@ -53,20 +53,8 @@ host() ->
     [_, Host] = string:tokens(atom_to_list(node()), "@"), Host.
 
 ebin_path() ->
-    EbinDir = local_path(["ebin"]),
-    DepsDir = local_path(["deps", "*", "ebin"]),
-    "-pa " ++ EbinDir ++ " -pa " ++ DepsDir.
+    string:join(["-pa" | lists:filter(fun is_lib/1, code:get_path())], " ").
 
-get_base_dir(Module) ->
-    {file, Here} = code:is_loaded(Module),
-    filename:dirname(filename:dirname(Here)).
-
-get_base_dir() ->
-    get_base_dir(?MODULE).
-
-local_path(Components, Module) ->
-    filename:join([get_base_dir(Module) | Components]).
-
-local_path(Components) ->
-    local_path(Components, ?MODULE).
+is_lib(Path) ->
+    string:prefix(Path, code:lib_dir()) =:= nomatch.
 

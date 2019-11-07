@@ -21,7 +21,7 @@
 -include("ekka.hrl").
 
 %% API
--export([start_link/0]).
+-export([start_link/0, stop/0]).
 
 -export([partitions/0]).
 
@@ -40,8 +40,8 @@
 -record(state, {
           partitions :: list(node()),
           heartbeat  :: undefined | reference(),
-          autoheal,
-          autoclean
+          autoheal   :: ekka_autoheal:autoheal(),
+          autoclean  :: ekka_autoclean:autoclean()
          }).
 
 -define(SERVER, ?MODULE).
@@ -52,6 +52,8 @@
 -spec(start_link() -> {ok, pid()} | {error, term()}).
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+stop() -> gen_server:stop(?SERVER).
 
 %% @doc Get partitions.
 partitions() ->

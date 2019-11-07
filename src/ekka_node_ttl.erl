@@ -19,7 +19,7 @@
 -behaviour(gen_statem).
 
 %% API
--export([start_link/2]).
+-export([start_link/2, stop/0]).
 
 %% gen_statem callbacks
 -export([ init/1
@@ -33,6 +33,8 @@
 
 start_link(Ttl, MFA) ->
     gen_statem:start_link({local, ?MODULE}, ?MODULE, [Ttl, MFA], []).
+
+stop() -> gen_statem:stop(?MODULE).
 
 %%--------------------------------------------------------------------
 %% gen_statem callbacks
