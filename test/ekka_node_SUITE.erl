@@ -23,15 +23,23 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-t_parse_name(_) ->
-    io:format("~p~n", [code:get_path()]),
-    'a@127.0.0.1' = ekka_node:parse_name("a@127.0.0.1"),
-    'b@127.0.0.1' = ekka_node:parse_name("b").
-
-t_is_running(_) ->
-    ?assertNot(ekka_node:is_running(ekka)).
-
 t_is_aliving(_) ->
-    true = ekka_node:is_aliving(node()),
-    false = ekka_node:is_aliving('x@127.0.0.1').
+    false = ekka_node:is_aliving('x@127.0.0.1'),
+    true = ekka_node:is_aliving(node()).
+
+t_parse_name(_) ->
+    ?assertEqual('a@127.0.0.1', ekka_node:parse_name("a@127.0.0.1")),
+    [_Node, Host] = string:tokens(atom_to_list(node()), "@"),
+    ?assertEqual(list_to_atom("b@" ++ Host), ekka_node:parse_name("b")).
+
+t_is_running_1(_) ->
+    false = ekka_node:is_running(ekka),
+    false = ekka_node:is_running('x@127.0.0.1', ekka).
+
+t_is_running_2(_) ->
+    ok = ekka:start(),
+    true = ekka_node:is_running(ekka),
+    true = ekka_node:is_running(node(), ekka),
+    ok = ekka:stop(),
+    ok = ekka_mnesia:ensure_stopped().
 
