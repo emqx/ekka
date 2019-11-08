@@ -33,30 +33,39 @@ end_per_testcase(_TestCase, Config) ->
 
 t_get(_) ->
     ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) ->
-                                             {ok, 200, <<"{\"key\": \"value\"}">>}
+                                             {ok, {{"HTTP/1.1", 204, "OK"}, [], <<"[]">>}}
+                                     end),
+    {ok, []} = ekka_httpc:get("localhost", "nodes", [{name, <<"node1">>}]),
+    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) ->
+                                             {ok, {{"HTTP/1.1", 200, "OK"}, [], <<"{\"key\": \"value\"}">>}}
                                      end),
     {ok, #{<<"key">> := <<"value">>}} = ekka_httpc:get("localhost", "nodes", [{name, <<"node1">>}]).
 
 t_post(_) ->
     ok = meck:expect(httpc, request, fun(post, _Req, _Opts, _) ->
-                                             {ok, 200, <<"{\"code\": 0}">>}
+                                             {ok, {201, <<"{\"code\": 0}">>}}
                                      end),
     {ok, #{<<"code">> := 0}} = ekka_httpc:post("localhost", "path", [{name, <<"x">>}]).
 
 t_put(_) ->
     ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
-                                             {ok, 200, <<"{\"code\": 0}">>}
+                                             {ok, {200, <<"{\"code\": 0}">>}}
                                      end),
     {ok, #{<<"code">> := 0}} = ekka_httpc:put("localhost", "path", [{name, <<"x">>}]).
 
 t_delete(_) ->
     ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
-                                             {ok, 200, <<"{\"code\": 0}">>}
+                                             {ok, {200, <<"{\"code\": 0}">>}}
                                      end),
     {ok, #{<<"code">> := 0}} = ekka_httpc:delete("localhost", "path", [{name, <<"x">>}]).
 
 t_build_url(_) ->
-   ?assertEqual("localhost/nodes/1", ekka_httpc:build_url("localhost", "nodes/1")),
-   ?assertEqual("localhost/nodes/1?a=b&c=d", ekka_httpc:build_url("localhost", "nodes/1", [{a, b}, {c, d}])),
-   ?assertEqual("localhost/nodes/1?a=b%2Fc%2Fd", ekka_httpc:build_url("localhost", "nodes/1", [{a, "b/c/d"}])).
+   ?assertEqual("localhost/nodes/1",
+                ekka_httpc:build_url("localhost", "nodes/1")),
+   ?assertEqual("localhost/nodes/1?a=b&c=d",
+                ekka_httpc:build_url("localhost", "nodes/1", [{a, b}, {c, d}])),
+   ?assertEqual("localhost/nodes/1?a=b%2Fc%2Fd",
+                ekka_httpc:build_url("localhost", "nodes/1", [{a, "b/c/d"}])),
+   ?assertEqual("localhost/nodes/1?a=b%2Fc%2Fd&e=5",
+                ekka_httpc:build_url("localhost", "nodes/1", [{a, "b/c/d"}, {e, 5}])).
 
