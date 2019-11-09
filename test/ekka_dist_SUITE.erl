@@ -24,7 +24,7 @@
 all() -> ekka_ct:all(?MODULE).
 
 init_per_testcase(_TestCase, Config) ->
-    ok = meck:new(inet_tcp_dist, [non_strict, passthrough, no_history]),
+    ok = meck:new(inet_tcp_dist, [unstick, non_strict, passthrough, no_history]),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
@@ -32,8 +32,8 @@ end_per_testcase(_TestCase, Config) ->
     Config.
 
 t_listen(_) ->
-    ok = meck:expect(inet_tcp_dist, listen, fun(Port, Opts) ->
-                                                    gen_tcp:listen(Port, Opts)
+    ok = meck:expect(inet_tcp_dist, listen, fun(_Name) ->
+                                                    gen_tcp:listen(0, [])
                                             end),
     {ok, Sock} = ekka_dist:listen('n@127.0.0.1'),
     ?assert(is_port(Sock)).
@@ -43,9 +43,10 @@ t_select(_) ->
     ?assert(ekka_dist:select('n@127.0.0.1')).
 
 t_accept(_) ->
-    ok = meck:expect(inet_tcp_dist, accept, fun(_) -> self() end),
+    Self = self(),
+    ok = meck:expect(inet_tcp_dist, accept, fun(_) -> Self end),
     {ok, LSock} = gen_tcp:listen(4370, []),
-    ?assert(ekka_dist:accept(LSock)),
+    Self = ekka_dist:accept(LSock),
     ok = gen_tcp:close(LSock).
 
 t_accept_connection(_) -> ok.

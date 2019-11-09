@@ -38,36 +38,36 @@ end_per_testcase(_TestCase, Config) ->
 
 t_lookup_member(_) ->
     false = ekka_membership:lookup_member('node@127.0.0.1'),
-    #member{node = 'ekkact1@127.0.0.1', status = up}
-        = ekka_membership:lookup_member('ekkact1@127.0.0.1').
+    #member{node = 'n1@127.0.0.1', status = up}
+        = ekka_membership:lookup_member('n1@127.0.0.1').
 
 t_coordinator(_) ->
     ?assertEqual(node(), ekka_membership:coordinator()),
-    Nodes = ['ekkact1@127.0.0.1', 'ekkact2@127.0.0.1', 'ekkact3@127.0.0.1'],
-    ?assertEqual('ekkact1@127.0.0.1', ekka_membership:coordinator(Nodes)).
+    Nodes = ['n1@127.0.0.1', 'n2@127.0.0.1', 'n3@127.0.0.1'],
+    ?assertEqual('n1@127.0.0.1', ekka_membership:coordinator(Nodes)).
 
 t_node_down_up(_) ->
     ok = meck:expect(ekka_mnesia, is_node_in_cluster, fun(_) -> true end),
-    ok = ekka_membership:node_down('ekkact2@127.0.0.1'),
+    ok = ekka_membership:node_down('n2@127.0.0.1'),
     ok = timer:sleep(100),
-    #member{status = down} = ekka_membership:lookup_member('ekkact2@127.0.0.1'),
-    ok = ekka_membership:node_up('ekkact2@127.0.0.1'),
+    #member{status = down} = ekka_membership:lookup_member('n2@127.0.0.1'),
+    ok = ekka_membership:node_up('n2@127.0.0.1'),
     ok = timer:sleep(100),
-    #member{status = up} = ekka_membership:lookup_member('ekkact2@127.0.0.1').
+    #member{status = up} = ekka_membership:lookup_member('n2@127.0.0.1').
 
 t_mnesia_down_up(_) ->
-    ok = ekka_membership:mnesia_down('ekkact2@127.0.0.1'),
+    ok = ekka_membership:mnesia_down('n2@127.0.0.1'),
     ok = timer:sleep(100),
-    #member{mnesia = stopped} = ekka_membership:lookup_member('ekkact2@127.0.0.1'),
-    ok = ekka_membership:mnesia_up('ekkact2@127.0.0.1'),
+    #member{mnesia = stopped} = ekka_membership:lookup_member('n2@127.0.0.1'),
+    ok = ekka_membership:mnesia_up('n2@127.0.0.1'),
     ok = timer:sleep(100),
-    #member{status = up, mnesia = running} = ekka_membership:lookup_member('ekkact2@127.0.0.1').
+    #member{status = up, mnesia = running} = ekka_membership:lookup_member('n2@127.0.0.1').
 
 t_partition_occurred(_) ->
-    ok = ekka_membership:partition_occurred('ekkact2@127.0.0.1').
+    ok = ekka_membership:partition_occurred('n2@127.0.0.1').
 
 t_partition_healed(_) ->
-    ok = ekka_membership:partition_healed(['ekkact2@127.0.0.1']).
+    ok = ekka_membership:partition_healed(['n2@127.0.0.1']).
 
 t_announce(_) ->
     ok = ekka_membership:announce(leave).
@@ -82,15 +82,17 @@ t_members(_) ->
     ?assertEqual(4, length(ekka_membership:members())).
 
 t_nodelist(_) ->
-    ?assertEqual(['ekkact1@127.0.0.1',
-                  'ekkact2@127.0.0.1',
-                  'ekkact3@127.0.0.1',
-                  node()], ekka_membership:nodelist()).
+    Nodes = lists:sort([node(),
+                        'n1@127.0.0.1',
+                        'n2@127.0.0.1',
+                        'n3@127.0.0.1'
+                       ]),
+    ?assertEqual(Nodes, lists:sort(ekka_membership:nodelist())).
 
 t_is_member(_) ->
-    ?assert(ekka_membership:is_member('ekkact1@127.0.0.1')),
-    ?assert(ekka_membership:is_member('ekkact2@127.0.0.1')),
-    ?assert(ekka_membership:is_member('ekkact3@127.0.0.1')).
+    ?assert(ekka_membership:is_member('n1@127.0.0.1')),
+    ?assert(ekka_membership:is_member('n2@127.0.0.1')),
+    ?assert(ekka_membership:is_member('n3@127.0.0.1')).
 
 t_local_member(_) ->
     #member{node = Node} = ekka_membership:local_member(),
@@ -106,7 +108,7 @@ init_membership(N) ->
                   end, lists:map(fun member/1, lists:seq(1, N))).
 
 member(I) ->
-    Node = list_to_atom("ekkact" ++ integer_to_list(I) ++ "@127.0.0.1"),
+    Node = list_to_atom("n" ++ integer_to_list(I) ++ "@127.0.0.1"),
     #member{node   = Node,
             addr   = {{127,0,0,1}, 5000 + I},
             guid   = ekka_guid:gen(),

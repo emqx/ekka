@@ -28,7 +28,13 @@
         , unregister/1
         ]).
 
--export([start_link/1, stop/0]).
+-export([ ensure_started/1
+        , start_link/1
+        , stop/0
+        ]).
+
+%% For tests
+-export([get_sock/0]).
 
 %% gen_server Callbacks
 -export([ init/1
@@ -85,6 +91,10 @@ register(_Options) ->
 unregister(_Options) ->
     ignore.
 
+%%--------------------------------------------------------------------
+%% Start/stop mcast server
+%%--------------------------------------------------------------------
+
 ensure_started(Options) ->
     case ekka_cluster_sup:start_child(?SERVER, [Options]) of
         {ok, Pid} -> Pid;
@@ -97,6 +107,10 @@ start_link(Options) ->
 
 -spec(stop() -> ok).
 stop() -> gen_server:stop(?SERVER).
+
+-spec(get_sock() -> inet:socket()).
+get_sock() ->
+    gen_server:call(?SERVER, get_sock).
 
 %%--------------------------------------------------------------------
 %% gen_server callbacks
@@ -126,6 +140,9 @@ handle_call(discover, From, State = #state{sock = Sock, addr = Addr,
                   end, Ports),
     erlang:send_after(3000, self(), {reply, discover, From}),
     {noreply, State};
+
+handle_call(get_sock, _From, State = #state{sock = Sock}) ->
+    {reply, Sock, State};
 
 handle_call(Req, _From, State) ->
     ?LOG(error, "Unexpected call: ~p", [Req]),

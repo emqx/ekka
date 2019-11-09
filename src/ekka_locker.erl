@@ -229,9 +229,9 @@ release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
 merge_results(ResL) ->
     merge_results(ResL, [], []).
 merge_results([], Succ, []) ->
-    {true, Succ};
+    {true, lists:flatten(Succ)};
 merge_results([], _, Failed) ->
-    {false, Failed};
+    {false, lists:flatten(Failed)};
 merge_results([{true, Res}|ResL], Succ, Failed) ->
     merge_results(ResL, [Res|Succ], Failed);
 merge_results([{false, Res}|ResL], Succ, Failed) ->
@@ -274,7 +274,6 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
 
 handle_info({'DOWN', _MRef, process, DownPid, _Reason},
             State = #state{locks = Tab, monitors = Monitors}) ->
-    io:format("Lock owner DOWN: ~p~n", [DownPid]),
     case maps:find(DownPid, Monitors) of
         {ok, Resources} ->
             lists:foreach(

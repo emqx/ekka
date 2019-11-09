@@ -19,18 +19,36 @@
 -include("ekka.hrl").
 
 %% Start and stop mnesia
--export([start/0, ensure_started/0, ensure_stopped/0, connect/1]).
+-export([ start/0
+        , ensure_started/0
+        , ensure_stopped/0
+        , connect/1
+        ]).
 
-%% Cluster mnesia
--export([join_cluster/1, leave_cluster/0, remove_from_cluster/1,
-         cluster_status/0, cluster_status/1, cluster_view/0,
-         cluster_nodes/1, running_nodes/0]).
+%% Mnesia Cluster API
+-export([ join_cluster/1
+        , leave_cluster/0
+        , remove_from_cluster/1
+        , cluster_info/0
+        , cluster_status/1
+        , cluster_view/0
+        , cluster_nodes/1
+        , running_nodes/0
+        ]).
 
--export([is_node_in_cluster/0, is_node_in_cluster/1]).
+-export([ is_node_in_cluster/0
+        , is_node_in_cluster/1
+        ]).
 
 %% Dir, schema and tables
--export([data_dir/0, copy_schema/1, delete_schema/0, del_schema_copy/1,
-         create_table/2, copy_table/1, copy_table/2]).
+-export([ data_dir/0
+        , copy_schema/1
+        , delete_schema/0
+        , del_schema_copy/1
+        , create_table/2
+        , copy_table/1
+        , copy_table/2
+        ]).
 
 %%--------------------------------------------------------------------
 %% Start and init mnesia
@@ -144,28 +162,25 @@ join_cluster(Node) when Node =/= node() ->
     copy_tables(),
     ensure_ok(wait_for(tables)).
 
-%% @doc Cluster status
--spec(cluster_status() -> list()).
-cluster_status() ->
+%% @doc Cluster Info
+-spec(cluster_info() -> map()).
+cluster_info() ->
     Running = mnesia:system_info(running_db_nodes),
     Stopped = mnesia:system_info(db_nodes) -- Running,
-    case Stopped =:= [] of
-        true  -> [{running_nodes, Running}];
-        false -> [{running_nodes, Running},
-                  {stopped_nodes, Stopped}]
-    end.
+    #{running_nodes => lists:sort(Running),
+      stopped_nodes => lists:sort(Stopped)
+     }.
 
 %% @doc Cluster status of the node
 -spec(cluster_status(node()) -> running | stopped | false).
 cluster_status(Node) ->
     case is_node_in_cluster(Node) of
-        true  ->
+        true ->
             case lists:member(Node, running_nodes()) of
                 true  -> running;
                 false -> stopped
             end;
-        false ->
-            false
+        false -> false
     end.
 
 -spec(cluster_view() -> {[node()], [node()]}).

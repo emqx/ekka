@@ -14,14 +14,16 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
-%% @doc Ekka Cluster with Mnesia Database.
+%% @doc Cluster via Mnesia database.
 -module(ekka_cluster).
+
+-export([info/0, info/1]).
 
 %% Cluster API
 -export([ join/1
         , leave/0
         , force_leave/1
-        , status/0
+        , status/1
         ]).
 
 %% RPC call for Cluster Management
@@ -29,6 +31,23 @@
         , heal/1
         , reboot/0
         ]).
+
+-type(info_key() :: running_nodes | stopped_nodes).
+
+-type(infos() :: #{running_nodes := list(node()),
+                   stopped_nodes := list(node())
+                  }).
+
+-export_type([info_key/0, infos/0]).
+
+-spec(info(atom()) -> list(node())).
+info(Key) -> maps:get(Key, info()).
+
+-spec(info() -> infos()).
+info() -> ekka_mnesia:cluster_info().
+
+%% @doc Cluster status of the node.
+status(Node) -> ekka_mnesia:cluster_status(Node).
 
 %% @doc Join the cluster
 -spec(join(node()) -> ok | ignore | {error, term()}).
@@ -98,7 +117,4 @@ reboot() ->
         {ok, Reboot} -> Reboot();
         undefined    -> ekka:start()
     end.
-
-%% @doc Cluster status.
-status() -> ekka_mnesia:cluster_status().
 
