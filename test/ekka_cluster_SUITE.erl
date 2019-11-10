@@ -89,7 +89,7 @@ t_prepare(_) ->
     ok = ekka_ct:stop_slave(N1).
 
 t_reboot(_) ->
-    N1 = ekka_ct:start_slave(node, n1),
+    N1 = ekka_ct:start_slave(ekka, n1),
     ok = rpc:call(N1, ekka_cluster, reboot, []),
     ok = ekka_ct:stop_slave(N1).
 
@@ -101,5 +101,6 @@ t_status(_) ->
     ok = rpc:call(N1, ekka_cluster, join, [N0]),
     running = ekka_cluster:status(N1),
     ok = ekka_cluster:force_leave(N1),
-    false = ekka_cluster:status(N1).
+    false = ekka_cluster:status(N1),
+    ok = ekka_ct:stop_slave(N1).
 

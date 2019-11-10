@@ -124,15 +124,18 @@ strategy_module(Strategy) ->
 discover_and_join(Mod, Options) ->
     case Mod:discover(Options) of
         {ok, Nodes} ->
+            io:format("!!! ~s: ~s discover ~p~n", [node(), Mod, Nodes]),
             maybe_join([N || N <- Nodes, ekka_node:is_aliving(N)]),
             log_error("Register", Mod:register(Options));
         {error, Reason} ->
+            io:format("!!! ~s: ~s discover error: ~p~n", [node(), Mod, Reason]),
             ?LOG(error, "Discovery error: ~p", [Reason])
     end.
 
 maybe_join([]) ->
     ignore;
 maybe_join(Nodes) ->
+    io:format("!!! maybe join: ~p~n", [Nodes]),
     case ekka_mnesia:is_node_in_cluster() of
         true  -> ignore;
         false -> join_with(find_oldest_node(Nodes))

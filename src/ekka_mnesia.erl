@@ -125,8 +125,7 @@ copy_table(Name, RamOrDisc) ->
 %% @doc Copy schema.
 copy_schema(Node) ->
     case mnesia:change_table_copy_type(schema, Node, disc_copies) of
-        {atomic, ok} ->
-            ok;
+        {atomic, ok} -> ok;
         {aborted, {already_exists, schema, Node, disc_copies}} ->
             ok;
         {aborted, Error} ->
