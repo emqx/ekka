@@ -21,6 +21,30 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(DNS_OPTIONS, [{name, "localhost"},
+                      {app, "ct"}
+                     ]).
+
+-define(ETCD_OPTIONS, [{server, ["http://127.0.0.1:2379"]},
+                       {prefix, "cl"},
+                       {node_ttl, 60}
+                      ]).
+
+-define(K8S_OPTIONS, [{apiserver, "http://127.0.0.1:6000"},
+                      {namespace, "default"},
+                      {service_name, "ekka"},
+                      {address_type, ip},
+                      {app_name, "ct"},
+                      {suffix, ""}
+                     ]).
+
+-define(MCAST_OPTIONS, [{addr, {239,192,0,1}},
+                        {ports, [5000,5001,5002]},
+                        {iface, {0,0,0,0}},
+                        {ttl, 255},
+                        {loop, true}
+                       ]).
+
 all() -> ekka_ct:all(?MODULE).
 
 %%--------------------------------------------------------------------
@@ -28,6 +52,7 @@ all() -> ekka_ct:all(?MODULE).
 %%--------------------------------------------------------------------
 
 init_per_suite(Config) ->
+    _ = inets:start(),
     ok = application:set_env(ekka, cluster_name, ekka),
     ok = application:set_env(ekka, cluster_enable, true),
     ok = ekka:start(),
@@ -40,7 +65,7 @@ end_per_suite(_Config) ->
 %%--------------------------------------------------------------------
 %% Autocluster via 'static' strategy
 
-xt_autocluster_via_static(Config) ->
+t_autocluster_via_static(Config) ->
     N1 = ekka_ct:start_slave(ekka, n1),
     try
         ok = ekka_ct:wait_running(N1),
@@ -55,12 +80,11 @@ xt_autocluster_via_static(Config) ->
 %%--------------------------------------------------------------------
 %% Autocluster via 'dns' strategy
 
-xt_autocluster_via_dns(Config) ->
+t_autocluster_via_dns(_Config) ->
     N1 = ekka_ct:start_slave(ekka, n1),
     try
         ok = ekka_ct:wait_running(N1),
-        Options = [{name, "localhost"}, {app, "ct"}],
-        ok = set_app_env(N1, {dns, Options}),
+        ok = set_app_env(N1, {dns, ?DNS_OPTIONS}),
         rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
         ok = ekka:force_leave(N1)
@@ -71,78 +95,57 @@ xt_autocluster_via_dns(Config) ->
 %%--------------------------------------------------------------------
 %% Autocluster via 'etcd' strategy
 
-t_autocluster_via_etcd(Config) ->
-    Options = [{server, "http://127.0.0.1:2379"},
-               {prefix, "cl"},
-               {node_ttl, 60}
-              ],
+t_autocluster_via_etcd(_Config) ->
+    {ok, _} = start_etcd_server(2379),
     N1 = ekka_ct:start_slave(ekka, n1),
     try
         ok = ekka_ct:wait_running(N1),
-        ok = set_app_env(N1, {etcd, Options}),
-        ok = rpc:call(N1, ?MODULE, autocluster_via_etc, []),
+        ok = set_app_env(N1, {etcd, ?ETCD_OPTIONS}),
+        _ = rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
         ok = ekka:force_leave(N1)
     after
+        ok = stop_etcd_server(2379),
         ok = ekka_ct:stop_slave(N1)
     end.
-
-autocluster_via_etc() ->
-    {ok, _} = application:ensure_all_started(meck),
-    ok = meck:new(httpc, [non_strict, passthrough, no_history]),
-    Json = <<"{\"node\": {\"nodes\": [{\"key\": \"cl/ct@127.0.0.1\"}]}}">>,
-    ok = meck:expect(httpc, request,
-                     fun(get, Req, _Opts, _) ->
-                             io:format("!!!!!!Get ~p~n", [Req]),
-                             {ok, {{"HTTP/1.1", 200, "OK"}, [], Json}};
-                        (Method, Req, _Opts, _) ->
-                             io:format("!!!!!!~s ~p~n", [Method, Req]),
-                             {ok, 200, <<"{\"errorCode\": 0}">>}
-                     end),
-    ekka:autocluster(),
-    ok = meck:unload(httpc).
 
 %%--------------------------------------------------------------------
 %% Autocluster via 'k8s' strategy
 
-xt_autocluster_via_k8s(Config) ->
-    Options = [{apiserver, "http://127.0.0.1:8080"},
-               {namespace, "default"},
-               {service_name, "ekka"},
-               {address_type, ip},
-               {app_name, "ct"},
-               {suffix, ""}],
+t_autocluster_via_k8s(_Config) ->
+    {ok, _} = start_k8sapi_server(6000),
     N1 = ekka_ct:start_slave(ekka, n1),
     try
         ok = ekka_ct:wait_running(N1),
-        ok = set_app_env(N1, {k8s, Options}),
+        ok = set_app_env(N1, {k8s, ?K8S_OPTIONS}),
         rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
         ok = ekka:force_leave(N1)
     after
+        ok = stop_k8sapi_server(6000),
         ok = ekka_ct:stop_slave(N1)
     end.
 
 %%--------------------------------------------------------------------
 %% Autocluster via 'mcast' strategy
 
-xt_autocluster_via_mcast(Config) ->
-    Options = [{addr, {239,192,0,1}},
-               {ports, [4369,4370]},
-               {iface, {0,0,0,0}},
-               {ttl, 255},
-               {loop, true}
-              ],
+t_autocluster_via_mcast(_Config) ->
+    ok = reboot_ekka_with_mcast_env(),
     N1 = ekka_ct:start_slave(ekka, n1),
     try
         ok = ekka_ct:wait_running(N1),
-        ok = set_app_env(N1, {mcast, Options}),
+        ok = set_app_env(N1, {mcast, ?MCAST_OPTIONS}),
         rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
         ok = ekka:force_leave(N1)
     after
         ok = ekka_ct:stop_slave(N1)
     end.
+
+reboot_ekka_with_mcast_env() ->
+    ok = ekka:stop(),
+    ok = set_app_env(node(), {mcast, ?MCAST_OPTIONS}),
+    ok = ekka:start().
 
 %%--------------------------------------------------------------------
 %% Helper functions
@@ -168,4 +171,28 @@ wait_for_node(Node, Cnt) ->
         true -> ok;
         false -> wait_for_node(Node, Cnt-1)
     end.
+
+start_etcd_server(Port) ->
+    start_http_server(Port, mod_etcd).
+
+start_k8sapi_server(Port) ->
+    start_http_server(Port, mod_k8s_api).
+
+start_http_server(Port, Mod) ->
+    inets:start(httpd, [{port, Port},
+                        {server_name, "etcd"},
+                        {server_root, "."},
+                        {document_root, "."},
+                        {bind_address, "localhost"},
+                        {modules, [Mod]}
+                       ]).
+
+stop_etcd_server(Port) ->
+    stop_http_server(Port).
+
+stop_k8sapi_server(Port) ->
+    stop_http_server(Port).
+
+stop_http_server(Port) ->
+    inets:stop(httpd, {{127,0,0,1}, Port}).
 

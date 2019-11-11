@@ -45,14 +45,14 @@ post(Addr, Path, Params) ->
     post(Addr, Path, Params, []).
 
 post(Addr, Path, Params, HttpOpts) ->
-    Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", urlencode(Params)},
+    Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", build_query(Params)},
     parse_response(httpc:request(post, Req, [{autoredirect, true} | HttpOpts], [])).
 
 put(Addr, Path, Params) ->
     put(Addr, Path, Params, []).
 
 put(Addr, Path, Params, HttpOpts) ->
-    Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", urlencode(Params)},
+    Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", build_query(Params)},
     parse_response(httpc:request(put, Req, [{autoredirect, true} | HttpOpts], [])).
 
 delete(Addr, Path, Params) ->
@@ -67,8 +67,10 @@ build_url(Addr, Path) ->
     lists:concat([Addr, "/", Path]).
 
 build_url(Addr, Path, Params) ->
-    Query = string:join([urlencode(Param) || Param <- Params], "&"),
-    lists:concat([build_url(Addr, Path), "?", Query]).
+    lists:concat([build_url(Addr, Path), "?", build_query(Params)]).
+
+build_query(Params) ->
+    string:join([urlencode(Param) || Param <- Params], "&").
 
 urlencode(L) when is_list(L) ->
     http_uri:encode(L);

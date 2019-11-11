@@ -22,27 +22,31 @@
         , handle_msg/2
         ]).
 
--record(autoheal, {role, proc, timer}).
+-record(autoheal, {delay, role, proc, timer}).
 
 -opaque(autoheal() :: #autoheal{}).
 
 -export_type([autoheal/0]).
 
--define(DELAY, 12000).
+-define(DEFAULT_DELAY, 15000).
 -define(LOG(Level, Format, Args),
         logger:Level("Ekka(Autoheal): " ++ Format, Args)).
 
 init() ->
     case enabled() of
-        false -> undefined;
-        true  -> #autoheal{}
+        {true, Delay} -> #autoheal{delay = Delay};
+        false -> undefined
     end.
 
 enabled() ->
-    ekka:env(cluster_autoheal, false).
+    case ekka:env(cluster_autoheal, false) of
+        false -> false;
+        true  -> {true, ?DEFAULT_DELAY};
+        Delay when is_integer(Delay) ->
+            {true, Delay}
+    end.
 
-proc(undefined) ->
-    undefined;
+proc(undefined) -> undefined;
 proc(#autoheal{proc = Proc}) ->
     Proc.
 
@@ -53,18 +57,18 @@ handle_msg({report_partition, _Node}, Autoheal = #autoheal{proc = Proc})
     when Proc =/= undefined ->
     Autoheal;
 
-handle_msg({report_partition, Node}, Autoheal = #autoheal{timer = TRef}) ->
+handle_msg({report_partition, Node}, Autoheal = #autoheal{delay = Delay, timer = TRef}) ->
     case ekka_membership:leader() =:= node() of
         true ->
             ensure_cancel_timer(TRef),
-            TRef1 = ekka_node_monitor:run_after(?DELAY, {autoheal, {create_splitview, node()}}),
+            TRef1 = ekka_node_monitor:run_after(Delay, {autoheal, {create_splitview, node()}}),
             Autoheal#autoheal{role = leader, timer = TRef1};
         false ->
             ?LOG(critical, "I am not leader, but received partition report from ~s", [Node]),
             Autoheal
     end;
 
-handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{timer = TRef})
+handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{delay = Delay, timer = TRef})
   when Node =:= node() ->
     ensure_cancel_timer(TRef),
     case ekka_membership:is_all_alive() of
@@ -79,7 +83,7 @@ handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{timer = TRef})
             end,
             Autoheal#autoheal{timer = undefined};
         false ->
-            Autoheal#autoheal{timer = ekka_node_monitor:run_after(?DELAY, {autoheal, Msg})}
+            Autoheal#autoheal{timer = ekka_node_monitor:run_after(Delay, {autoheal, Msg})}
     end;
 
 handle_msg(Msg = {create_splitview, _Node}, Autoheal) ->

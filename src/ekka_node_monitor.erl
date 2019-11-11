@@ -72,6 +72,7 @@ run_after(Delay, Msg) ->
 %%--------------------------------------------------------------------
 
 init([]) ->
+    Envs = application:get_all_env(ekka),
     process_flag(trap_exit, true),
     rand:seed(exsplus, erlang:timestamp()),
     net_kernel:monitor_nodes(true, [{node_type, visible}, nodedown_reason]),
@@ -153,7 +154,7 @@ handle_info({mnesia_system_event, {inconsistent_database, Context, Node}},
     ?LOG(critical, "Network partition detected from node ~s: ~p", [Node, Context]),
     ekka_membership:partition_occurred(Node),
     case ekka_autoheal:enabled() of
-        true  -> run_after(3000, confirm_partition);
+        {true, _} -> run_after(3000, confirm_partition);
         false -> ignore
     end,
     {noreply, State#state{partitions = lists:usort([Node | Partitions])}};

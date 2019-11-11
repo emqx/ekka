@@ -43,35 +43,41 @@ t_join_leave(_) ->
     N0 = node(),
     N1 = ekka_ct:start_slave(ekka, n1),
     N2 = ekka_ct:start_slave(ekka, n2),
-    ekka_ct:wait_running(N1),
-    ekka_ct:wait_running(N2),
-    true = ekka:is_running(N1, ekka),
-    true = ekka:is_running(N2, ekka),
-    ok = rpc:call(N1, ekka_cluster, join, [N0]),
-    ok = rpc:call(N2, ekka_cluster, join, [N0]),
-    [N0, N1, N2] = ekka_cluster:info(running_nodes),
-    ok = rpc:call(N1, ekka_cluster, leave, []),
-    ok = rpc:call(N2, ekka_cluster, leave, []),
-    [N0] = ekka_cluster:info(running_nodes),
-    ok = ekka_ct:stop_slave(N1),
-    ok = ekka_ct:stop_slave(N2).
+    try
+        ekka_ct:wait_running(N1),
+        ekka_ct:wait_running(N2),
+        true = ekka:is_running(N1, ekka),
+        true = ekka:is_running(N2, ekka),
+        ok = rpc:call(N1, ekka_cluster, join, [N0]),
+        ok = rpc:call(N2, ekka_cluster, join, [N0]),
+        [N0, N1, N2] = ekka_cluster:info(running_nodes),
+        ok = rpc:call(N1, ekka_cluster, leave, []),
+        ok = rpc:call(N2, ekka_cluster, leave, []),
+        [N0] = ekka_cluster:info(running_nodes)
+    after
+        ok = ekka_ct:stop_slave(N1),
+        ok = ekka_ct:stop_slave(N2)
+    end.
 
 t_force_leave(_) ->
     N0 = node(),
     N1 = ekka_ct:start_slave(ekka, n1),
     N2 = ekka_ct:start_slave(ekka, n2),
-    ok = ekka_ct:wait_running(N1),
-    ok = ekka_ct:wait_running(N2),
-    true = ekka:is_running(N1, ekka),
-    true = ekka:is_running(N2, ekka),
-    ok = rpc:call(N1, ekka_cluster, join, [N0]),
-    ok = rpc:call(N2, ekka_cluster, join, [N1]),
-    [N0, N1, N2] = ekka_cluster:info(running_nodes),
-    ok = ekka_cluster:force_leave(N1),
-    ok = ekka_cluster:force_leave(N2),
-    [N0] = ekka_cluster:info(running_nodes),
-    ok = ekka_ct:stop_slave(N1),
-    ok = ekka_ct:stop_slave(N2).
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = ekka_ct:wait_running(N2),
+        true = ekka:is_running(N1, ekka),
+        true = ekka:is_running(N2, ekka),
+        ok = rpc:call(N1, ekka_cluster, join, [N0]),
+        ok = rpc:call(N2, ekka_cluster, join, [N1]),
+        [N0, N1, N2] = ekka_cluster:info(running_nodes),
+        ok = ekka_cluster:force_leave(N1),
+        ok = ekka_cluster:force_leave(N2),
+        [N0] = ekka_cluster:info(running_nodes)
+    after
+        ok = ekka_ct:stop_slave(N1),
+        ok = ekka_ct:stop_slave(N2)
+    end.
 
 t_heal_shutdown(_) ->
     N1 = ekka_ct:start_slave(ekka, n1),
@@ -96,11 +102,14 @@ t_reboot(_) ->
 t_status(_) ->
     N0 = node(),
     N1 = ekka_ct:start_slave(ekka, n1),
-    ok = ekka_ct:wait_running(N1),
-    true = ekka:is_running(N1, ekka),
-    ok = rpc:call(N1, ekka_cluster, join, [N0]),
-    running = ekka_cluster:status(N1),
-    ok = ekka_cluster:force_leave(N1),
-    false = ekka_cluster:status(N1),
-    ok = ekka_ct:stop_slave(N1).
+    try
+        ok = ekka_ct:wait_running(N1),
+        true = ekka:is_running(N1, ekka),
+        ok = rpc:call(N1, ekka_cluster, join, [N0]),
+        running = ekka_cluster:status(N1),
+        ok = ekka_cluster:force_leave(N1),
+        false = ekka_cluster:status(N1)
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
 

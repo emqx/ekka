@@ -65,6 +65,7 @@
          }).
 
 -define(SERVER, ?MODULE).
+
 -define(LOG(Level, Format, Args),
         logger:Level("Ekka(Mcast): " ++ Format, Args)).
 
