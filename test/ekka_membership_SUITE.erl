@@ -103,9 +103,11 @@ t_local_member(_) ->
 %%--------------------------------------------------------------------
 
 init_membership(N) ->
-    lists:foreach(fun(Member) ->
-                          ok = ekka_membership:pong(node(), Member)
-                  end, lists:map(fun member/1, lists:seq(1, N))).
+    lists:foreach(
+      fun(Member) ->
+              ok = ekka_membership:pong(node(), Member)
+      end, lists:map(fun member/1, lists:seq(1, N))),
+    ekka_membership:announce(join).
 
 member(I) ->
     Node = list_to_atom("n" ++ integer_to_list(I) ++ "@127.0.0.1"),
