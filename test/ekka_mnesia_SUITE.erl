@@ -52,44 +52,52 @@ t_create_del_table(_) ->
 %% -spec(leave_cluster(node()) -> ok | {error, any()}).
 t_join_leave_cluster(_) ->
     N0 = node(),
-    io:format("!!! N0: ~p~n", [N0]),
     N1 = ekka_ct:start_slave(node, n1),
-    ok = rpc:call(N1, ekka_mnesia, start, []),
-    ok = rpc:call(N1, ekka_mnesia, join_cluster, [N0]),
-    #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
-    [N0, N1] = lists:sort(ekka_mnesia:running_nodes()),
-    ok = rpc:call(N1, ekka_mnesia, leave_cluster, []),
-    #{running_nodes := [N0]} = ekka_mnesia:cluster_info(),
-    [N0] = ekka_mnesia:running_nodes(),
-    ok = rpc:call(N1, ekka_mnesia, ensure_stopped, []),
-    ok = ekka_ct:stop_slave(N1).
+    try
+        ok = rpc:call(N1, ekka_mnesia, start, []),
+        ok = rpc:call(N1, ekka_mnesia, join_cluster, [N0]),
+        #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
+        [N0, N1] = lists:sort(ekka_mnesia:running_nodes()),
+        ok = rpc:call(N1, ekka_mnesia, leave_cluster, []),
+        #{running_nodes := [N0]} = ekka_mnesia:cluster_info(),
+        [N0] = ekka_mnesia:running_nodes(),
+        ok = rpc:call(N1, ekka_mnesia, ensure_stopped, [])
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
 
 %% -spec(cluster_status(node()) -> running | stopped | false).
 t_cluster_status(_) ->
     N0 = node(),
     N1 = ekka_ct:start_slave(node, n1),
-    ok = rpc:call(N1, ekka_mnesia, start, []),
-    ok = rpc:call(N1, ekka_mnesia, join_cluster, [N0]),
-    running = ekka_mnesia:cluster_status(N1),
-    ok = rpc:call(N1, ekka_mnesia, leave_cluster, []),
-    ok = ekka_ct:stop_slave(N1).
+    try
+        ok = rpc:call(N1, ekka_mnesia, start, []),
+        ok = rpc:call(N1, ekka_mnesia, join_cluster, [N0]),
+        running = ekka_mnesia:cluster_status(N1),
+        ok = rpc:call(N1, ekka_mnesia, leave_cluster, [])
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
 
 %% -spec(remove_from_cluster(node()) -> ok | {error, any()}).
 t_remove_from_cluster(_) ->
     N0 = node(),
     N1 = ekka_ct:start_slave(node, n1),
-    ok = rpc:call(N1, ekka_mnesia, start, []),
-    ok = rpc:call(N1, ekka_mnesia, join_cluster, [N0]),
-    #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
-    [N0, N1] = lists:sort(ekka_mnesia:running_nodes()),
-    [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(all)),
-    [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(running)),
-    [] = ekka_mnesia:cluster_nodes(stopped),
-    ok = ekka_mnesia:remove_from_cluster(N1),
-    #{running_nodes := [N0]} = ekka_mnesia:cluster_info(),
-    [N0] = ekka_mnesia:running_nodes(),
-    [N0] = ekka_mnesia:cluster_nodes(all),
-    [N0] = ekka_mnesia:cluster_nodes(running),
-    ok = rpc:call(N1, ekka_mnesia, ensure_stopped, []),
-    ok = ekka_ct:stop_slave(N1).
+    try
+        ok = rpc:call(N1, ekka_mnesia, start, []),
+        ok = rpc:call(N1, ekka_mnesia, join_cluster, [N0]),
+        #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
+        [N0, N1] = lists:sort(ekka_mnesia:running_nodes()),
+        [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(all)),
+        [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(running)),
+        [] = ekka_mnesia:cluster_nodes(stopped),
+        ok = ekka_mnesia:remove_from_cluster(N1),
+        #{running_nodes := [N0]} = ekka_mnesia:cluster_info(),
+        [N0] = ekka_mnesia:running_nodes(),
+        [N0] = ekka_mnesia:cluster_nodes(all),
+        [N0] = ekka_mnesia:cluster_nodes(running),
+        ok = rpc:call(N1, ekka_mnesia, ensure_stopped, [])
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
 

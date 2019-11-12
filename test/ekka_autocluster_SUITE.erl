@@ -131,6 +131,7 @@ t_autocluster_via_k8s(_Config) ->
 
 t_autocluster_via_mcast(_Config) ->
     ok = reboot_ekka_with_mcast_env(),
+    ok = timer:sleep(1000),
     N1 = ekka_ct:start_slave(ekka, n1),
     try
         ok = ekka_ct:wait_running(N1),
@@ -152,17 +153,15 @@ reboot_ekka_with_mcast_env() ->
 %%--------------------------------------------------------------------
 
 set_app_env(Node, Discovery) ->
-    Envs = [{cluster_name, ekka},
-            {cluster_enable, true},
-            {cluster_discovery, Discovery}
-           ],
-    lists:foreach(
-      fun({Par, Val}) ->
-              rpc:call(Node, application, set_env, [ekka, Par, Val])
-      end, Envs).
+    Config = [{ekka, [{cluster_name, ekka},
+                      {cluster_enable, true},
+                      {cluster_discovery, Discovery}
+                     ]
+              }],
+    rpc:call(Node, application, set_env, [Config]).
 
 wait_for_node(Node) ->
-    wait_for_node(Node, 10).
+    wait_for_node(Node, 20).
 wait_for_node(Node, 0) ->
     error({autocluster_timeout, Node});
 wait_for_node(Node, Cnt) ->

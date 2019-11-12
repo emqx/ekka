@@ -72,7 +72,6 @@ run_after(Delay, Msg) ->
 %%--------------------------------------------------------------------
 
 init([]) ->
-    Envs = application:get_all_env(ekka),
     process_flag(trap_exit, true),
     rand:seed(exsplus, erlang:timestamp()),
     net_kernel:monitor_nodes(true, [{node_type, visible}, nodedown_reason]),
