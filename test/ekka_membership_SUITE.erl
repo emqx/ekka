@@ -19,73 +19,104 @@
 -compile(export_all).
 -compile(nowarn_export_all).
 
+-include("ekka.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 all() -> ekka_ct:all(?MODULE).
 
 init_per_testcase(_TestCase, Config) ->
+    ok = meck:new(ekka_mnesia, [non_strict, passthrough, no_history]),
+    ok = meck:expect(ekka_mnesia, cluster_status, fun(_) -> running end),
+    {ok, _} = ekka_membership:start_link(),
+    ok = init_membership(3),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
+    ok = ekka_membership:stop(),
+    ok = meck:unload(ekka_mnesia),
     Config.
 
-t_start_link(_) ->
-    error('TODO').
-
 t_lookup_member(_) ->
-    error('TODO').
+    false = ekka_membership:lookup_member('node@127.0.0.1'),
+    #member{node = 'n1@127.0.0.1', status = up}
+        = ekka_membership:lookup_member('n1@127.0.0.1').
 
 t_coordinator(_) ->
-    error('TODO').
+    ?assertEqual(node(), ekka_membership:coordinator()),
+    Nodes = ['n1@127.0.0.1', 'n2@127.0.0.1', 'n3@127.0.0.1'],
+    ?assertEqual('n1@127.0.0.1', ekka_membership:coordinator(Nodes)).
 
-t_ping(_) ->
-    error('TODO').
+t_node_down_up(_) ->
+    ok = meck:expect(ekka_mnesia, is_node_in_cluster, fun(_) -> true end),
+    ok = ekka_membership:node_down('n2@127.0.0.1'),
+    ok = timer:sleep(100),
+    #member{status = down} = ekka_membership:lookup_member('n2@127.0.0.1'),
+    ok = ekka_membership:node_up('n2@127.0.0.1'),
+    ok = timer:sleep(100),
+    #member{status = up} = ekka_membership:lookup_member('n2@127.0.0.1').
 
-t_pong(_) ->
-    error('TODO').
-
-t_node_up(_) ->
-    error('TODO').
-
-t_node_down(_) ->
-    error('TODO').
-
-t_mnesia_up(_) ->
-    error('TODO').
-
-t_mnesia_down(_) ->
-    error('TODO').
+t_mnesia_down_up(_) ->
+    ok = ekka_membership:mnesia_down('n2@127.0.0.1'),
+    ok = timer:sleep(100),
+    #member{mnesia = stopped} = ekka_membership:lookup_member('n2@127.0.0.1'),
+    ok = ekka_membership:mnesia_up('n2@127.0.0.1'),
+    ok = timer:sleep(100),
+    #member{status = up, mnesia = running} = ekka_membership:lookup_member('n2@127.0.0.1').
 
 t_partition_occurred(_) ->
-    error('TODO').
+    ok = ekka_membership:partition_occurred('n2@127.0.0.1').
 
 t_partition_healed(_) ->
-    error('TODO').
+    ok = ekka_membership:partition_healed(['n2@127.0.0.1']).
 
 t_announce(_) ->
-    error('TODO').
+    ok = ekka_membership:announce(leave).
 
 t_leader(_) ->
-    error('TODO').
+    ?assertEqual(node(), ekka_membership:leader()).
 
 t_is_all_alive(_) ->
-    error('TODO').
-
-t_oldest(_) ->
-    error('TODO').
+    ?assert(ekka_membership:is_all_alive()).
 
 t_members(_) ->
-    error('TODO').
-
-t_monitor(_) ->
-    error('TODO').
+    ?assertEqual(4, length(ekka_membership:members())).
 
 t_nodelist(_) ->
-    error('TODO').
+    Nodes = lists:sort([node(),
+                        'n1@127.0.0.1',
+                        'n2@127.0.0.1',
+                        'n3@127.0.0.1'
+                       ]),
+    ?assertEqual(Nodes, lists:sort(ekka_membership:nodelist())).
 
 t_is_member(_) ->
-    error('TODO').
+    ?assert(ekka_membership:is_member('n1@127.0.0.1')),
+    ?assert(ekka_membership:is_member('n2@127.0.0.1')),
+    ?assert(ekka_membership:is_member('n3@127.0.0.1')).
 
 t_local_member(_) ->
-    error('TODO').
+    #member{node = Node} = ekka_membership:local_member(),
+    ?assertEqual(node(), Node).
+
+%%--------------------------------------------------------------------
+%% Helper functions
+%%--------------------------------------------------------------------
+
+init_membership(N) ->
+    lists:foreach(
+      fun(Member) ->
+              ok = ekka_membership:pong(node(), Member)
+      end, lists:map(fun member/1, lists:seq(1, N))),
+    ekka_membership:announce(join).
+
+member(I) ->
+    Node = list_to_atom("n" ++ integer_to_list(I) ++ "@127.0.0.1"),
+    #member{node   = Node,
+            addr   = {{127,0,0,1}, 5000 + I},
+            guid   = ekka_guid:gen(),
+            hash   = 1000 * I,
+            status = up,
+            mnesia = running,
+            ltime  = erlang:timestamp()
+           }.
 

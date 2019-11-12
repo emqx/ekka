@@ -21,62 +21,83 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-record(kv_tab, {key, val}).
+
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
+init_per_suite(Config) ->
+    ok = application:set_env(ekka, cluster_name, ekka),
+    ok = application:set_env(ekka, cluster_discovery, {manual, []}),
+    application:ensure_all_started(ekka),
     Config.
 
-end_per_testcase(_TestCase, Config) ->
-    Config.
+end_per_suite(_Config) ->
+    ok = application:stop(ekka),
+    ekka_mnesia:ensure_stopped().
 
 t_data_dir(_) ->
-    error('TODO').
+    ekka_mnesia:data_dir().
 
-t_create_table(_) ->
-    error('TODO').
+t_create_del_table(_) ->
+    ok = ekka_mnesia:create_table(kv_tab, [
+                {ram_copies, [node()]},
+                {record_name, kv_tab},
+                {attributes, record_info(fields, kv_tab)},
+                {storage_properties, []}]),
+    ok = ekka_mnesia:copy_table(kv_tab, disc_copies),
+    ok = mnesia:dirty_write(#kv_tab{key = a, val = 1}),
+    {atomic, ok} = mnesia:del_table_copy(kv_tab, node()).
 
-t_copy_table(_) ->
-    error('TODO').
+%% -spec(join_cluster(node()) -> ok).
+%% -spec(leave_cluster(node()) -> ok | {error, any()}).
+t_join_leave_cluster(_) ->
+    N0 = node(),
+    N1 = ekka_ct:start_slave(node, n1),
+    try
+        ok = rpc:call(N1, ekka_mnesia, start, []),
+        ok = rpc:call(N1, ekka_mnesia, join_cluster, [N0]),
+        #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
+        [N0, N1] = lists:sort(ekka_mnesia:running_nodes()),
+        ok = rpc:call(N1, ekka_mnesia, leave_cluster, []),
+        #{running_nodes := [N0]} = ekka_mnesia:cluster_info(),
+        [N0] = ekka_mnesia:running_nodes(),
+        ok = rpc:call(N1, ekka_mnesia, ensure_stopped, [])
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
 
-t_copy_schema(_) ->
-    error('TODO').
-
-t_delete_schema(_) ->
-    error('TODO').
-
-t_del_schema_copy(_) ->
-    error('TODO').
-
-t_cluster_view(_) ->
-    error('TODO').
-
-t_connect(_) ->
-    error('TODO').
-
+%% -spec(cluster_status(node()) -> running | stopped | false).
 t_cluster_status(_) ->
-    error('TODO').
+    N0 = node(),
+    N1 = ekka_ct:start_slave(node, n1),
+    try
+        ok = rpc:call(N1, ekka_mnesia, start, []),
+        ok = rpc:call(N1, ekka_mnesia, join_cluster, [N0]),
+        running = ekka_mnesia:cluster_status(N1),
+        ok = rpc:call(N1, ekka_mnesia, leave_cluster, [])
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
 
-t_ensure_stopped(_) ->
-    error('TODO').
-
+%% -spec(remove_from_cluster(node()) -> ok | {error, any()}).
 t_remove_from_cluster(_) ->
-    error('TODO').
-
-t_leave_cluster(_) ->
-    error('TODO').
-
-t_running_nodes(_) ->
-    error('TODO').
-
-t_join_cluster(_) ->
-    error('TODO').
-
-t_is_node_in_cluster(_) ->
-    error('TODO').
-
-t_cluster_nodes(_) ->
-    error('TODO').
-
-t_start(_) ->
-    error('TODO').
+    N0 = node(),
+    N1 = ekka_ct:start_slave(node, n1),
+    try
+        ok = rpc:call(N1, ekka_mnesia, start, []),
+        ok = rpc:call(N1, ekka_mnesia, join_cluster, [N0]),
+        #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
+        [N0, N1] = lists:sort(ekka_mnesia:running_nodes()),
+        [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(all)),
+        [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(running)),
+        [] = ekka_mnesia:cluster_nodes(stopped),
+        ok = ekka_mnesia:remove_from_cluster(N1),
+        #{running_nodes := [N0]} = ekka_mnesia:cluster_info(),
+        [N0] = ekka_mnesia:running_nodes(),
+        [N0] = ekka_mnesia:cluster_nodes(all),
+        [N0] = ekka_mnesia:cluster_nodes(running),
+        ok = rpc:call(N1, ekka_mnesia, ensure_stopped, [])
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
 

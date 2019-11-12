@@ -30,7 +30,12 @@
 
 -module(ekka_guid).
 
--export([gen/0, new/0, timestamp/1, to_hexstr/1, from_hexstr/1]).
+-export([ gen/0
+        , new/0
+        , timestamp/1
+        , to_hexstr/1
+        , from_hexstr/1
+        ]).
 
 -define(MAX_SEQ, 16#FFFF).
 

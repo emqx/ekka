@@ -18,7 +18,12 @@
 
 -behaviour(ekka_cluster_strategy).
 
--export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
+-export([ discover/1
+        , lock/1
+        , unlock/1
+        , register/1
+        , unregister/1
+        ]).
 
 discover(Options) ->
     {ok, proplists:get_value(seeds, Options, [])}.

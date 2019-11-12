@@ -21,47 +21,64 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(OPTIONS, [{addr, {239,192,0,1}},
+                  {ports, [4369,4370]},
+                  {iface, {0,0,0,0}},
+                  {ttl, 255},
+                  {loop, true}
+                 ]).
+
 all() -> ekka_ct:all(?MODULE).
 
+%%--------------------------------------------------------------------
+%% CT callbacks
+%%--------------------------------------------------------------------
+
+init_per_testcase(t_discover, Config) ->
+    ok = meck:new(gen_udp, [unstick, non_strict, passthrough, no_history]),
+    ok = meck:expect(gen_udp, send, fun(_, _, _, _) -> ok end),
+    ok = meck:new(ekka_cluster_sup, [non_strict, passthrough, no_history]),
+    ok = meck:expect(ekka_cluster_sup, start_child,
+                     fun(_, _) ->
+                             ekka_cluster_mcast:start_link(?OPTIONS)
+                     end),
+    Config;
 init_per_testcase(_TestCase, Config) ->
     Config.
 
+end_per_testcase(t_discover, Config) ->
+    ok = meck:unload(gen_udp),
+    ok = meck:unload(ekka_cluster_sup),
+    Config;
 end_per_testcase(_TestCase, Config) ->
     Config.
 
+%%--------------------------------------------------------------------
+%% Test cases
+%%--------------------------------------------------------------------
+
 t_discover(_) ->
-    error('TODO').
+    %% Simulate a UDP packet.
+    Cookie = erlang:phash2(erlang:get_cookie()),
+    Pong = {pong, 'node1@192.168.10.10', ekka, Cookie},
+    Pid = ekka_cluster_mcast:ensure_started(?OPTIONS),
+    ?assert(is_process_alive(Pid)),
+    Sock = ekka_cluster_mcast:get_sock(),
+    Datagram = {udp, Sock, {127,0,0,1}, 5000, term_to_binary(Pong)},
+    Pid ! Datagram,
+    Node = node(),
+    {ok, [Node, 'node1@192.168.10.10']} = ekka_cluster_mcast:discover(?OPTIONS),
+    ok = ekka_cluster_mcast:stop().
 
 t_lock(_) ->
-    error('TODO').
+    ignore = ekka_cluster_mcast:lock([]).
 
 t_unlock(_) ->
-    error('TODO').
+    ignore = ekka_cluster_mcast:unlock([]).
 
 t_register(_) ->
-    error('TODO').
+    ignore = ekka_cluster_mcast:register([]).
 
 t_unregister(_) ->
-    error('TODO').
-
-t_start_link(_) ->
-    error('TODO').
-
-t_init(_) ->
-    error('TODO').
-
-t_handle_call(_) ->
-    error('TODO').
-
-t_handle_cast(_) ->
-    error('TODO').
-
-t_handle_info(_) ->
-    error('TODO').
-
-t_terminate(_) ->
-    error('TODO').
-
-t_code_change(_) ->
-    error('TODO').
+    ignore = ekka_cluster_mcast:unregister([]).
 

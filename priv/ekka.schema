@@ -27,7 +27,7 @@
 
 %% @doc Cluster autoheal
 {mapping, "cluster.autoheal", "ekka.cluster_autoheal", [
-  {datatype, flag},
+  {datatype, [flag, {duration, ms}]},
   {default, off}
 ]}.
 

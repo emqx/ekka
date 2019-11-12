@@ -14,21 +14,18 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_cluster_strategy_SUITE).
+-module(mod_etcd).
 
--compile(export_all).
--compile(nowarn_export_all).
+-include_lib("inets/include/httpd.hrl").
 
--include_lib("eunit/include/eunit.hrl").
+-export([do/1]).
 
-all() -> ekka_ct:all(?MODULE).
+do(Req = #mod{method = "GET", request_uri = "/v2/keys/" ++ _Uri}) ->
+    Response = {200, "{\"node\": {\"nodes\": [{\"key\": \"cl/ct@127.0.0.1\"}]}}"},
+    {proceed, [{response, Response}]};
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
+do(Req = #mod{request_uri = "/v2/keys/" ++ _Uri}) ->
+    {proceed, [{response, {200, "{\"errorCode\": 0}"}}]};
 
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
-t_behaviour_info(_) ->
-    error('TODO').
+do(Req) -> {proceed, Req#mod.data}.
 

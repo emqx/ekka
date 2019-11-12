@@ -31,6 +31,7 @@ init([]) ->
                restart  => permanent,
                shutdown => 5000,
                type     => worker,
-               modules  => [ekka_locker]},
+               modules  => [ekka_locker]
+              },
     {ok, {{one_for_one, 100, 3600}, [Locker]}}.
 

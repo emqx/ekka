@@ -18,7 +18,7 @@
 
 -ifdef(use_specs).
 
--type(options() :: list(proplists:property())).
+-type(options() :: proplists:proplist()).
 
 -callback(discover(options()) -> {ok, list(node())} | {error, term()}).
 

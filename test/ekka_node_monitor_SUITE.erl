@@ -23,39 +23,45 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
+init_per_suite(Config) ->
+    ok = application:set_env(ekka, cluster_discovery, {manual, []}),
+    application:ensure_all_started(ekka),
     Config.
 
-end_per_testcase(_TestCase, Config) ->
-    Config.
+end_per_suite(_Config) ->
+    ok = application:stop(ekka),
+    ekka_mnesia:ensure_stopped().
 
-t_start_link(_) ->
-    error('TODO').
+t_cast_heartbeat(_) ->
+    ok = ekka_node_monitor:cast(node(), heartbeat).
 
-t_init(_) ->
-    error('TODO').
+t_cast_suspect(_) ->
+    ok = ekka_node_monitor:cast(node(), {suspect, 'n1@127.0.0.1', 'n2@127.0.0.1'}).
 
-t_handle_call(_) ->
-    error('TODO').
+t_cast_confirm(_) ->
+    ok = ekka_node_monitor:cast(node(), {confirm, 'n1@127.0.0.1', down}).
 
-t_handle_cast(_) ->
-    error('TODO').
+t_cast_report_partition(_) ->
+    ok = ekka_node_monitor:cast(node, {report_partition, 'n1@127.0.0.1'}).
 
-t_handle_info(_) ->
-    error('TODO').
+t_cast_heal_partition(_) ->
+    ok = ekka_node_monitor:cast(node, {heal_partition, ['n1@127.0.0.1']}).
 
-t_terminate(_) ->
-    error('TODO').
+t_handle_nodeup_info(_) ->
+    ekka_node_monitor ! {nodeup, 'n1@127.0.0.1', []}.
 
-t_code_change(_) ->
-    error('TODO').
-
-t_cast(_) ->
-    error('TODO').
+t_handle_nodedown_info(_) ->
+    ekka_node_monitor ! {nodedown, 'n1@127.0.0.1', []}.
 
 t_run_after(_) ->
-    error('TODO').
+    TRef = ekka_node_monitor:run_after(100, heartbeat),
+    ?assert(is_reference(TRef)).
 
 t_partitions(_) ->
-    error('TODO').
+    [] = ekka_node_monitor:partitions().
+
+t_handle_unexpected(_) ->
+    {reply, ignore, state} = ekka_node_monitor:handle_call(req, from, state),
+    {noreply, state} = ekka_node_monitor:handle_cast(msg, state),
+    {noreply, state} = ekka_node_monitor:handle_info(info, state).
 
