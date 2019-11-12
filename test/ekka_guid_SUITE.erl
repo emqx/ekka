@@ -14,29 +14,30 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_lib_SUITE).
-
--include_lib("eunit/include/eunit.hrl").
+-module(ekka_guid_SUITE).
 
 -compile(export_all).
 -compile(nowarn_export_all).
 
-all() -> [{group, node}].
+-include_lib("eunit/include/eunit.hrl").
 
-groups() ->
-    [{node, [], [node_is_aliving, node_parse_name]}].
+all() -> ekka_ct:all(?MODULE).
 
-%%--------------------------------------------------------------------
-%% ekka_node
-%%--------------------------------------------------------------------
+t_gen(_) ->
+    <<_:128>> = Guid1 = ekka_guid:gen(),
+    <<_:128>> = Guid2 = ekka_guid:gen(),
+    ?assert(Guid2 > Guid1).
 
-node_is_aliving(_) ->
-    io:format("Node: ~p~n", [node()]),
-    true = ekka_node:is_aliving(node()),
-    false = ekka_node:is_aliving('x@127.0.0.1').
+t_new(_) ->
+    {Ts1, _NPid, 0} = ekka_guid:new(),
+    {Ts2, _NPid, 0} = ekka_guid:new(),
+    ?assert(Ts2 > Ts1).
 
-node_parse_name(_) ->
-    'a@127.0.0.1' = ekka_node:parse_name("a@127.0.0.1"),
-    'b@127.0.0.1' = ekka_node:parse_name("b").
+t_timestamp(_) ->
+    Ts1 = ekka_guid:timestamp(ekka_guid:gen()),
+    Ts2 = ekka_guid:timestamp(ekka_guid:gen()),
+    ?assert(Ts2 > Ts1).
 
+t_to_from_hexstr(_) ->
+    ?assertEqual(Guid = ekka_guid:gen(), ekka_guid:from_hexstr(ekka_guid:to_hexstr(Guid))).
 

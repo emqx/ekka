@@ -14,19 +14,18 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_test_table).
+-module(mod_etcd).
 
--export([init/0, insert/2]).
+-include_lib("inets/include/httpd.hrl").
 
--record(test_table, {key, val}).
+-export([do/1]).
 
-init() ->
-    ok = ekka_mnesia:create_table(test_table, [
-            {type, set}, {disc_copies, [node()]},
-            {record_name, test_table},
-            {attributes, record_info(fields, test_table)}]),
-    ok = ekka_mnesia:copy_table(test_table, disc_copies).
+do(Req = #mod{method = "GET", request_uri = "/v2/keys/" ++ _Uri}) ->
+    Response = {200, "{\"node\": {\"nodes\": [{\"key\": \"cl/ct@127.0.0.1\"}]}}"},
+    {proceed, [{response, Response}]};
 
-insert(Key, Val) ->
-    mnesia:transaction(fun mnesia:write/1, [#test_table{key = Key, val = Val}]).
+do(Req = #mod{request_uri = "/v2/keys/" ++ _Uri}) ->
+    {proceed, [{response, {200, "{\"errorCode\": 0}"}}]};
+
+do(Req) -> {proceed, Req#mod.data}.
 

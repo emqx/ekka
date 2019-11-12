@@ -14,29 +14,27 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_cluster_static).
+-module(ekka_ring_SUITE).
 
--behaviour(ekka_cluster_strategy).
+-compile(export_all).
+-compile(nowarn_export_all).
 
--export([ discover/1
-        , lock/1
-        , unlock/1
-        , register/1
-        , unregister/1
-        ]).
+-include("ekka.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
-discover(Options) ->
-    {ok, proplists:get_value(seeds, Options, [])}.
+all() -> ekka_ct:all(?MODULE).
 
-lock(_Options) ->
-    ignore.
+t_find_node(_) ->
+    ?assertEqual(n1, ekka_ring:find_node(key, ring(5))).
 
-unlock(_Options) ->
-    ignore.
+t_find_nodes(_) ->
+    ?assertEqual([n1,n5,n3], ekka_ring:find_nodes(key, ring(5))),
+    ?assertEqual([n1,n5,n3], ekka_ring:find_nodes(key, 3, ring(5))).
 
-register(_Options) ->
-    ignore.
-
-unregister(_Options) ->
-    ignore.
+ring(N) ->
+    Node = fun(I) -> list_to_atom("n" ++ integer_to_list(I)) end,
+    Hash = fun(I) -> erlang:phash2(I, 4294967295) end,
+    lists:keysort(#member.hash, [#member{node = Node(I),
+                                         hash = Hash(I)
+                                        } || I <- lists:seq(1, N)]).
 

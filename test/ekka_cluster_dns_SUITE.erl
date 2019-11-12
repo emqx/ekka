@@ -14,29 +14,28 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_cluster_static).
+-module(ekka_cluster_dns_SUITE).
 
--behaviour(ekka_cluster_strategy).
+-compile(export_all).
+-compile(nowarn_export_all).
 
--export([ discover/1
-        , lock/1
-        , unlock/1
-        , register/1
-        , unregister/1
-        ]).
+-include_lib("eunit/include/eunit.hrl").
 
-discover(Options) ->
-    {ok, proplists:get_value(seeds, Options, [])}.
+all() -> ekka_ct:all(?MODULE).
 
-lock(_Options) ->
-    ignore.
+t_discover(_) ->
+    Options = [{name, "localhost"}, {app, "ekka"}],
+    {ok, ['ekka@127.0.0.1']} = ekka_cluster_dns:discover(Options).
 
-unlock(_Options) ->
-    ignore.
+t_lock(_) ->
+    ignore = ekka_cluster_dns:lock([]).
 
-register(_Options) ->
-    ignore.
+t_unlock(_) ->
+    ignore = ekka_cluster_dns:unlock([]).
 
-unregister(_Options) ->
-    ignore.
+t_register(_) ->
+    ignore = ekka_cluster_dns:register([]).
+
+t_unregister(_) ->
+    ignore = ekka_cluster_dns:unregister([]).
 

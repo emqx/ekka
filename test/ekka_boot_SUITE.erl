@@ -14,29 +14,21 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_cluster_static).
+-module(ekka_boot_SUITE).
 
--behaviour(ekka_cluster_strategy).
+-compile(export_all).
+-compile(nowarn_export_all).
 
--export([ discover/1
-        , lock/1
-        , unlock/1
-        , register/1
-        , unregister/1
-        ]).
+-include_lib("eunit/include/eunit.hrl").
 
-discover(Options) ->
-    {ok, proplists:get_value(seeds, Options, [])}.
+all() -> ekka_ct:all(?MODULE).
 
-lock(_Options) ->
-    ignore.
+%% TODO:
+t_apply_module_attributes(_) ->
+    %% Arg is Attribute Name
+    [] =  ekka_boot:apply_module_attributes(xattr).
 
-unlock(_Options) ->
-    ignore.
-
-register(_Options) ->
-    ignore.
-
-unregister(_Options) ->
-    ignore.
+%% TODO:
+t_all_module_attributes(_) ->
+    [] = ekka_boot:all_module_attributes(xattr).
 

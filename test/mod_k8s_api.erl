@@ -14,29 +14,15 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_cluster_static).
+-module(mod_k8s_api).
 
--behaviour(ekka_cluster_strategy).
+-include_lib("inets/include/httpd.hrl").
 
--export([ discover/1
-        , lock/1
-        , unlock/1
-        , register/1
-        , unregister/1
-        ]).
+-export([do/1]).
 
-discover(Options) ->
-    {ok, proplists:get_value(seeds, Options, [])}.
+do(Req = #mod{method = "GET", request_uri = "/api/v1/namespaces/" ++ _Uri}) ->
+    Response = {200, "{\"subsets\": [{\"addresses\": [{\"ip\": \"127.0.0.1\"}]}]}"},
+    {proceed, [{response, Response}]};
 
-lock(_Options) ->
-    ignore.
-
-unlock(_Options) ->
-    ignore.
-
-register(_Options) ->
-    ignore.
-
-unregister(_Options) ->
-    ignore.
+do(Req) -> {proceed, Req#mod.data}.
 
