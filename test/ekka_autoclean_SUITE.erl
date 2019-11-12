@@ -23,15 +23,27 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
+init_per_suite(Config) ->
+    ok = application:set_env(ekka, cluster_name, ekka),
+    ok = application:set_env(ekka, cluster_autoclean, 1000),
+    ok = application:set_env(ekka, cluster_discovery, {manual, []}),
+    ok = ekka:start(),
     Config.
 
-end_per_testcase(_TestCase, Config) ->
-    Config.
+end_per_suite(_Config) ->
+    application:stop(ekka),
+    ekka_mnesia:ensure_stopped().
 
-t_init(_) ->
-    error('TODO').
+t_autoclean(_) ->
+    N0 = node(),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ok = rpc:call(N1, ekka_cluster, join, [N0]),
+    [N0, N1] = ekka_cluster:info(running_nodes),
+    ok = ekka_ct:stop_slave(N1),
+    ok = timer:sleep(2000),
+    [N0] = ekka_cluster:info(running_nodes),
+    ekka:force_leave(N1).
 
-t_check(_) ->
-    error('TODO').
+
+
 

@@ -23,15 +23,12 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
+%% TODO:
 t_apply_module_attributes(_) ->
-    error('TODO').
+    %% Arg is Attribute Name
+    [] =  ekka_boot:apply_module_attributes(xattr).
 
+%% TODO:
 t_all_module_attributes(_) ->
-    error('TODO').
+    [] = ekka_boot:all_module_attributes(xattr).
 

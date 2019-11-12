@@ -16,11 +16,46 @@
 
 -module(ekka_ct).
 
--export([all/1]).
+-compile(export_all).
+-compile(nowarn_export_all).
 
 %% @doc Get all the test cases in a CT suite.
 all(Suite) ->
     lists:usort([F || {F, 1} <- Suite:module_info(exports),
                       string:substr(atom_to_list(F), 1, 2) == "t_"
                 ]).
+
+start_slave(node, Name) ->
+    {ok, Node} = slave:start(host(), Name, ebin_path()),
+    Node;
+start_slave(ekka, Name) ->
+    Paths = ebin_path(),
+    {ok, Node} = slave:start(host(), Name, ebin_path()),
+    rpc:call(Node, ekka, start, []),
+    Node.
+
+wait_running(Node) ->
+    wait_running(Node, 30000).
+
+wait_running(Node, Timeout) when Timeout < 0 ->
+    throw({wait_timeout, Node});
+
+wait_running(Node, Timeout) ->
+    case rpc:call(Node, ekka, is_running, [Node, ekka]) of
+        true  -> ok;
+        false -> timer:sleep(100),
+                 wait_running(Node, Timeout - 100)
+    end.
+
+stop_slave(Node) ->
+    slave:stop(Node).
+
+host() ->
+    [_, Host] = string:tokens(atom_to_list(node()), "@"), Host.
+
+ebin_path() ->
+    string:join(["-pa" | lists:filter(fun is_lib/1, code:get_path())], " ").
+
+is_lib(Path) ->
+    string:prefix(Path, code:lib_dir()) =:= nomatch.
 

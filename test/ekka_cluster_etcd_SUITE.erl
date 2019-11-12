@@ -21,29 +21,58 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(OPTIONS, [{server, "http://127.0.0.1:2379"},
+                  {prefix, "emqxcl"},
+                  {node_ttl, 60}
+                 ]).
+
 all() -> ekka_ct:all(?MODULE).
 
 init_per_testcase(_TestCase, Config) ->
+    ok = meck:new(httpc, [non_strict, passthrough, no_history]),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
+    ok = meck:unload(httpc),
     Config.
 
-t_discover(_) ->
-    error('TODO').
+t_discover(Config) ->
+    Json = <<"{\"node\": {\"nodes\": [{\"key\": \"ekkacl/n1@127.0.0.1\"}]}}">>,
+    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) -> {ok, 200, Json} end),
+    {ok, ['n1@127.0.0.1']} = ekka_cluster_etcd:discover(?OPTIONS).
 
-t_lock(_) ->
-    error('TODO').
+t_lock(Config) ->
+    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
+                                             {ok, 200, <<"{\"errorCode\": 0}">>}
+                                     end),
+    ok = ekka_cluster_etcd:lock(?OPTIONS).
 
 t_unlock(_) ->
-    error('TODO').
+    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
+                                             {ok, 200, <<"{\"errorCode\": 0}">>}
+                                     end),
+    ok = ekka_cluster_etcd:unlock(?OPTIONS).
 
 t_register(_) ->
-    error('TODO').
+    ok = meck:new(ekka_cluster_sup, [non_strict, passthrough, no_history]),
+    ok = meck:expect(ekka_cluster_sup, start_child, fun(_, _) -> {ok, self()} end),
+    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
+                                             {ok, 200, <<"{\"errorCode\": 0}">>}
+                                     end),
+    ok = ekka_cluster_etcd:register(?OPTIONS),
+    ok = meck:unload(ekka_cluster_sup).
 
 t_unregister(_) ->
-    error('TODO').
+    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
+                                             {ok, 200, <<"{\"errorCode\": 0}">>}
+                                     end),
+    ok = meck:expect(ekka_cluster_sup, stop_child, fun(_) -> ok end),
+    ok = ekka_cluster_etcd:unregister(?OPTIONS),
+    ok = meck:unload(ekka_cluster_sup).
 
 t_etcd_set_node_key(_) ->
-    error('TODO').
+    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
+                                             {ok, 200, <<"{\"errorCode\": 0}">>}
+                                     end),
+    {ok, #{<<"errorCode">> := 0}} = ekka_cluster_etcd:etcd_set_node_key(?OPTIONS).
 

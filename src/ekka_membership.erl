@@ -20,13 +20,26 @@
 
 -include("ekka.hrl").
 
--export([start_link/0]).
+-export([start_link/0, stop/0]).
+
+%% Ring API
+-export([ring/0, ring/1]).
 
 %% Members API
--export([local_member/0, lookup_member/1, members/0, members/1,
-         is_member/1, oldest/1]).
+-export([ local_member/0
+        , lookup_member/1
+        , members/0
+        , members/1
+        , is_member/1
+        , oldest/1
+        ]).
 
--export([leader/0, nodelist/0, nodelist/1, coordinator/0, coordinator/1]).
+-export([ leader/0
+        , nodelist/0
+        , nodelist/1
+        , coordinator/0
+        , coordinator/1
+        ]).
 
 -export([is_all_alive/0]).
 
@@ -40,31 +53,53 @@
 -export([ping/2, pong/2]).
 
 %% On Node/Mnesia Status
--export([node_up/1, node_down/1, mnesia_up/1, mnesia_down/1]).
+-export([ node_up/1
+        , node_down/1
+        , mnesia_up/1
+        , mnesia_down/1
+        ]).
 
 %% On Cluster Status
--export([partition_occurred/1, partition_healed/1]).
+-export([ partition_occurred/1
+        , partition_healed/1
+        ]).
 
 %% gen_server Callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([ init/1
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , terminate/2
+        , code_change/3
+        ]).
 
 -record(state, {monitors, events}).
 
--type eventtype() :: partition | membership.
+-type(event_type() :: partition | membership).
 
+-define(SERVER, ?MODULE).
 -define(LOG(Level, Format, Args),
         logger:Level("Ekka(Membership): " ++ Format, Args)).
 
--define(SERVER, ?MODULE).
+-spec(start_link() -> {ok, pid()} | {error, term()}).
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+-spec(stop() -> ok).
+stop() ->
+    gen_server:stop(?SERVER).
 
 %%--------------------------------------------------------------------
 %% API
 %%--------------------------------------------------------------------
 
--spec(start_link() -> {ok, pid()} | ignore | {error, any()}).
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+-spec(ring() -> [member()]).
+ring() ->
+    lists:keysort(#member.hash, members()).
+
+-spec(ring(up | down) -> [member()]).
+ring(Status) ->
+    lists:keysort(#member.hash, members(Status)).
 
 -spec(local_member() -> member()).
 local_member() ->
@@ -88,11 +123,13 @@ members(Status) ->
 
 %% Get leader node of the members
 -spec(leader() -> node()).
-leader() -> Member = oldest(members()), Member#member.node.
+leader() ->
+    Member = oldest(members()), Member#member.node.
 
 %% Get coordinator node from all the alive members
 -spec(coordinator() -> node()).
-coordinator() -> Member = oldest(members(up)), Member#member.node.
+coordinator() ->
+    Member = oldest(members(up)), Member#member.node.
 
 %% Get Coordinator from nodes
 -spec(coordinator(list(node())) -> node()).
@@ -120,7 +157,7 @@ nodelist(Status) ->
 is_all_alive() ->
     length(ekka_mnesia:cluster_nodes(all) -- [node() | nodes()]) == 0.
 
--spec(monitor(eventtype(), pid() | function(), boolean()) -> ok).
+-spec(monitor(event_type(), pid() | function(), boolean()) -> ok).
 monitor(Type, PidOrFun, OnOff) ->
     call({monitor, {Type, PidOrFun, OnOff}}).
 
@@ -183,9 +220,9 @@ cast(Node, Msg) ->
 call(Req) ->
     gen_server:call(?SERVER, Req).
 
-%%%===================================================================
-%%% gen_server Callbacks
-%%%===================================================================
+%%--------------------------------------------------------------------
+%% gen_server Callbacks
+%%--------------------------------------------------------------------
 
 init([]) ->
     _ = ets:new(membership, [ordered_set, protected, named_table, {keypos, 2}]),
@@ -195,7 +232,8 @@ init([]) ->
                       end,
     LocalMember = with_hash(#member{node = node(), guid = ekka_guid:gen(),
                                     status = up, mnesia = IsMnesiaRunning,
-                                    ltime = erlang:timestamp()}),
+                                    ltime = erlang:timestamp()
+                                   }),
     true = ets:insert(membership, LocalMember),
     lists:foreach(fun(Node) ->
                       spawn(?MODULE, ping, [Node, LocalMember])
@@ -273,7 +311,6 @@ handle_cast({healing, Node}, State) ->
     notify({node, healing, Node}, State),
     {noreply, State};
 
-
 handle_cast({ping, Member = #member{node = Node}}, State) ->
     pong(Node, local_member()),
     insert(Member#member{mnesia = ekka_mnesia:cluster_status(Node)}),
@@ -318,7 +355,6 @@ handle_cast({mnesia_down, Node}, State) ->
     end,
     notify({mnesia, down, Node}, State),
     {noreply, State};
-
 
 handle_cast({partition_occurred, Node}, State) ->
     notify(partition, {occurred, Node}, State),
@@ -386,8 +422,7 @@ del_monitor({Type, PidOrFun}, S = #state{monitors = Monitors}) ->
     case lists:keyfind({Type, PidOrFun}, 1, Monitors) of
         false -> S;
         {_, MRef} ->
-            is_pid(PidOrFun) andalso
-                erlang:demonitor(MRef, [flush]),
+            is_pid(PidOrFun) andalso erlang:demonitor(MRef, [flush]),
             S#state{monitors = lists:delete({{Type, PidOrFun}, MRef}, Monitors)}
     end.
 

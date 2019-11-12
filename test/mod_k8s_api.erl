@@ -14,42 +14,15 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(ekka_dist_SUITE).
+-module(mod_k8s_api).
 
--compile(export_all).
--compile(nowarn_export_all).
+-include_lib("inets/include/httpd.hrl").
 
--include_lib("eunit/include/eunit.hrl").
+-export([do/1]).
 
-all() -> ekka_ct:all(?MODULE).
+do(Req = #mod{method = "GET", request_uri = "/api/v1/namespaces/" ++ _Uri}) ->
+    Response = {200, "{\"subsets\": [{\"addresses\": [{\"ip\": \"127.0.0.1\"}]}]}"},
+    {proceed, [{response, Response}]};
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
-t_listen(_) ->
-    error('TODO').
-
-t_select(_) ->
-    error('TODO').
-
-t_accept(_) ->
-    error('TODO').
-
-t_accept_connection(_) ->
-    error('TODO').
-
-t_setup(_) ->
-    error('TODO').
-
-t_close(_) ->
-    error('TODO').
-
-t_childspecs(_) ->
-    error('TODO').
-
-t_port(_) ->
-    error('TODO').
+do(Req) -> {proceed, Req#mod.data}.
 

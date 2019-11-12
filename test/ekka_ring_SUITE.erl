@@ -19,19 +19,22 @@
 -compile(export_all).
 -compile(nowarn_export_all).
 
+-include("ekka.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
 t_find_node(_) ->
-    error('TODO').
+    ?assertEqual(n1, ekka_ring:find_node(key, ring(5))).
 
 t_find_nodes(_) ->
-    error('TODO').
+    ?assertEqual([n1,n5,n3], ekka_ring:find_nodes(key, ring(5))),
+    ?assertEqual([n1,n5,n3], ekka_ring:find_nodes(key, 3, ring(5))).
+
+ring(N) ->
+    Node = fun(I) -> list_to_atom("n" ++ integer_to_list(I)) end,
+    Hash = fun(I) -> erlang:phash2(I, 4294967295) end,
+    lists:keysort(#member.hash, [#member{node = Node(I),
+                                         hash = Hash(I)
+                                        } || I <- lists:seq(1, N)]).
 

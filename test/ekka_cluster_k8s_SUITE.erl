@@ -21,26 +21,34 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(OPTIONS, [{apiserver, "http://10.110.111.204:8080"},
+                  {namespace, "default"},
+                  {service_name, "ekka"},
+                  {address_type, ip},
+                  {app_name, "ekka"},
+                  {suffix, ""}
+                 ]).
+
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
 t_discover(_) ->
-    error('TODO').
+    ok = meck:new(httpc, [non_strict, passthrough, no_history]),
+    Json = <<"{\"subsets\": [{\"addresses\": [{\"ip\": \"192.168.10.10\"}]}]}">>,
+    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) ->
+                                             {ok, {{"HTTP/1.1", 200, "OK"}, [], Json}}
+                                     end),
+    {ok, ['ekka@192.168.10.10']} = ekka_cluster_k8s:discover(?OPTIONS),
+    ok = meck:unload(httpc).
 
 t_lock(_) ->
-    error('TODO').
+    ignore = ekka_cluster_static:lock([]).
 
 t_unlock(_) ->
-    error('TODO').
+    ignore = ekka_cluster_static:unlock([]).
 
 t_register(_) ->
-    error('TODO').
+    ignore = ekka_cluster_static:register([]).
 
 t_unregister(_) ->
-    error('TODO').
+    ignore = ekka_cluster_static:unregister([]).
 

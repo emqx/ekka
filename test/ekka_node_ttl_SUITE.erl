@@ -23,27 +23,11 @@
 
 all() -> ekka_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
-
-end_per_testcase(_TestCase, Config) ->
-    Config.
-
 t_start_link(_) ->
-    error('TODO').
+    {ok, _} = ekka_node_ttl:start_link(100, {?MODULE, ttl, [self()]}),
+    ok = timer:sleep(100),
+    receive alive -> ok after 0 -> error(timeout) end,
+    ok = ekka_node_ttl:stop().
 
-t_init(_) ->
-    error('TODO').
-
-t_callback_mode(_) ->
-    error('TODO').
-
-t_handle_event(_) ->
-    error('TODO').
-
-t_terminate(_) ->
-    error('TODO').
-
-t_code_change(_) ->
-    error('TODO').
+ttl(Parent) -> Parent ! alive.
 

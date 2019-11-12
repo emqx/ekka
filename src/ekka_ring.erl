@@ -18,16 +18,26 @@
 
 -include("ekka.hrl").
 
--export([find_node/1, find_nodes/1, find_nodes/2]).
+-export([ find_node/2
+        , find_nodes/2
+        , find_nodes/3
+        ]).
+
+-ifdef(TEST).
+-compile(export_all).
+-compile(nowarn_export_all).
+-endif.
 
 -type(key() :: term()).
+-type(ring() :: list(member())).
 
-%% trunc(math:pow(2, 32) - 1))
--define(BASE, 4294967295).
+-export_type([key/0, ring/0]).
 
--spec(find_node(key()) -> node()).
-find_node(Key) ->
-    (next_member(phash(Key), ring()))#member.node.
+-define(BASE, 4294967295). %% trunc(math:pow(2, 32) - 1))
+
+-spec(find_node(key(), ring()) -> node()).
+find_node(Key, Ring) ->
+    (next_member(phash(Key), Ring))#member.node.
 
 next_member(Hash, Ring = [Head|_]) ->
     next_member(Hash, Head, Ring).
@@ -40,14 +50,12 @@ next_member(Hash, _Head, [M = #member{hash = MHash}|_])
 next_member(Hash, Head, [_|Ring]) ->
     next_member(Hash, Head, Ring).
 
-find_nodes(Key) ->
-    Ring = ring(),
+-spec(find_nodes(key(), ring()) -> list(node())).
+find_nodes(Key, Ring) ->
     Count = min(quorum(Ring), length(Ring)),
     find_nodes(Key, Count, Ring).
 
-find_nodes(Key, Count) ->
-    find_nodes(Key, Count, ring()).
-
+-spec(find_nodes(key(), pos_integer(), ring()) -> list(node())).
 find_nodes(Key, Count, Ring) ->
     [N || #member{node = N} <- next_members(phash(Key), Count, Ring)].
 
@@ -80,9 +88,5 @@ quorum(Ring) ->
         N -> N
     end.
 
-ring() ->
-    lists:keysort(#member.hash, ekka_membership:members(up)).
-
-phash(Key) ->
-    erlang:phash2(Key, ?BASE).
+phash(Key) -> erlang:phash2(Key, ?BASE).
 
