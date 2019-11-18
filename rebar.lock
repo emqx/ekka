@@ -1,14 +1,6 @@
 {"1.1.0",
-[{<<"cuttlefish">>,
-  {git,"https://github.com/emqx/cuttlefish",
-       {ref,"6cbd4a22da214735da932c19d327b2724172107a"}},
-  0},
- {<<"getopt">>,
-  {git,"https://github.com/emqx/getopt.git",
-       {ref,"215f2083408e1fe562d441aea6062bf5d9e1fb67"}},
-  1},
- {<<"jsx">>,{pkg,<<"jsx">>,<<"2.9.0">>},0}]}.
+[{<<"jsx">>,{pkg,<<"jsx">>,<<"2.10.0">>},0}]}.
 [
 {pkg_hash,[
- {<<"jsx">>, <<"D2F6E5F069C00266CAD52FB15D87C428579EA4D7D73A33669E12679E203329DD">>}]}
+ {<<"jsx">>, <<"77760560D6AC2B8C51FD4C980E9E19B784016AA70BE354CE746472C33BEB0B1C">>}]}
 ].
