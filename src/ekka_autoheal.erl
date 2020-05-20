@@ -39,7 +39,7 @@ init() ->
     end.
 
 enabled() ->
-    case ekka:env(cluster_autoheal, false) of
+    case ekka:env(cluster_autoheal, true) of
         false -> false;
         true  -> {true, ?DEFAULT_DELAY};
         Delay when is_integer(Delay) ->

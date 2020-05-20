@@ -27,6 +27,7 @@
 -export([port/1]).
 
 -define(DEFAULT_PORT, 4370).
+-define(MAX_PORT_LIMIT, 60000).
 
 listen(Name) ->
     %% Here we figure out what port we want to listen on.
@@ -81,13 +82,14 @@ port(Name) when is_list(Name) ->
     %% name.  If there is no such number, the offset is 0.
     %%
     %% Also handle the case when no hostname was specified.
-    NodeName = re:replace(Name, "@.*$", ""),
-    Offset =
-        case re:run(NodeName, "[0-9]+$", [{capture, first, list}]) of
-            nomatch ->
-                0;
-            {match, [OffsetAsString]} ->
-                list_to_integer(OffsetAsString)
-        end,
-    BasePort + Offset.
+    BasePort + offset(Name).
 
+%% @doc Figure out the offset by node's name
+offset(NodeName) ->
+    ShortName = re:replace(NodeName, "@.*$", ""),
+    case re:run(ShortName, "[0-9]+$", [{capture, first, list}]) of
+        nomatch ->
+            0;
+        {match, [OffsetAsString]} ->
+            (list_to_integer(OffsetAsString) rem ?MAX_PORT_LIMIT)
+    end.

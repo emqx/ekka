@@ -35,7 +35,9 @@ t_port_please(_) ->
     ?assertEqual({port, 4370, 5}, ekka_epmd:port_please('n0@127.0.0.1', {127,0,0,1})),
     ?assertEqual({port, 4371, 5}, ekka_epmd:port_please('n1@127.0.0.1', {127,0,0,1})),
     ?assertEqual({port, 4372, 5}, ekka_epmd:port_please('n2@127.0.0.1', {127,0,0,1})),
-    ?assertEqual({port, 4470, 5}, ekka_epmd:port_please('n100@127.0.0.1', {127,0,0,1})).
+    ?assertEqual({port, 4470, 5}, ekka_epmd:port_please('n100@127.0.0.1', {127,0,0,1})),
+    ?assertEqual({port, 4370, 5}, ekka_epmd:port_please('n60000@127.0.0.1', {127,0,0,1})),
+    ?assertEqual({port, 9905, 5}, ekka_epmd:port_please('n65535@127.0.0.1', {127,0,0,1})).
 
 t_names(_) ->
     ?assertEqual({error, address}, ekka_epmd:names()).
