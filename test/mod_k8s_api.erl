@@ -20,7 +20,7 @@
 
 -export([do/1]).
 
-do(Req = #mod{method = "GET", request_uri = "/api/v1/namespaces/" ++ _Uri}) ->
+do(_Req = #mod{method = "GET", request_uri = "/api/v1/namespaces/" ++ _Uri}) ->
     Response = {200, "{\"subsets\": [{\"addresses\": [{\"ip\": \"127.0.0.1\"}]}]}"},
     {proceed, [{response, Response}]};
 

@@ -20,11 +20,11 @@
 
 -export([do/1]).
 
-do(Req = #mod{method = "GET", request_uri = "/v2/keys/" ++ _Uri}) ->
+do(_Req = #mod{method = "GET", request_uri = "/v2/keys/" ++ _Uri}) ->
     Response = {200, "{\"node\": {\"nodes\": [{\"key\": \"cl/ct@127.0.0.1\"}]}}"},
     {proceed, [{response, Response}]};
 
-do(Req = #mod{request_uri = "/v2/keys/" ++ _Uri}) ->
+do(_Req = #mod{request_uri = "/v2/keys/" ++ _Uri}) ->
     {proceed, [{response, {200, "{\"errorCode\": 0}"}}]};
 
 do(Req) -> {proceed, Req#mod.data}.

@@ -29,7 +29,6 @@ start_slave(node, Name) ->
     {ok, Node} = slave:start(host(), Name, ebin_path()),
     Node;
 start_slave(ekka, Name) ->
-    Paths = ebin_path(),
     {ok, Node} = slave:start(host(), Name, ebin_path()),
     rpc:call(Node, ekka, start, []),
     Node.

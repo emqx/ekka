@@ -36,12 +36,12 @@ end_per_testcase(_TestCase, Config) ->
     ok = meck:unload(httpc),
     Config.
 
-t_discover(Config) ->
+t_discover(_Config) ->
     Json = <<"{\"node\": {\"nodes\": [{\"key\": \"ekkacl/n1@127.0.0.1\"}]}}">>,
     ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) -> {ok, 200, Json} end),
     {ok, ['n1@127.0.0.1']} = ekka_cluster_etcd:discover(?OPTIONS).
 
-t_lock(Config) ->
+t_lock(_Config) ->
     ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),

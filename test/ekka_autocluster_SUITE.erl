@@ -65,7 +65,7 @@ end_per_suite(_Config) ->
 %%--------------------------------------------------------------------
 %% Autocluster via 'static' strategy
 
-t_autocluster_via_static(Config) ->
+t_autocluster_via_static(_Config) ->
     N1 = ekka_ct:start_slave(ekka, n1),
     try
         ok = ekka_ct:wait_running(N1),
@@ -167,7 +167,7 @@ wait_for_node(Node, 0) ->
 wait_for_node(Node, Cnt) ->
     ok = timer:sleep(500),
     case lists:member(Node, ekka:info(running_nodes)) of
-        true -> ok;
+        true -> timer:sleep(500), ok;
         false -> wait_for_node(Node, Cnt-1)
     end.
 

@@ -44,6 +44,3 @@ t_autoclean(_) ->
     [N0] = ekka_cluster:info(running_nodes),
     ekka:force_leave(N1).
 
-
-
-

@@ -25,7 +25,6 @@ all() -> ekka_ct:all(?MODULE).
 
 init_per_suite(Config) ->
     ok = init_app_envs(node()),
-    Envs = application:get_all_env(ekka),
     ok = ekka:start(),
     Config.
 
