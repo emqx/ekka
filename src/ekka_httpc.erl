@@ -70,6 +70,15 @@ build_url(Addr, Path) ->
 build_url(Addr, Path, Params) ->
     lists:concat([build_url(Addr, Path), "?", build_query(Params)]).
 
+-if(?OTP_RELEASE >= 23).
+build_query(Params) when is_list(Params) ->
+    uri_string:compose_query([{safty(K), safty(V)} || {K, V} <- Params]).
+
+safty(A) when is_atom(A)    -> atom_to_list(A);
+safty(I) when is_integer(I) -> integer_to_list(I);
+safty(T) -> T.
+
+-else.
 build_query(Params) ->
     string:join([urlencode(Param) || Param <- Params], "&").
 
@@ -83,6 +92,7 @@ urlencode(I) when is_integer(I) ->
     urlencode(integer_to_list(I));
 urlencode(B) when is_binary(B) ->
     urlencode(binary_to_list(B)).
+-endif.
 
 parse_response({ok, {{_, Code, _}, _Headers, Body}}) ->
     parse_response({ok, Code, Body});
