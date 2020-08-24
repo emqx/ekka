@@ -304,7 +304,7 @@ wait_for(stop) ->
 
 wait_for(tables) ->
     Tables = mnesia:system_info(local_tables),
-    case mnesia:wait_for_tables(Tables, 150000) of
+    case mnesia:wait_for_tables(Tables, 15000) of
         ok                   -> ok;
         {error, Reason}      -> {error, Reason};
         {timeout, BadTables} -> {error, {timeout, BadTables}}
