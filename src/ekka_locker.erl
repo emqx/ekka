@@ -263,8 +263,8 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
     Monitors1 = lists:foldl(
                   fun(#lock{resource = Resource, owner = Owner}, MonAcc) ->
                       case maps:find(Owner, MonAcc) of
-                          {ok, ResourcesMap} ->
-                              maps:put(Owner, ResourcesMap#{Resource => nil}, MonAcc);
+                          {ok, ResourcesSet} ->
+                              maps:put(Owner, ResourcesSet#{Resource => nil}, MonAcc);
                           error ->
                               _MRef = erlang:monitor(process, Owner),
                               maps:put(Owner, [Resource], MonAcc)
@@ -275,7 +275,7 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
 handle_info({'DOWN', _MRef, process, DownPid, _Reason},
             State = #state{locks = Tab, monitors = Monitors}) ->
     case maps:find(DownPid, Monitors) of
-        {ok, ResourcesMap} ->
+        {ok, ResourcesSet} ->
             lists:foreach(
               fun(Resource) ->
                   case ets:lookup(Tab, Resource) of
@@ -283,7 +283,7 @@ handle_info({'DOWN', _MRef, process, DownPid, _Reason},
                           ets:delete_object(Tab, Lock);
                       _ -> ok
                   end
-              end, maps:keys(ResourcesMap)),
+              end, maps:keys(ResourcesSet)),
             {noreply, State#state{monitors = maps:remove(DownPid, Monitors)}};
         error ->
             {noreply, State}
