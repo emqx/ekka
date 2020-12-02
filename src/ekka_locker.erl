@@ -263,11 +263,11 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
     Monitors1 = lists:foldl(
                   fun(#lock{resource = Resource, owner = Owner}, MonAcc) ->
                       case maps:find(Owner, MonAcc) of
-                          {ok, ResourcesSet} ->
-                              maps:put(Owner, ResourcesSet#{Resource => nil}, MonAcc);
+                          {ok, ResourceSet} ->
+                              maps:put(Owner, sets_put(Resource, ResourceSet), MonAcc);
                           error ->
                               _MRef = erlang:monitor(process, Owner),
-                              maps:put(Owner, [Resource], MonAcc)
+                              maps:put(Owner, sets_put(Resource, #{}), MonAcc)
                       end
                   end, Monitors, check_lease(Tab, Lease, erlang:system_time(millisecond))),
     {noreply, State#state{monitors = Monitors1}, hibernate};
@@ -275,7 +275,7 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
 handle_info({'DOWN', _MRef, process, DownPid, _Reason},
             State = #state{locks = Tab, monitors = Monitors}) ->
     case maps:find(DownPid, Monitors) of
-        {ok, ResourcesSet} ->
+        {ok, ResourceSet} ->
             lists:foreach(
               fun(Resource) ->
                   case ets:lookup(Tab, Resource) of
@@ -283,7 +283,7 @@ handle_info({'DOWN', _MRef, process, DownPid, _Reason},
                           ets:delete_object(Tab, Lock);
                       _ -> ok
                   end
-              end, maps:keys(ResourcesSet)),
+              end, sets_to_list(ResourceSet)),
             {noreply, State#state{monitors = maps:remove(DownPid, Monitors)}};
         error ->
             {noreply, State}
@@ -309,3 +309,18 @@ check_lease(Tab, #lease{expiry = Expiry}, Now) ->
 
 cancel_lease(#lease{timer = TRef}) -> timer:cancel(TRef).
 
+%% TODO: Remove code about list in next version
+sets_put(Resource, ResourceSet) when is_list(ResourceSet) ->
+    case lists:member(Resource, ResourceSet) of
+        true ->
+            ResourceSet;
+        false ->
+            [Resource | ResourceSet]
+    end;
+sets_put(Resource, ResourceSet) when is_map(ResourceSet) ->
+    ResourceSet#{Resource => nil}.
+
+sets_to_list(ResourceSet) when is_list(ResourceSet) ->
+    ResourceSet;
+sets_to_list(ResourceSet) when is_map(ResourceSet) ->
+    maps:keys(ResourceSet).
