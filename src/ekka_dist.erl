@@ -27,17 +27,23 @@
 -export([port/1]).
 
 -define(DEFAULT_PORT, 4370).
+-define(MIN_RAND_PORT, 10000).
 -define(MAX_PORT_LIMIT, 60000).
 
 listen(Name) ->
     %% Here we figure out what port we want to listen on.
     Port = port(Name),
 
-    %% Set both "min" and "max" variables, to force the port number to
-    %% this one.
-    ok = application:set_env(kernel, inet_dist_listen_min, Port),
-    ok = application:set_env(kernel, inet_dist_listen_max, Port),
-
+    case Port > 0 of
+        true ->
+            %% Set both "min" and "max" variables, to force the port number to
+            %% this one.
+            ok = application:set_env(kernel, inet_dist_listen_min, Port),
+            ok = application:set_env(kernel, inet_dist_listen_max, Port);
+        false ->
+            ok = application:set_env(kernel, inet_dist_listen_min, ?MIN_RAND_PORT),
+            ok = application:set_env(kernel, inet_dist_listen_max, ?MAX_PORT_LIMIT)
+    end,
     %% Finally run the real function!
     with_module(fun(M) -> M:listen(Name) end).
 
@@ -71,6 +77,11 @@ with_module(Fun) ->
 -spec(port(node() | string()) -> inet:port_number()).
 port(Name) when is_atom(Name) ->
     port(atom_to_list(Name));
+port("remsh" ++ _) ->
+    %% outgoing port for remsh,
+    %% it should never accept incoming connections
+    %% i.e. no one else should need to know the actual port
+    0;
 port(Name) when is_list(Name) ->
     %% Figure out the base port.  If not specified using the
     %% inet_dist_base_port kernel environment variable, default to
