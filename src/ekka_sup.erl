@@ -30,7 +30,8 @@ init([]) ->
           [child(ekka_cluster_sup, supervisor),
            child(ekka_membership, worker),
            child(ekka_node_monitor, worker),
-           child(ekka_locker_sup, supervisor)
+           child(ekka_locker_sup, supervisor),
+           child(ekka_rlog_sup, supervisor)
           ]}}.
 
 child(Mod, worker) ->
@@ -48,4 +49,3 @@ child(Mod, supervisor) ->
        shutdown => infinity,
        type     => supervisor,
        modules  => [Mod]}.
-
