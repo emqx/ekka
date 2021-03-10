@@ -27,3 +27,6 @@ ekka.d
 _build/
 .rebar3/
 rebar.lock
+TEST-*.xml
+_checkouts
+TAGS
