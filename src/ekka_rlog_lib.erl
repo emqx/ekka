@@ -17,6 +17,17 @@
 %% Internal functions
 -module(ekka_rlog_lib).
 
+-export([make_key/0, make_key_in_past/1, import_batch/1]).
+
+-export_type([batch/0]).
+
+-type tx() :: any().  %% TODO: proper type
+
+-type batch() :: { _Sender :: pid()
+                 , _SeqNo  :: integer()
+                 , _Tx     :: list(tx())
+                 }.
+
 %% Log key should be monotonic and globally unique.
 %% it is a tuple of a timestamp (ts) and the node id (node_id),
 %% where ts is at nanosecond precesion to ensure it is locally
@@ -36,3 +47,8 @@ make_key() ->
 make_key_in_past(Dt) ->
     {TS, Node} = make_key(),
     {TS - Dt, Node}.
+
+%% @doc Import transaction ops to the local database
+-spec import_batch([tx()]) -> ok.
+import_batch(Batch) ->
+    ok. %% TODO

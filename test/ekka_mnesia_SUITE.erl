@@ -109,7 +109,7 @@ t_async_cluster_start(_) ->
               ],
     Env = [{shards, [foo]}],
     ?check_trace(
-       #{timeout => 10000},
+       #{timeout => 30000},
        begin
            Nodes = ekka_ct:cluster(Cluster, Env)
        end,
