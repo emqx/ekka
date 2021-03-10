@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2020 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 -compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 -record(kv_tab, {key, val}).
 
@@ -101,3 +102,19 @@ t_remove_from_cluster(_) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+t_async_cluster_start(_) ->
+    Cluster = [ {core, n1}
+              , {core, n2}
+              , {replicant, n3}
+              ],
+    Env = [{shards, [foo]}],
+    ?check_trace(
+       #{timeout => 10000},
+       begin
+           Nodes = ekka_ct:cluster(Cluster, Env)
+       end,
+       fun([N1, N2, N3], Trace) ->
+               %% Ensure that the nodes assumed designated roles:
+               ?projection_complete(node, ?of_kind(ekka_rlog_server_start, Trace), [N1, N2]),
+               ?projection_complete(node, ?of_kind(ekka_rlog_replica_start, Trace), [N3])
+       end).

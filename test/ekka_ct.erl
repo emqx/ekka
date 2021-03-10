@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2021 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -25,11 +25,26 @@ all(Suite) ->
                       string:substr(atom_to_list(F), 1, 2) == "t_"
                 ]).
 
+-spec cluster([{core | replicant, Node}], [{atom(), term()}]) -> Node
+              when Node :: atom().
+cluster(ClusterSpec, Env) ->
+    Host = host(),
+    CoreNodes = [list_to_atom(lists:concat([Name, "@", Host])) || {core, Name} <- ClusterSpec],
+    [begin
+         Node = start_slave(node, Name),
+         Env1 = [{node_role, Role}, {core_nodes, CoreNodes} | Env],
+         [rpc:call(Node, application, set_env, [ekka, Key, Val]) || {Key, Val} <- Env1],
+         rpc:call(Node, ekka, start, []),
+         Node
+     end
+     || {Role, Name} <- ClusterSpec].
+
 start_slave(node, Name) ->
     {ok, Node} = slave:start(host(), Name, ebin_path()),
+    snabbkaffe:forward_trace(Node),
     Node;
 start_slave(ekka, Name) ->
-    {ok, Node} = slave:start(host(), Name, ebin_path()),
+    Node = start_slave(node, Name),
     rpc:call(Node, ekka, start, []),
     Node.
 
@@ -57,4 +72,3 @@ ebin_path() ->
 
 is_lib(Path) ->
     string:prefix(Path, code:lib_dir()) =:= nomatch.
-
