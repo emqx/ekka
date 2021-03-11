@@ -17,7 +17,7 @@
 %% Internal functions
 -module(ekka_rlog_lib).
 
--export([make_key/0, make_key_in_past/1, import_batch/1]).
+-export([make_key/0, make_key_in_past/1, import_batch/2]).
 
 -export_type([batch/0]).
 
@@ -49,6 +49,6 @@ make_key_in_past(Dt) ->
     {TS - Dt, Node}.
 
 %% @doc Import transaction ops to the local database
--spec import_batch([tx()]) -> ok.
-import_batch(Batch) ->
+-spec import_batch(transaction | dirty, [tx()]) -> ok.
+import_batch(_ImportType, Batch) ->
     ok. %% TODO

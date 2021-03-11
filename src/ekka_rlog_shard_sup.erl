@@ -65,22 +65,6 @@ server(Module, Shard) ->
      , type => worker
      }.
 
-agent_sup(Shard) ->
-    #{ id => core_agent_sup
-     , start => {?MODULE, start_link_agent_sup, [Shard]}
-     , restart => permanent
-     , shutdown => 1000
-     , type => supervisor
-     }.
-
-bootstrapper_sup(Shard) ->
-    #{ id => core_bootstrapper_sup
-     , start => {?MODULE, start_link_bootstrapper_sup, [Shard]}
-     , restart => permanent
-     , shutdown => 1000
-     , type => supervisor
-     }.
-
 simple_sup(Module, Shard) ->
     SupFlags = #{ strategy => simple_one_for_one
                 , intensity => 0
