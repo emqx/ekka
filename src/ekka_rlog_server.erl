@@ -24,7 +24,7 @@
 %% API
 -export([ start_link/1
         , subscribe_tlog/3
-        , bootstrap/2
+        , bootstrap_me/2
         ]).
 
 %% gen_server callbacks
@@ -36,9 +36,10 @@
         , code_change/3
         ]).
 
--export_type([ checkpoint/0
-             , subscriber/0
-             ]).
+%% Internal exports
+-export([do_bootstrap/2]).
+
+-export_type([checkpoint/0]).
 
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
@@ -47,8 +48,6 @@
 %%================================================================================
 
 -type checkpoint() :: ekka_rlog:txid() | undefined.
-
--type subscriber() :: {node(), pid()}.
 
 -record(s,
         { agent_sup           :: pid()
@@ -65,14 +64,19 @@ start_link(Shard) ->
     Config = #{}, % TODO
     gen_server:start_link({local, Shard}, ?MODULE, {Shard, Config}, []).
 
--spec subscribe_tlog(ekka_rlog:shard(), subscriber(), checkpoint()) ->
+-spec subscribe_tlog(ekka_rlog:shard(), ekka_rlog_lib:subscriber(), checkpoint()) ->
           {_NeedBootstrap :: boolean(), _Agent :: pid()}.
 subscribe_tlog(Shard, Subscriber, Checkpoint) ->
     gen_server:call(Shard, {subscribe_tlog, Subscriber, Checkpoint}, infinity).
 
--spec bootstrap(ekka_rlog:shard(), pid()) -> ok.
-bootstrap(Shard, Subscriber) ->
-    gen_server:call(Shard, {bootstrap, Subscriber}, infinity).
+-spec bootstrap_me(node(), ekka_rlog:shard()) -> {ok, pid()}
+              | {error, term()}.
+bootstrap_me(RemoteNode, Shard) ->
+    Me = {node(), self()},
+    case gen_rpc:call(RemoteNode, ?MODULE, do_bootstrap, [Shard, Me]) of
+        {ok, Pid} -> {ok, Pid};
+        Err       -> {error, Err}
+    end.
 
 %%================================================================================
 %% gen_server callbacks
@@ -143,3 +147,12 @@ maybe_start_child(Supervisor, Args) ->
         {ok, Pid, _} -> Pid;
         {error, {already_started, Pid}} -> Pid
     end.
+
+%%================================================================================
+%% Internal exports (gen_rpc)
+%%================================================================================
+
+
+-spec do_bootstrap(ekka_rlog:shard(), ekka_rlog_bootstrapper:subscriber()) -> {ok, pid()}.
+do_bootstrap(Shard, Subscriber) ->
+    gen_server:call(Shard, {bootstrap, Subscriber}, infinity).

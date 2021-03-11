@@ -21,7 +21,7 @@
 %% API:
 -export([start_link/2, start_link_client/3]).
 
-%% gen_server callbacks
+%% gen_server callbacks:
 -export([ init/1
         , terminate/2
         , handle_call/3
@@ -30,19 +30,29 @@
         , code_change/3
         ]).
 
+%% Internal exports:
+-export([do_push_batch/2]).
+
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 %%================================================================================
 %% Type declarations
 %%================================================================================
 
+-type batch() :: { _Last :: boolean()
+                 , _From :: pid()
+                 , _TXs  :: [ekka_rlog_lib:tx()]
+                 }.
+
 -record(server,
-        {
+        { shard       :: ekka_rlog:shard()
+        , subscriber  :: ekka_rlog_lib:subscriber()
         }).
 
 -record(client,
-        { shard :: ekka_rlog:shard()
-        , parent :: pid()
+        { shard       :: ekka_rlog:shard()
+        , server      :: pid()
+        , parent      :: pid()
         }).
 
 %%================================================================================
@@ -50,7 +60,7 @@
 %%================================================================================
 
 %% @doc Start bootstrapper server
--spec start_link(ekka_rlog:shard(), ekka_rlog_server:subscriber()) -> {ok, pid()}.
+-spec start_link(ekka_rlog:shard(), ekka_rlog_lib:subscriber()) -> {ok, pid()}.
 start_link(Shard, Subscriber) ->
     gen_server:start_link(?MODULE, {server, Shard, Subscriber}, []).
 
@@ -64,16 +74,21 @@ start_link_client(Shard, RemoteNode, Parent) ->
 %%================================================================================
 
 init({server, Shard, Subscriber}) ->
-    {ok, #server{}};
-init({client, Shard, RemoteNode, Parent}) ->
     %% TODO: wrong
     self() ! hack,
-    {ok, #client{ parent = Parent
-                , shard  = Shard
+    {ok, #server{ shard      = Shard
+                , subscriber = Subscriber
+                }};
+init({client, Shard, RemoteNode, Parent}) ->
+    {ok, Pid} = ekka_rlog_server:bootstrap_me(RemoteNode, Shard),
+    {ok, #client{ parent     = Parent
+                , shard      = Shard
+                , server     = Pid
                 }}.
 
-handle_info(hack, St = #client{parent = Parent}) ->
-    Parent ! {bootstrap_complete, self(), ekka_rlog_lib:make_key()},
+handle_info(hack, St = #server{subscriber = Subscriber}) ->
+    %% TODO: don't do this.
+    ok = push_batch(Subscriber, {true, self(), []}),
     {exit, normal, St};
 handle_info(_Info, St) ->
     {noreply, St}.
@@ -81,15 +96,35 @@ handle_info(_Info, St) ->
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
+handle_call(_, {batch, {Last, From, TXs}}, St = #client{server = From, parent = Parent}) ->
+    ok = ekka_rlog_lib:import_batch(dirty, TXs),
+    if Last ->
+            Parent ! {bootstrap_complete, self(), ekka_rlog_lib:make_key()},
+            {exit, normal, St};
+       true ->
+            {reply, ok, St}
+    end;
 handle_call(_From, Call, St) ->
     {reply, {error, {unknown_call, Call}}, St}.
 
 code_change(_OldVsn, St, _Extra) ->
     {ok, St}.
 
-terminate(_Reason, #{} = St) ->
+terminate(_Reason, St) ->
     {ok, St}.
 
 %%================================================================================
 %% Internal functions
 %%================================================================================
+
+-spec push_batch(ekka_rlog_lib:subscriber(), batch()) -> ok.
+push_batch({Node, Pid}, Batch = {_, _, _}) ->
+    gen_rpc:call(Node, ?MODULE, do_push_batch, [Pid, Batch]).
+
+%%================================================================================
+%% Internal exports (gen_rpc)
+%%================================================================================
+
+-spec do_push_batch(pid(), batch()) -> ok.
+do_push_batch(Pid, Batch) ->
+    gen_server:call(Pid, {batch, Batch}, infinity).

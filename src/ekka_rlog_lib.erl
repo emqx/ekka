@@ -19,7 +19,7 @@
 
 -export([make_key/0, make_key_in_past/1, import_batch/2]).
 
--export_type([batch/0]).
+-export_type([batch/0, subscriber/0]).
 
 -type tx() :: any().  %% TODO: proper type
 
@@ -27,6 +27,8 @@
                  , _SeqNo  :: integer()
                  , _Tx     :: list(tx())
                  }.
+
+-type subscriber() :: {node(), pid()}.
 
 %% Log key should be monotonic and globally unique.
 %% it is a tuple of a timestamp (ts) and the node id (node_id),
