@@ -55,9 +55,9 @@ core_nodes() ->
     application:get_env(ekka, core_nodes, []).
 
 -spec subscribe_tlog(ekka_rlog:shard(), node(), pid(), ekka_rlog_server:checkpoint()) ->
-          {_NeedBootstrap :: boolean(), _Agent :: pid()}
+          {ok, _NeedBootstrap :: boolean(), _Agent :: pid()}
         | {badrpc | badtcp, term()}.
 subscribe_tlog(Shard, RemoteNode, Subscriber, Checkpoint) ->
     MyNode = node(),
     Args = [Shard, {MyNode, Subscriber}, Checkpoint],
-    gen_rpc:call(RemoteNode, ekka_rlog_server, subscribe, Args).
+    ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe_tlog, Args).

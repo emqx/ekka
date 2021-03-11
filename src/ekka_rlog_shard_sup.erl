@@ -49,7 +49,7 @@ init([shard, Shard]) ->
                ],
     {ok, {SupFlags, Children}};
 init([agent, Shard]) ->
-    simple_sup(ekka_rlog_server, Shard);
+    simple_sup(ekka_rlog_agent, Shard);
 init([bootstrapper, Shard]) ->
     simple_sup(ekka_rlog_bootstrapper, Shard).
 
