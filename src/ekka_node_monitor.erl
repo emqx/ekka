@@ -213,6 +213,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %%--------------------------------------------------------------------
 
+%% TODO: This function triggers a bug in dialyzer, where it forgets about some record fields.
+-dialyzer({nowarn_function, [ensure_heartbeat/1]}).
 ensure_heartbeat(State = #state{heartbeat = undefined}) ->
     Interval = rand:uniform(2000) + 2000,
     State#state{heartbeat = run_after(Interval, heartbeat)};
@@ -222,4 +224,3 @@ ensure_heartbeat(State) ->
 
 autoheal_handle_msg(Msg, State = #state{autoheal = Autoheal}) ->
     State#state{autoheal = ekka_autoheal:handle_msg(Msg, Autoheal)}.
-

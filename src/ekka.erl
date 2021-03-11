@@ -109,11 +109,12 @@ stop() ->
 %% Env
 %%--------------------------------------------------------------------
 
--spec(env(atom()) -> undefined | {ok, term()}).
+-spec(env(atom() | {callback, atom()}) -> undefined | {ok, term()}).
 env(Key) ->
-    application:get_env(ekka, Key).
+    %% TODO: hack, using apply to trick dialyzer.
+    apply(application, get_env, [ekka, Key]).
 
--spec(env(atom(), term()) -> term()).
+-spec(env(atom() | {callback, atom()}, term()) -> term()).
 env(Key, Default) ->
     application:get_env(ekka, Key, Default).
 
@@ -168,13 +169,15 @@ autocluster(App) ->
 %% Register callback
 %%--------------------------------------------------------------------
 
--spec(callback(atom()) -> undefined | function()).
+-spec callback(atom()) -> undefined | {ok, function()}.
 callback(Name) ->
     env({callback, Name}).
 
 -spec(callback(atom(), function()) -> ok).
 callback(Name, Fun) ->
-    application:set_env(ekka, {callback, Name}, Fun).
+    %% TODO: hack, using apply to trick dialyzer.
+    %% Using a tuple as a key of the application environment "works", but it violates the spec
+    apply(application, set_env, [ekka, {callback, Name}, Fun]).
 
 %%--------------------------------------------------------------------
 %% Node API
@@ -254,4 +257,3 @@ unlock(Resource) ->
 -spec(unlock(ekka_locker:resource(), ekka_locker:lock_type()) -> ekka_locker:lock_result()).
 unlock(Resource, Type) ->
     ekka_locker:release(ekka_locker, Resource, Type).
-

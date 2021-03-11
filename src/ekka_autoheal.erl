@@ -24,7 +24,7 @@
 
 -record(autoheal, {delay, role, proc, timer}).
 
--opaque(autoheal() :: #autoheal{}).
+-type(autoheal() :: #autoheal{}).
 
 -export_type([autoheal/0]).
 

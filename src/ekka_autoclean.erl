@@ -22,7 +22,7 @@
 
 -record(autoclean, {expiry, timer}).
 
--opaque(autoclean() :: #autoclean{}).
+-type(autoclean() :: #autoclean{}).
 
 -export_type([autoclean/0]).
 

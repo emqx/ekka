@@ -1,4 +1,3 @@
-
 -type(cluster() :: atom()).
 
 -type(member_status() :: joining | up | healing | leaving | down).
@@ -8,12 +7,11 @@
 -record(member, {
           node   :: node(),
           addr   :: undefined | member_address(),
-          guid   :: ekka_guid:guid(),
-          hash   :: pos_integer(),
+          guid   :: undefined | ekka_guid:guid(),
+          hash   :: undefined | pos_integer(),
           status :: member_status(),
-          mnesia :: running | stopped | false,
-          ltime  :: erlang:timestamp()
+          mnesia :: undefined | running | stopped | false,
+          ltime  :: undefined | erlang:timestamp()
          }).
 
 -type(member() :: #member{}).
-

@@ -287,7 +287,7 @@ ensure_tab({aborted, {already_exists, _Name, _Node}})-> ok;
 ensure_tab({aborted, Error})                         -> Error.
 
 %% @doc Wait for mnesia to start, stop or tables ready.
--spec(wait_for(start | stop | tables) -> ok | {error, Reason :: atom()}).
+-spec(wait_for(start | stop | tables) -> ok | {error, Reason :: term()}).
 wait_for(start) ->
     case mnesia:system_info(is_running) of
         yes      -> ok;
@@ -311,4 +311,3 @@ wait_for(tables) ->
         {error, Reason}      -> {error, Reason};
         {timeout, BadTables} -> {error, {timeout, BadTables}}
     end.
-

@@ -102,7 +102,7 @@ heal(reboot) ->
     ekka_mnesia:ensure_started(), reboot().
 
 %% @doc Prepare to join or leave the cluster.
--spec(prepare(join | leave) -> ok | {error, term()}).
+-spec(prepare(join | leave | heal) -> ok | {error, term()}).
 prepare(Action) ->
     ekka_membership:announce(Action),
     case ekka:callback(prepare) of
@@ -117,4 +117,3 @@ reboot() ->
         {ok, Reboot} -> Reboot();
         undefined    -> ekka:start()
     end.
-
