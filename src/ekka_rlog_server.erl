@@ -37,6 +37,7 @@
         ]).
 
 -export_type([ checkpoint/0
+             , subscriber/0
              ]).
 
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
@@ -46,6 +47,8 @@
 %%================================================================================
 
 -type checkpoint() :: ekka_rlog:txid() | undefined.
+
+-type subscriber() :: {node(), pid()}.
 
 -record(s,
         { agent_sup           :: pid()
@@ -62,7 +65,8 @@ start_link(Shard) ->
     Config = #{}, % TODO
     gen_server:start_link({local, Shard}, ?MODULE, {Shard, Config}, []).
 
--spec subscribe_tlog(ekka_rlog:shard(), pid(), checkpoint()) -> ok.
+-spec subscribe_tlog(ekka_rlog:shard(), subscriber(), checkpoint()) ->
+          {_NeedBootstrap :: boolean(), _Agent :: pid()}.
 subscribe_tlog(Shard, Subscriber, Checkpoint) ->
     gen_server:call(Shard, {subscribe_tlog, Subscriber, Checkpoint}, infinity).
 
@@ -97,12 +101,12 @@ handle_info(_Info, St) ->
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
-handle_call(_From, {subscribe_tlog, Subscriber, Checkpoint}, State) ->
+handle_call(_From, {subscribe_tlog, {Node, Subscriber}, Checkpoint}, State) ->
     {NeedBootstrap, ReplaySince} = needs_bootstrap( State#s.bootstrap_threshold
                                                   , State#s.tlog_replay
                                                   , Checkpoint
                                                   ),
-    Pid = maybe_start_child(State#s.agent_sup, [Subscriber, ReplaySince]),
+    Pid = maybe_start_child(State#s.agent_sup, [Node, Subscriber, ReplaySince]),
     {reply, {NeedBootstrap, Pid}, State};
 handle_call(_From, {bootstrap, Subscriber}, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),

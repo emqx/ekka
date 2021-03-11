@@ -44,7 +44,7 @@
 -record(d,
         { shard                        :: ekka_rlog:shard()
         , remote_core_node = undefined :: node() | undefined
-        , agent                        :: pid()
+        , agent                        :: pid() | undefined
         , tmp_worker       = undefined :: pid() | undefined
         , checkpoint       = undefined :: ekka_rlog_server:checkpoint()
         , next_batch_seqno = 0         :: integer()
@@ -128,7 +128,7 @@ terminate(_Reason, _State, _Data) ->
 
 %% @private Consume transactions from the core node
 -spec handle_batch(state(), ekka_rlog_lib:batch(), data()) -> fsm_result().
-handle_batch(?normal, Batch = {Agent, SeqNo, Transactions},
+handle_batch(?normal, {Agent, SeqNo, Transactions},
              D = #d{ agent            = Agent
                    , next_batch_seqno = SeqNo
                    }) ->
@@ -138,7 +138,7 @@ handle_batch(?normal, Batch = {Agent, SeqNo, Transactions},
          , seqno => SeqNo
          , transactions => Transactions
          }),
-    ekka_rlog_lib:import_batch(transaction, Batch),
+    ekka_rlog_lib:import_batch(transaction, Transactions),
     {keep_state, D#d{next_batch_seqno = SeqNo + 1}, [{reply, ok}]};
 handle_batch(St, {tlog_batch, {Agent, SeqNo, Transactions}},
              D = #d{ agent = Agent
@@ -171,8 +171,8 @@ handle_batch(State, {Agent, SeqNo, _Transactions}, Data) ->
     keep_state_and_data.
 
 -spec initiate_bootstrap(data()) -> fsm_result().
-initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Node}) ->
-    {ok, Pid} = ekka_rlog_bootstrap_client:start_link(Node, Shard),
+initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
+    {ok, Pid} = ekka_rlog_bootstrapper:start_link_client(Shard, Remote, self()),
     {keep_state, D#d{tmp_worker = Pid}}.
 
 -spec handle_bootstrap_complete(ekka_rlog_server:checkpoint(), data()) -> fsm_result().
@@ -238,7 +238,20 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
                 {ok, boolean(), node(), pid()}
               | {error, term()}.
 try_connect(Shard, Checkpoint) ->
-    {error, not_implemented}.
+    try_connect(shuffle(ekka_rlog:core_nodes()), Shard, Checkpoint).
+
+-spec try_connect([node()], ekka_rlog:shard(), ekka_rlog_server:checkpoint()) ->
+                {ok, boolean(), node(), pid()}
+              | {error, term()}.
+try_connect([], _, _) ->
+    {error, no_core_available};
+try_connect([Node|Rest], Shard, Checkpoint) ->
+    case ekka_rlog:subscribe_tlog(Shard, Node, self(), Checkpoint) of
+        {Err, _} when Err =:= badrpc orelse Err =:= badtcp ->
+            try_connect(Rest, Shard, Checkpoint);
+        {NeedBootstrap, Agent} when is_pid(Agent) ->
+            {ok, NeedBootstrap, Node, Agent}
+    end.
 
 -spec buffer_tlog_ops([ekka_rlog_lib:tx()], data()) -> ok.
 buffer_tlog_ops(Batch, Data) ->
@@ -269,3 +282,7 @@ handle_state_trans(OldState, State, _Data) ->
          , to => State
          }),
     keep_state_and_data.
+
+-spec shuffle([A]) -> [A].
+shuffle(A) ->
+    A. %% TODO: implement me
