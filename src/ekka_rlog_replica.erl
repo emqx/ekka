@@ -96,16 +96,16 @@ handle_event(enter, OldState, ?disconnected, D) ->
 handle_event(timeout, reconnect, ?disconnected, D) ->
     handle_reconnect(D);
 %% Events specific to `bootstrap' state:
-handle_event(info, {bootstrap_complete, Pid, Checkpoint}, ?bootstrap, D = #d{tmp_worker = Pid}) ->
-    handle_bootstrap_complete(Checkpoint, D);
 handle_event(enter, OldState, ?bootstrap, D) ->
     handle_state_trans(OldState, ?bootstrap, D),
     initiate_bootstrap(D);
+handle_event(info, {bootstrap_complete, Pid, Checkpoint}, ?bootstrap, D = #d{tmp_worker = Pid}) ->
+    handle_bootstrap_complete(Checkpoint, D);
 %% Events specific to `local_replay' state:
 handle_event(enter, OldState, ?local_replay, D) ->
     handle_state_trans(OldState, ?local_replay, D),
     initiate_local_replay(D);
-handle_event(call, {local_replay_complete, Worker}, ?local_replay, D = #d{tmp_worker = Worker}) ->
+handle_event(info, {local_replay_complete, Worker}, ?local_replay, D = #d{tmp_worker = Worker}) ->
     complete_initialization(D);
 %% Events specific to `normal' state:
 %% Common events:
@@ -203,7 +203,11 @@ handle_agent_down(State, Reason, D) ->
 -spec initiate_local_replay(data()) -> fsm_result().
 initiate_local_replay(D) ->
     %% TODO: Not implemented
-    {keep_state, D}.
+    Parent = self(),
+    Worker = spawn_link(fun() ->
+                                Parent ! {local_replay_complete, self()}
+                        end),
+    {keep_state, D#d{tmp_worker = Worker}}.
 
 -spec complete_initialization(data()) -> fsm_result().
 complete_initialization(D) ->
