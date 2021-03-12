@@ -89,18 +89,19 @@ init({client, Shard, RemoteNode, Parent}) ->
 handle_info(hack, St = #server{subscriber = Subscriber}) ->
     %% TODO: don't do this.
     ok = push_batch(Subscriber, {true, self(), []}),
-    {exit, normal, St};
+    {stop, normal, St};
 handle_info(_Info, St) ->
     {noreply, St}.
 
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
-handle_call({batch, {Last, From, TXs}}, _From, St = #client{server = From, parent = Parent}) ->
+handle_call({batch, {Last, Server, TXs}}, From, St = #client{server = Server, parent = Parent}) ->
     ok = ekka_rlog_lib:import_batch(dirty, TXs),
     if Last ->
             Parent ! {bootstrap_complete, self(), ekka_rlog_lib:make_key()},
-            {exit, normal, St};
+            gen_server:reply(From, ok),
+            {stop, normal, St};
        true ->
             {reply, ok, St}
     end;

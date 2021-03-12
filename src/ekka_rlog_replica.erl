@@ -71,6 +71,10 @@ start_link(Shard) ->
 %% gen_statem callbacks
 %%================================================================================
 
+%% @private We use handle_event_function style, because it leads to
+%% better code reuse and makes it harder to accidentally forget to
+%% handle some type of event in one of the states. Also it allows to
+%% group event handlers logically.
 callback_mode() -> [handle_event_function, state_enter].
 
 -spec init({ekka_rlog:shard(), any()}) -> {ok, state(), data()}.
@@ -79,9 +83,7 @@ init({Shard, _Opts}) ->
     logger:update_process_metadata(#{ domain => [ekka, rlog, replica]
                                     , shard  => Shard
                                     }),
-    ?tp(notice, ekka_rlog_replica_start,
-        #{
-         }),
+    ?tp(notice, rlog_replica_start, #{node => node()}),
     D = #d{ shard = Shard
           },
     {ok, ?disconnected, D}.
@@ -96,16 +98,16 @@ handle_event(enter, OldState, ?disconnected, D) ->
 handle_event(timeout, reconnect, ?disconnected, D) ->
     handle_reconnect(D);
 %% Events specific to `bootstrap' state:
-handle_event(cast, {bootstrap_complete, Pid, Checkpoint}, ?bootstrap, D = #d{tmp_worker = Pid}) ->
-    handle_bootstrap_complete(Checkpoint, D);
 handle_event(enter, OldState, ?bootstrap, D) ->
     handle_state_trans(OldState, ?bootstrap, D),
     initiate_bootstrap(D);
+handle_event(info, {bootstrap_complete, Pid, Checkpoint}, ?bootstrap, D = #d{tmp_worker = Pid}) ->
+    handle_bootstrap_complete(Checkpoint, D);
 %% Events specific to `local_replay' state:
 handle_event(enter, OldState, ?local_replay, D) ->
     handle_state_trans(OldState, ?local_replay, D),
     initiate_local_replay(D);
-handle_event(call, {local_replay_complete, Worker}, ?local_replay, D = #d{tmp_worker = Worker}) ->
+handle_event(info, {local_replay_complete, Worker}, ?local_replay, D = #d{tmp_worker = Worker}) ->
     complete_initialization(D);
 %% Events specific to `normal' state:
 %% Common events:
@@ -203,7 +205,11 @@ handle_agent_down(State, Reason, D) ->
 -spec initiate_local_replay(data()) -> fsm_result().
 initiate_local_replay(D) ->
     %% TODO: Not implemented
-    {keep_state, D}.
+    Parent = self(),
+    Worker = spawn_link(fun() ->
+                                Parent ! {local_replay_complete, self()}
+                        end),
+    {keep_state, D#d{tmp_worker = Worker}}.
 
 -spec complete_initialization(data()) -> fsm_result().
 complete_initialization(D) ->
@@ -252,7 +258,7 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
     ?tp(try_connect,
         #{ node => Node
          }),
-    case ekka_rlog:subscribe_tlog(Shard, Node, self(), Checkpoint) of
+    case ekka_rlog:subscribe(Shard, Node, self(), Checkpoint) of
         {ok, NeedBootstrap, Agent} ->
             {ok, NeedBootstrap, Node, Agent};
         Err ->

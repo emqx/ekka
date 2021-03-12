@@ -21,7 +21,7 @@
         , core_nodes/0
         , role/0
         , node_id/0
-        , subscribe_tlog/4
+        , subscribe/4
         ]).
 
 -export_type([ shard/0
@@ -54,10 +54,10 @@ role() ->
 core_nodes() ->
     application:get_env(ekka, core_nodes, []).
 
--spec subscribe_tlog(ekka_rlog:shard(), node(), pid(), ekka_rlog_server:checkpoint()) ->
+-spec subscribe(ekka_rlog:shard(), node(), pid(), ekka_rlog_server:checkpoint()) ->
           {ok, _NeedBootstrap :: boolean(), _Agent :: pid()}
         | {badrpc | badtcp, term()}.
-subscribe_tlog(Shard, RemoteNode, Subscriber, Checkpoint) ->
+subscribe(Shard, RemoteNode, Subscriber, Checkpoint) ->
     MyNode = node(),
     Args = [Shard, {MyNode, Subscriber}, Checkpoint],
-    ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe_tlog, Args).
+    ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe, Args).

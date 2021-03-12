@@ -23,7 +23,7 @@
 
 %% API
 -export([ start_link/1
-        , subscribe_tlog/3
+        , subscribe/3
         , bootstrap_me/2
         ]).
 
@@ -64,10 +64,10 @@ start_link(Shard) ->
     Config = #{}, % TODO
     gen_server:start_link({local, Shard}, ?MODULE, {Shard, Config}, []).
 
--spec subscribe_tlog(ekka_rlog:shard(), ekka_rlog_lib:subscriber(), checkpoint()) ->
+-spec subscribe(ekka_rlog:shard(), ekka_rlog_lib:subscriber(), checkpoint()) ->
           {_NeedBootstrap :: boolean(), _Agent :: pid()}.
-subscribe_tlog(Shard, Subscriber, Checkpoint) ->
-    gen_server:call(Shard, {subscribe_tlog, Subscriber, Checkpoint}, infinity).
+subscribe(Shard, Subscriber, Checkpoint) ->
+    gen_server:call(Shard, {subscribe, Subscriber, Checkpoint}, infinity).
 
 -spec bootstrap_me(node(), ekka_rlog:shard()) -> {ok, pid()}
               | {error, term()}.
@@ -86,7 +86,7 @@ init({Shard, Config}) ->
     logger:set_process_metadata(#{ domain => [ekka, rlog, server]
                                  , shard => Shard
                                  }),
-    ?tp(rlog_server_start, #{}),
+    ?tp(rlog_server_start, #{node => node()}),
     {ok, AgentSup} = ekka_rlog_shard_sup:start_link_agent_sup(Shard),
     {ok, BootstrapperSup} = ekka_rlog_shard_sup:start_link_bootstrapper_sup(Shard),
     TlogReplay =
@@ -105,7 +105,7 @@ handle_info(_Info, St) ->
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
-handle_call({subscribe_tlog, Subscriber, Checkpoint}, _From, State) ->
+handle_call({subscribe, Subscriber, Checkpoint}, _From, State) ->
     {NeedBootstrap, ReplaySince} = needs_bootstrap( State#s.bootstrap_threshold
                                                   , State#s.tlog_replay
                                                   , Checkpoint
