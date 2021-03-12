@@ -96,7 +96,7 @@ handle_event(enter, OldState, ?disconnected, D) ->
 handle_event(timeout, reconnect, ?disconnected, D) ->
     handle_reconnect(D);
 %% Events specific to `bootstrap' state:
-handle_event(cast, {bootstrap_complete, Pid, Checkpoint}, ?bootstrap, D = #d{tmp_worker = Pid}) ->
+handle_event(info, {bootstrap_complete, Pid, Checkpoint}, ?bootstrap, D = #d{tmp_worker = Pid}) ->
     handle_bootstrap_complete(Checkpoint, D);
 handle_event(enter, OldState, ?bootstrap, D) ->
     handle_state_trans(OldState, ?bootstrap, D),
@@ -268,6 +268,8 @@ buffer_tlog_ops(Batch, Data) ->
     ok. %% TODO
 
 -spec handle_worker_down(state(), term(), data()) -> no_return().
+%% handle_worker_down(_, normal, _) ->
+%%     keep_state_and_data;
 handle_worker_down(State, Reason, D) ->
     ?tp(critical, "Failed to initialize replica",
         #{ state => State
@@ -295,3 +297,11 @@ handle_state_trans(OldState, State, _Data) ->
 -spec shuffle([A]) -> [A].
 shuffle(A) ->
     A. %% TODO: implement me
+
+forget_worker(Pid) ->
+    unlink(Pid),
+    receive
+        {'EXIT', Pid, _} -> ok
+    after 0 ->
+            ok
+    end.

@@ -126,15 +126,10 @@ t_async_cluster_start(_) ->
        end).
 
 replicant_bootstrap_stages(Node, Trace) ->
-    Transitions = [{From, To} || #{ ?snk_kind := state_change
-                                  , ?snk_meta := #{node := Node, domain := [ekka, rlog, replica]}
-                                  , from := From
-                                  , to := To
-                                  } <- Trace],
-    ?assertMatch( [ {disconnected, disconnected}
-                  , {disconnected, bootstrap}
-                  , {bootstrap, local_replay}
-                  , {local_replay, normal}
-                  ]
+    Transitions = [To || #{ ?snk_kind := state_change
+                          , ?snk_meta := #{node := Node, domain := [ekka, rlog, replica]}
+                          , to := To
+                          } <- Trace],
+    ?assertMatch( [disconnected, bootstrap, local_replay, normal]
                 , Transitions
                 ).
