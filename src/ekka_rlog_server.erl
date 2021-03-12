@@ -73,7 +73,7 @@ subscribe_tlog(Shard, Subscriber, Checkpoint) ->
               | {error, term()}.
 bootstrap_me(RemoteNode, Shard) ->
     Me = {node(), self()},
-    case gen_rpc:call(RemoteNode, ?MODULE, do_bootstrap, [Shard, Me]) of
+    case ekka_rlog_lib:rpc_call(RemoteNode, ?MODULE, do_bootstrap, [Shard, Me]) of
         {ok, Pid} -> {ok, Pid};
         Err       -> {error, Err}
     end.

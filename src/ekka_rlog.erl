@@ -60,4 +60,4 @@ core_nodes() ->
 subscribe_tlog(Shard, RemoteNode, Subscriber, Checkpoint) ->
     MyNode = node(),
     Args = [Shard, {MyNode, Subscriber}, Checkpoint],
-    gen_rpc:call(RemoteNode, ekka_rlog_server, subscribe, Args).
+    ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe, Args).

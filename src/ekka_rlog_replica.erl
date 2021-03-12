@@ -61,11 +61,11 @@
 %% This function is called by the remote core node.
 -spec push_batch(node(), ekka_rlog:shard(), ekka_rlog_lib:batch()) -> ok.
 push_batch(Node, Shard, Batch) ->
-    gen_rpc:call(Node, gen_statem, call, [Shard, {tlog_batch, Batch}, infinity]).
+    ekka_rlog_lib:rpc_call(Node, gen_statem, call, [Shard, {tlog_batch, Batch}, infinity]).
 
 start_link(Shard) ->
     Config = #{}, % TODO
-    gen_statem:start_link({local, Shard}, ?MODULE, {Shard, Config}, []).
+    gen_statem:start_link(?MODULE, {Shard, Config}, []).
 
 %%================================================================================
 %% gen_statem callbacks

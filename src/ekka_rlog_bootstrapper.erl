@@ -119,7 +119,7 @@ terminate(_Reason, St) ->
 
 -spec push_batch(ekka_rlog_lib:subscriber(), batch()) -> ok.
 push_batch({Node, Pid}, Batch = {_, _, _}) ->
-    gen_rpc:call(Node, ?MODULE, do_push_batch, [Pid, Batch]).
+    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_push_batch, [Pid, Batch]).
 
 %%================================================================================
 %% Internal exports (gen_rpc)

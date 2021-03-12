@@ -12,8 +12,8 @@
    [kernel,
     stdlib,
     mnesia,
-    inets,
-    gen_rpc
+    inets%% ,
+    %% gen_rpc
    ]},
   {modules, []},
   {licenses, ["Apache 2.0"]},

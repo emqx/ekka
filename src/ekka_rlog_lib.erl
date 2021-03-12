@@ -17,7 +17,12 @@
 %% Internal functions
 -module(ekka_rlog_lib).
 
--export([make_key/0, make_key_in_past/1, import_batch/2]).
+-export([ make_key/0
+        , make_key_in_past/1
+        , import_batch/2
+        , rpc_call/4
+        , local_rpc_call/4
+        ]).
 
 -export_type([batch/0, subscriber/0]).
 
@@ -54,3 +59,15 @@ make_key_in_past(Dt) ->
 -spec import_batch(transaction | dirty, [tx()]) -> ok.
 import_batch(_ImportType, Batch) ->
     ok. %% TODO
+
+%% @doc Do an RPC call
+-spec rpc_call(node(), module(), atom(), list()) -> term().
+rpc_call(Node, Module, Function, Args) ->
+    Fun = persistent_term:get(ekka_rlog_rpc_fun, fun gen_rpc:call/4),
+    apply(Fun, [Node, Module, Function, Args]).
+
+%% @doc Do a local RPC call, used for testing
+-spec local_rpc_call(node(), module(), atom(), list()) -> term().
+local_rpc_call(Node, Module, Function, Args) ->
+    Node = node(), % assert
+    apply(Module, Function, Args).

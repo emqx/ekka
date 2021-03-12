@@ -32,7 +32,9 @@ cluster(ClusterSpec, Env) ->
     CoreNodes = [list_to_atom(lists:concat([Name, "@", Host])) || {core, Name} <- ClusterSpec],
     [begin
          Node = start_slave(node, Name),
-         Env1 = [{node_role, Role}, {core_nodes, CoreNodes} | Env],
+         Env1 = [ {node_role, Role}
+                , {core_nodes, CoreNodes}
+                | Env],
          [rpc:call(Node, application, set_env, [ekka, Key, Val]) || {Key, Val} <- Env1],
          rpc:call(Node, ekka, start, []),
          Node
