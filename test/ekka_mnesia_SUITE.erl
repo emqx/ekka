@@ -107,9 +107,11 @@ t_async_cluster_start(_) ->
               , {core, n2}
               , {replicant, n3}
               ],
-    Env = [{shards, [foo]}],
+    Env = [ {shards, [foo]}
+          , {rlog_rpc_fun, fun rpc:call/4}
+          ],
     ?check_trace(
-       #{timeout => 30000},
+       #{timeout => 10000},
        begin
            Nodes = ekka_ct:cluster(Cluster, Env)
        end,
