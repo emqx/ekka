@@ -83,10 +83,10 @@ bootstrap_me(RemoteNode, Shard) ->
 %%================================================================================
 
 init({Shard, Config}) ->
-    ?tp(ekka_rlog_server_start,
-        #{ node => node()
-         , shard => Shard
-         }),
+    logger:set_process_metadata(#{ domain => [ekka, rlog, server]
+                                 , shard => Shard
+                                 }),
+    ?tp(rlog_server_start, #{}),
     {ok, AgentSup} = ekka_rlog_shard_sup:start_link_agent_sup(Shard),
     {ok, BootstrapperSup} = ekka_rlog_shard_sup:start_link_bootstrapper_sup(Shard),
     TlogReplay =
@@ -105,18 +105,19 @@ handle_info(_Info, St) ->
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
-handle_call(_From, {subscribe_tlog, {Node, Subscriber}, Checkpoint}, State) ->
+handle_call({subscribe_tlog, Subscriber, Checkpoint}, _From, State) ->
     {NeedBootstrap, ReplaySince} = needs_bootstrap( State#s.bootstrap_threshold
                                                   , State#s.tlog_replay
                                                   , Checkpoint
                                                   ),
-    Pid = maybe_start_child(State#s.agent_sup, [Node, Subscriber, ReplaySince]),
-    {reply, {NeedBootstrap, Pid}, State};
-handle_call(_From, {bootstrap, Subscriber}, State) ->
+    Pid = maybe_start_child(State#s.agent_sup, [Subscriber, ReplaySince]),
+    {reply, {ok, NeedBootstrap, Pid}, State};
+handle_call({bootstrap, Subscriber}, _From, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),
-    {reply, {ok, Pid}, State};
-handle_call(_From, Call, St) ->
-    {reply, {error, {unknown_call, Call}}, St}.
+    {reply, {ok, Pid}, State}%% ;
+%% handle_call(_From, Call, St) ->
+%%     {reply, {error, {unknown_call, Call}}, St}.
+.
 
 code_change(_OldVsn, St, _Extra) ->
     {ok, St}.

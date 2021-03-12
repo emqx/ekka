@@ -96,7 +96,7 @@ handle_info(_Info, St) ->
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
-handle_call(_, {batch, {Last, From, TXs}}, St = #client{server = From, parent = Parent}) ->
+handle_call({batch, {Last, From, TXs}}, _From, St = #client{server = From, parent = Parent}) ->
     ok = ekka_rlog_lib:import_batch(dirty, TXs),
     if Last ->
             Parent ! {bootstrap_complete, self(), ekka_rlog_lib:make_key()},
@@ -104,7 +104,7 @@ handle_call(_, {batch, {Last, From, TXs}}, St = #client{server = From, parent = 
        true ->
             {reply, ok, St}
     end;
-handle_call(_From, Call, St) ->
+handle_call(Call, _From, St) ->
     {reply, {error, {unknown_call, Call}}, St}.
 
 code_change(_OldVsn, St, _Extra) ->

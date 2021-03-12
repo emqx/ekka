@@ -111,12 +111,30 @@ t_async_cluster_start(_) ->
           , {rlog_rpc_fun, fun rpc:call/4}
           ],
     ?check_trace(
-       #{timeout => 10000},
        begin
-           Nodes = ekka_ct:cluster(Cluster, Env)
+           Nodes = ekka_ct:cluster(Cluster, Env),
+           timer:sleep(5000),
+           Nodes
        end,
        fun([N1, N2, N3], Trace) ->
                %% Ensure that the nodes assumed designated roles:
-               ?projection_complete(node, ?of_kind(ekka_rlog_server_start, Trace), [N1, N2]),
-               ?projection_complete(node, ?of_kind(ekka_rlog_replica_start, Trace), [N3])
+
+               %% ?projection_complete(node, ?of_kind(ekka_rlog_server_start, Trace), [N1, N2]),
+               %% ?projection_complete(node, ?of_kind(ekka_rlog_replica_start, Trace), [N3]),
+               %% Other tests
+               replicant_bootstrap_stages(N3, Trace)
        end).
+
+replicant_bootstrap_stages(Node, Trace) ->
+    Transitions = [{From, To} || #{ ?snk_kind := state_change
+                                  , ?snk_meta := #{node := Node, domain := [ekka, rlog, replica]}
+                                  , from := From
+                                  , to := To
+                                  } <- Trace],
+    ?assertMatch( [ {disconnected, disconnected}
+                  , {disconnected, bootstrap}
+                  , {bootstrap, local_replay}
+                  , {local_replay, normal}
+                  ]
+                , Transitions
+                ).

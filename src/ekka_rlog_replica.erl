@@ -76,9 +76,11 @@ callback_mode() -> [handle_event_function, state_enter].
 -spec init({ekka_rlog:shard(), any()}) -> {ok, state(), data()}.
 init({Shard, _Opts}) ->
     process_flag(trap_exit, true),
-    ?tp(ekka_rlog_replica_start,
-        #{ node => node()
-         , shard => Shard
+    logger:update_process_metadata(#{ domain => [ekka, rlog, replica]
+                                    , shard  => Shard
+                                    }),
+    ?tp(notice, ekka_rlog_replica_start,
+        #{
          }),
     D = #d{ shard = Shard
           },
@@ -102,7 +104,7 @@ handle_event(enter, OldState, ?bootstrap, D) ->
 %% Events specific to `local_replay' state:
 handle_event(enter, OldState, ?local_replay, D) ->
     handle_state_trans(OldState, ?local_replay, D),
-    init_local_replay(D);
+    initiate_local_replay(D);
 handle_event(call, {local_replay_complete, Worker}, ?local_replay, D = #d{tmp_worker = Worker}) ->
     complete_initialization(D);
 %% Events specific to `normal' state:
@@ -178,8 +180,7 @@ initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
 -spec handle_bootstrap_complete(ekka_rlog_server:checkpoint(), data()) -> fsm_result().
 handle_bootstrap_complete(Checkpoint, D) ->
     ?tp(notice, "Bootstrap of the shard is complete",
-        #{ shard => D#d.shard
-         , checkpoint => Checkpoint
+        #{ checkpoint => Checkpoint
          }),
     {next_state, ?local_replay, D#d{ tmp_worker = undefined
                                    , checkpoint = Checkpoint
@@ -190,7 +191,6 @@ handle_agent_down(State, Reason, D) ->
     ?tp(notice, "Remote RLOG agent died",
         #{ reason => Reason
          , repl_state => State
-         , shard => D#d.shard
          }),
     case State of
         ?normal ->
@@ -200,21 +200,24 @@ handle_agent_down(State, Reason, D) ->
             exit(agent_died)
     end.
 
--spec init_local_replay(data()) -> fsm_result().
-init_local_replay(D) ->
+-spec initiate_local_replay(data()) -> fsm_result().
+initiate_local_replay(D) ->
     %% TODO: Not implemented
     {keep_state, D}.
 
 -spec complete_initialization(data()) -> fsm_result().
 complete_initialization(D) ->
     ?tp(notice, "Shard replica is ready",
-        #{ shard => D#d.shard
+        #{
          }),
     {next_state, ?normal, D#d{tmp_worker = undefined}}.
 
 %% @private Try connecting to a core node
 -spec handle_reconnect(data()) -> fsm_result().
 handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
+    ?tp(rlog_replica_reconnect,
+        #{ node => node()
+         }),
     case try_connect(Shard, Checkpoint) of
         {ok, _BootstrapNeeded = true, Node, ConnPid} ->
             D = #d{ shard            = Shard
@@ -246,11 +249,18 @@ try_connect(Shard, Checkpoint) ->
 try_connect([], _, _) ->
     {error, no_core_available};
 try_connect([Node|Rest], Shard, Checkpoint) ->
+    ?tp(try_connect,
+        #{ node => Node
+         }),
     case ekka_rlog:subscribe_tlog(Shard, Node, self(), Checkpoint) of
-        {Err, _} when Err =:= badrpc orelse Err =:= badtcp ->
-            try_connect(Rest, Shard, Checkpoint);
-        {NeedBootstrap, Agent} when is_pid(Agent) ->
-            {ok, NeedBootstrap, Node, Agent}
+        {ok, NeedBootstrap, Agent} ->
+            {ok, NeedBootstrap, Node, Agent};
+        Err ->
+            ?tp(connection_failed,
+                #{ node => Node
+                 , reason => Err
+                 }),
+            try_connect(Rest, Shard, Checkpoint)
     end.
 
 -spec buffer_tlog_ops([ekka_rlog_lib:tx()], data()) -> ok.
@@ -262,7 +272,6 @@ handle_worker_down(State, Reason, D) ->
     ?tp(critical, "Failed to initialize replica",
         #{ state => State
          , reason => Reason
-         , shard => D#d.shard
          , worker => D#d.tmp_worker
          }),
     exit(bootstrap_failed).
@@ -277,7 +286,7 @@ handle_unknown(EventType, Event, State, Data) ->
     keep_state_and_data.
 
 handle_state_trans(OldState, State, _Data) ->
-    ?tp(rlog_agent_state_change,
+    ?tp(info, state_change,
         #{ from => OldState
          , to => State
          }),
