@@ -71,6 +71,10 @@ start_link(Shard) ->
 %% gen_statem callbacks
 %%================================================================================
 
+%% @private We use handle_event_function style, because it leads to
+%% better code reuse and makes it harder to accidentally forget to
+%% handle some type of event in one of the states. Also it allows to
+%% group event handlers logically.
 callback_mode() -> [handle_event_function, state_enter].
 
 -spec init({ekka_rlog:shard(), any()}) -> {ok, state(), data()}.
