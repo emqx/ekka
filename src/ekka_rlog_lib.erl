@@ -35,17 +35,12 @@
 
 -type subscriber() :: {node(), pid()}.
 
-%% Log key should be monotonic and globally unique.
+%% Log key should be globally unique.
+%%
 %% it is a tuple of a timestamp (ts) and the node id (node_id),
 %% where ts is at nanosecond precesion to ensure it is locally
 %% monotoic and unique, and node_id, which identifies the node which
 %% initiated the transaction, should ensure global uniqueness.
-%%
-%% NOTE: In case of two or more concurrent transactions,
-%% it is possible to have a later transction logged with
-%% an earlier ts if there is no conflict in the content
-%% the concurrent transactions updated, otherwise we rely on
-%% mnesia locks to ensure linearbility.
 -spec make_key() -> ekka_rlog:txid().
 make_key() ->
     {erlang:system_time(nanosecond), ekka_rlog:node_id()}.

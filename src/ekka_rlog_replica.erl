@@ -272,8 +272,6 @@ buffer_tlog_ops(Batch, Data) ->
     ok. %% TODO
 
 -spec handle_worker_down(state(), term(), data()) -> no_return().
-%% handle_worker_down(_, normal, _) ->
-%%     keep_state_and_data;
 handle_worker_down(State, Reason, D) ->
     ?tp(critical, "Failed to initialize replica",
         #{ state => State
