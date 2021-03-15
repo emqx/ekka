@@ -104,6 +104,10 @@ init({Shard, Config}) ->
 
 handle_info(post_init, St) ->
     mnesia:wait_for_tables([St#s.shard], 100000),
+    ?tp(notice, "Shard fully up",
+        #{ node => node()
+         , shard => St#s.shard
+         }),
     {noreply, St};
 handle_info(_Info, St) ->
     {noreply, St}.

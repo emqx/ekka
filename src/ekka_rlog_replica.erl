@@ -110,6 +110,9 @@ handle_event(enter, OldState, ?local_replay, D) ->
 handle_event(info, {local_replay_complete, Worker}, ?local_replay, D = #d{tmp_worker = Worker}) ->
     complete_initialization(D);
 %% Events specific to `normal' state:
+handle_event(enter, OldState, ?normal, D) ->
+    handle_normal(D),
+    handle_state_trans(OldState, ?normal, D);
 %% Common events:
 handle_event(enter, OldState, State, Data) ->
     handle_state_trans(OldState, State, Data);
@@ -270,8 +273,15 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
     end.
 
 -spec buffer_tlog_ops([ekka_rlog_lib:tx()], data()) -> ok.
-buffer_tlog_ops(Batch, Data) ->
+buffer_tlog_ops(Batch, D) ->
     ok. %% TODO
+
+-spec handle_normal(data()) -> ok.
+handle_normal(D) ->
+    ?tp(notice, "Shard fully up",
+        #{ node => node()
+         , shard => D#d.shard
+         }).
 
 -spec handle_worker_down(state(), term(), data()) -> no_return().
 handle_worker_down(State, Reason, D) ->
