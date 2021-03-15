@@ -103,7 +103,7 @@ handle_event(enter, OldState, ?normal, D) ->
          , subscribe_node => Node
          }),
     handle_state_trans(OldState, ?normal, D);
-handle_event(info, {write, Record, ActivityId}, ?normal, D) ->
+handle_event(info, {mnesia_table_event, {write, Record, ActivityId}}, ?normal, D) ->
     handle_tx(Record, ActivityId, D);
 %% Common actions:
 handle_event({call, From}, stop, State, D) ->

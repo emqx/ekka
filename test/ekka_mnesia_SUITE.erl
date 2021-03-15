@@ -111,6 +111,7 @@ t_async_cluster_start(_) ->
           , {rlog_rpc_fun, fun rpc:call/4}
           ],
     ?check_trace(
+       #{timeout => 5000},
        begin
            Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
            ok = ekka_mnesia:create_table(kv_tab, [{ram_copies, [N1, N2]},
@@ -118,6 +119,7 @@ t_async_cluster_start(_) ->
                                                   {attributes, record_info(fields, kv_tab)},
                                                   {storage_properties, []}]),
            wait_shards(Nodes, [foo]),
+           {atomic, _} = rpc:call(N1, ekka_transaction_gen, create_keys, []),
            Nodes
        end,
        fun([N1, N2, N3], Trace) ->

@@ -17,7 +17,8 @@
 %% API and management functions for asynchronous Mnesia replication
 -module(ekka_rlog).
 
--export([ shards/0
+-export([ transaction/2
+        , shards/0
         , core_nodes/0
         , role/0
         , node_id/0
@@ -28,6 +29,16 @@
              ]).
 
 -type shard() :: atom().
+
+-type func(A) :: fun((...) -> A).
+
+-include("ekka_rlog.hrl").
+-include_lib("mnesia/src/mnesia.hrl").
+
+%% @doc Perform a transaction and log changes.
+%% the logged changes are to be replicated to other nodes.
+-spec transaction(func(A), [term()]) -> mnesia:t_result(A).
+transaction(F, Args) -> do(transaction, F, Args).
 
 %% TODO: configurable
 node_id() ->
@@ -54,3 +65,44 @@ subscribe(Shard, RemoteNode, Subscriber, Checkpoint) ->
     MyNode = node(),
     Args = [Shard, {MyNode, Subscriber}, Checkpoint],
     ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe, Args).
+
+
+do(Type, F, Args) ->
+    Shards = ekka_rlog:shards(),
+    TxFun =
+        fun() ->
+                Result = apply(F, Args),
+                Ops = get_tx_ops(F, Args),
+                case Ops =:= [] of
+                    true ->
+                        %% nothing to log, avoid creating a key
+                        ok;
+                    false ->
+                        Key = ekka_rlog_lib:make_key(),
+                        [dig_ops_for_shard(Ops, Key, Shard) || Shard <- Shards],
+                        ok
+                end,
+                Result
+        end,
+    case Type of
+        transaction -> mnesia:transaction(TxFun);
+        async_dirty -> mnesia:async_dirty(TxFun)
+    end.
+
+get_tx_ops(F, Args) ->
+    {_, _, Store} = mnesia:get_activity_id(),
+    case Store of
+        non_transaction ->
+            args_as_op(F, Args);
+        #tidstore{store = Ets} ->
+            %% TODO This is probably wrong. Mnesia stores ops in ets?
+            AllOps = ets:tab2list(Ets)
+    end.
+
+%% TODO: Implement proper filtering
+dig_ops_for_shard(Ops, Key, Shard) ->
+    mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write).
+
+%% we can only hope that this is not an anonymous function
+%% add the function is idempotent.
+args_as_op(F, Args) -> [{F, Args, apply}].

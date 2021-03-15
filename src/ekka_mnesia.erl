@@ -52,6 +52,10 @@
         , copy_table/2
         ]).
 
+%% Transaction API
+-export([ transaction/1
+        ]).
+
 -deprecated({copy_table, 1, next_major_release}).
 
 %%--------------------------------------------------------------------
@@ -312,4 +316,20 @@ wait_for(tables) ->
         ok                   -> ok;
         {error, Reason}      -> {error, Reason};
         {timeout, BadTables} -> {error, {timeout, BadTables}}
+    end.
+
+%%--------------------------------------------------------------------
+%% Transaction API
+%%--------------------------------------------------------------------
+
+-spec(transaction(fun(() -> A)) -> mnesia:t_result(A)).
+transaction(Fun) ->
+    %% TODO: it should be possible initiate transactions on replicants too
+    core = ekka_rlog:role(),
+    %% TODO: this is wrong, we need to unwrap the result of the nested
+    %% transaction in the transaction, and match it with `{atomic,
+    %% Ret}'. For now, we don't need this.
+    case ekka_rlog:transaction(fun mnesia:transaction/1, [Fun]) of
+        {atomic, Ret} -> Ret;
+        Err -> Err
     end.
