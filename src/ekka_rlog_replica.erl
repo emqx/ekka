@@ -61,7 +61,7 @@
 %% This function is called by the remote core node.
 -spec push_batch(ekka_rlog_lib:subscriber(), ekka_rlog_lib:batch()) -> ok.
 push_batch({Node, Pid}, Batch) ->
-    ekka_rlog_lib:rpc_call(Node, gen_statem, call, [Pid, {tlog_batch, Batch}, infinity]).
+    ekka_rlog_lib:rpc_call(Node, gen_statem, cast, [Pid, {tlog_batch, Batch}]).
 
 start_link(Shard) ->
     Config = #{}, % TODO
@@ -89,8 +89,8 @@ init({Shard, _Opts}) ->
     {ok, ?disconnected, D}.
 
 -spec handle_event(gen_statem:event_type(), _EventContent, state(), data()) -> fsm_result().
-handle_event({call, From}, {tlog_batch, Batch}, State, D) ->
-    handle_batch(State, Batch, From, D);
+handle_event(cast, {tlog_batch, Batch}, State, D) ->
+    handle_batch(State, Batch, D);
 %% Events specific to `disconnected' state:
 handle_event(enter, OldState, ?disconnected, D) ->
     handle_state_trans(OldState, ?disconnected, D),
@@ -134,8 +134,8 @@ terminate(_Reason, _State, _Data) ->
 %%================================================================================
 
 %% @private Consume transactions from the core node
--spec handle_batch(state(), ekka_rlog_lib:batch(), gen_statem:from(), data()) -> fsm_result().
-handle_batch(?normal, {Agent, SeqNo, Transactions}, From,
+-spec handle_batch(state(), ekka_rlog_lib:batch(), data()) -> fsm_result().
+handle_batch(?normal, {Agent, SeqNo, Transactions},
              D = #d{ agent            = Agent
                    , next_batch_seqno = SeqNo
                    }) ->
@@ -146,8 +146,8 @@ handle_batch(?normal, {Agent, SeqNo, Transactions}, From,
          , transactions => Transactions
          }),
     ekka_rlog_lib:import_batch(transaction, Transactions),
-    {keep_state, D#d{next_batch_seqno = SeqNo + 1}, [{reply, From, ok}]};
-handle_batch(St, {tlog_batch, {Agent, SeqNo, Transactions}}, From,
+    {keep_state, D#d{next_batch_seqno = SeqNo + 1}};
+handle_batch(St, {tlog_batch, {Agent, SeqNo, Transactions}},
              D = #d{ agent = Agent
                    , next_batch_seqno = SeqNo
                    }) when St =:= ?bootstrap orelse
@@ -160,8 +160,8 @@ handle_batch(St, {tlog_batch, {Agent, SeqNo, Transactions}}, From,
          , transactions => Transactions
          }),
     buffer_tlog_ops(Transactions, D),
-    {keep_state, D#d{next_batch_seqno = SeqNo + 1}, [{reply, From, ok}]};
-handle_batch(_State, {Agent, SeqNo, _}, From,
+    {keep_state, D#d{next_batch_seqno = SeqNo + 1}};
+handle_batch(_State, {Agent, SeqNo, _},
              #d{ agent = Agent
                , next_batch_seqno = MySeqNo
                }) when SeqNo > MySeqNo ->
@@ -169,13 +169,13 @@ handle_batch(_State, {Agent, SeqNo, _}, From,
     %% TODO: sometimes it should be possible to restart gracefully to
     %% salvage the bootstrapped data.
     error(gap_in_the_tlog);
-handle_batch(State, {Agent, SeqNo, _Transactions}, From, Data) ->
+handle_batch(State, {Agent, SeqNo, _Transactions}, Data) ->
     ?tp(warning, rlog_replica_unexpected_batch,
         #{ state => State
          , from => Agent
          , seqno => SeqNo
          }),
-    {keep_state_and_data, [{reply, From, {error, unexpected_batch}}]}.
+    keep_state_and_data.
 
 -spec initiate_bootstrap(data()) -> fsm_result().
 initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->

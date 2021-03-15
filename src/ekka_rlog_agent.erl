@@ -156,5 +156,5 @@ handle_tx(Record, ActivityId, D) ->
     %% TODO: implement proper batches
     SeqNo = D#d.seqno,
     Batch = {self(), SeqNo, [Record]},
-    ekka_rlog_replica:push_batch(D#d.subscriber, Batch),
+    ok = ekka_rlog_replica:push_batch(D#d.subscriber, Batch),
     {keep_state, D#d{seqno = SeqNo + 1}}.

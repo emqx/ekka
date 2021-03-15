@@ -35,6 +35,8 @@
 -include("ekka_rlog.hrl").
 -include_lib("mnesia/src/mnesia.hrl").
 
+-include_lib("stdlib/include/ms_transform.hrl").
+
 %% @doc Perform a transaction and log changes.
 %% the logged changes are to be replicated to other nodes.
 -spec transaction(func(A), [term()]) -> mnesia:t_result(A).
@@ -72,16 +74,8 @@ do(Type, F, Args) ->
     TxFun =
         fun() ->
                 Result = apply(F, Args),
-                Ops = get_tx_ops(F, Args),
-                case Ops =:= [] of
-                    true ->
-                        %% nothing to log, avoid creating a key
-                        ok;
-                    false ->
-                        Key = ekka_rlog_lib:make_key(),
-                        [dig_ops_for_shard(Ops, Key, Shard) || Shard <- Shards],
-                        ok
-                end,
+                Key = ekka_rlog_lib:make_key(),
+                [dig_ops_for_shard(Key, Shard) || Shard <- Shards],
                 Result
         end,
     case Type of
@@ -100,10 +94,17 @@ get_tx_ops(F, Args) ->
     end.
 
 %% TODO: Implement proper filtering
-dig_ops_for_shard(Ops0, Key, Shard) ->
-    %% TODO: proper filtering
-    Ops = [I || I = {{kv_tab, _}, _, _} <- Ops0],
-    mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write).
+dig_ops_for_shard(Key, Shard) ->
+    case mnesia:get_activity_id() of
+      {_, _, #tidstore{store = Ets}} ->
+        %% TODO: get filter from config
+        MS = ets:fun2ms(fun(A = {{T, _}, _, _}) when T =:= kv_tab;
+                                                     T =:= foobar ->
+                                A
+                        end),
+        Ops = ets:select(Ets, MS),
+        mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write)
+    end.
 
 %% we can only hope that this is not an anonymous function
 %% add the function is idempotent.

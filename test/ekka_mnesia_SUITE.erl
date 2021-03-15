@@ -115,7 +115,7 @@ t_async_cluster_start(_) ->
        begin
            Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
            wait_shards(Nodes, [foo]),
-           {atomic, _} = rpc:call(N1, ekka_transaction_gen, create_keys, []),
+           {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
            Nodes
        end,
        fun([N1, N2, N3], Trace) ->

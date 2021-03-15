@@ -1,11 +1,11 @@
 -module(ekka_transaction_gen).
 
--export([ create_keys/0
+-export([ init/0
         ]).
 
 -record(kv_tab, {key, val}).
 
-create_keys() ->
+init() ->
     %% TODO: do it in a nicer way
     ok = ekka_mnesia:create_table(kv_tab, [{ram_copies, ekka_rlog:core_nodes()},
                                            {record_name, kv_tab},
