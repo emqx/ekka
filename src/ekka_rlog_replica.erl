@@ -61,7 +61,7 @@
 %% This function is called by the remote core node.
 -spec push_batch(ekka_rlog_lib:subscriber(), ekka_rlog_lib:batch()) -> ok.
 push_batch({Node, Pid}, Batch) ->
-    ekka_rlog_lib:rpc_call(Node, gen_statem, cast, [Pid, {tlog_batch, Batch}]).
+    ekka_rlog_lib:rpc_cast(Node, gen_statem, cast, [Pid, {tlog_batch, Batch}]), ok.
 
 start_link(Shard) ->
     Config = #{}, % TODO
@@ -157,7 +157,7 @@ handle_batch(St, {tlog_batch, {Agent, SeqNo, Transactions}},
     ?tp(rlog_replica_store_batch,
         #{ agent => Agent
          , seqno => SeqNo
-         , transactions => Transactions
+         , transactions   => Transactions
          }),
     buffer_tlog_ops(Transactions, D),
     {keep_state, D#d{next_batch_seqno = SeqNo + 1}};

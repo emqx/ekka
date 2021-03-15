@@ -33,6 +33,7 @@
 %% gen_statem callbacks:
 -export([init/1, terminate/3, code_change/4, callback_mode/0, handle_event/4]).
 
+-include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 %% Concurrent transactions (rlog entries) may each other and result in
@@ -148,13 +149,15 @@ handle_state_trans(OldState, State, _Data) ->
     keep_state_and_data.
 
 -spec handle_tx(ekka_rlog_lib:rlog(), term(), data()) -> fsm_result().
-handle_tx(Record, ActivityId, D) ->
-    ?tp(rlog_realitime_op,
-        #{ record => Record
-         , activity_id => ActivityId
-         }),
-    %% TODO: implement proper batches
+handle_tx({Shard, K, Ops}, ActivityId, D = #d{shard = Shard}) ->
     SeqNo = D#d.seqno,
-    Batch = {self(), SeqNo, [Record]},
+    ?tp(rlog_realtime_op,
+        #{ ops         => Ops
+         , key         => K
+         , activity_id => ActivityId
+         , agent       => self()
+         , seqno       => SeqNo
+         }),
+    Batch = {self(), SeqNo, [Ops]},
     ok = ekka_rlog_replica:push_batch(D#d.subscriber, Batch),
     {keep_state, D#d{seqno = SeqNo + 1}}.

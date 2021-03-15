@@ -74,7 +74,7 @@ replicant_worker(Shard) ->
 
 -spec setup_persistent_terms() -> ok.
 setup_persistent_terms() ->
-    copy_from_env(rlog_rpc_fun, ekka_rlog_rpc_fun).
+    copy_from_env(rlog_rpc_module, ekka_rlog_rpc_mod).
 
 -spec copy_from_env(atom(), term()) -> ok.
 copy_from_env(Env, PersistentTermKey) ->

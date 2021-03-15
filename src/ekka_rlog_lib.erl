@@ -21,7 +21,8 @@
         , make_key_in_past/1
         , import_batch/2
         , rpc_call/4
-        , local_rpc_call/4
+        , rpc_cast/4
+        %% , local_rpc_call/4
         ]).
 
 -export_type([ batch/0
@@ -83,11 +84,17 @@ import_batch(_ImportType, Batch) ->
 %% @doc Do an RPC call
 -spec rpc_call(node(), module(), atom(), list()) -> term().
 rpc_call(Node, Module, Function, Args) ->
-    Fun = persistent_term:get(ekka_rlog_rpc_fun, fun gen_rpc:call/4),
-    apply(Fun, [Node, Module, Function, Args]).
+    Mod = persistent_term:get(ekka_rlog_rpc_mod, gen_rpc),
+    apply(Mod, call, [Node, Module, Function, Args]).
 
-%% @doc Do a local RPC call, used for testing
--spec local_rpc_call(node(), module(), atom(), list()) -> term().
-local_rpc_call(Node, Module, Function, Args) ->
-    Node = node(), % assert
-    apply(Module, Function, Args).
+%% @doc Do an RPC cast
+-spec rpc_cast(node(), module(), atom(), list()) -> term().
+rpc_cast(Node, Module, Function, Args) ->
+    Mod = persistent_term:get(ekka_rlog_rpc_mod, gen_rpc),
+    apply(Mod, cast, [Node, Module, Function, Args]).
+
+%% %% @doc Do a local RPC call, used for testing
+%% -spec local_rpc_call(node(), module(), atom(), list()) -> term().
+%% local_rpc_call(Node, Module, Function, Args) ->
+%%     Node = node(), % assert
+%%     apply(Module, Function, Args).

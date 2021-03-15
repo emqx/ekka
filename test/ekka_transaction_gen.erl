@@ -11,7 +11,6 @@ init() ->
                                            {record_name, kv_tab},
                                            {attributes, record_info(fields, kv_tab)},
                                            {storage_properties, []}]),
-    mnesia:wait_for_tables([kv_tab], 10000),
     ekka_mnesia:transaction(
       fun() ->
               [mnesia:write(#kv_tab{ key = I
