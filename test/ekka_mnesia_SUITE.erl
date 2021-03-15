@@ -108,14 +108,14 @@ t_async_cluster_start(_) ->
               , {replicant, n3}
               ],
     Env = [ {shards, [foo]}
-          , {rlog_rpc_fun, fun rpc:call/4}
+          , {rlog_rpc_module, rpc}
           ],
     ?check_trace(
        #{timeout => 5000},
        begin
            Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
            wait_shards(Nodes, [foo]),
-           {atomic, _} = rpc:call(N1, ekka_transaction_gen, create_keys, []),
+           {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
            Nodes
        end,
        fun([N1, N2, N3], Trace) ->
@@ -124,7 +124,7 @@ t_async_cluster_start(_) ->
                ?projection_complete(node, ?of_kind(rlog_replica_start, Trace), [N3]),
                %% Other tests
                replicant_bootstrap_stages(N3, Trace),
-               error(no_way)
+               all_batches_received(Trace)
        end).
 
 replicant_bootstrap_stages(Node, Trace) ->
@@ -135,6 +135,14 @@ replicant_bootstrap_stages(Node, Trace) ->
     ?assertMatch( [disconnected, bootstrap, local_replay, normal]
                 , Transitions
                 ).
+
+all_batches_received(Trace) ->
+    ?assert(
+       ?strict_causality(
+           #{?snk_kind := rlog_realtime_op, agent := _A, seqno := _S}
+         , #{?snk_kind := K, agent := _A, seqno := _S} when K =:= rlog_replica_import_batch;
+                                                            K =:= rlog_replica_store_batch
+         , Trace)).
 
 wait_shards(Nodes, Shards) ->
     [{ok, _} = ?block_until(#{ ?snk_kind := "Shard fully up"
