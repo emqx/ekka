@@ -50,7 +50,8 @@
 -type checkpoint() :: ekka_rlog:txid() | undefined.
 
 -record(s,
-        { agent_sup           :: pid()
+        { shard               :: ekka_rlog:shard()
+        , agent_sup           :: pid()
         , bootstrapper_sup    :: pid()
         , tlog_replay         :: integer()
         , bootstrap_threshold :: integer()
@@ -93,12 +94,17 @@ init({Shard, Config}) ->
         erlang:convert_time_unit(maps:get(tlog_replay, Config, 10), second, nanosecond),
     BootstrapThreshold =
         erlang:convert_time_unit(maps:get(tlog_replay, Config, 300), second, nanosecond),
-    {ok, #s{ agent_sup           = AgentSup
+    self() ! post_init,
+    {ok, #s{ shard               = Shard
+           , agent_sup           = AgentSup
            , bootstrapper_sup    = BootstrapperSup
            , tlog_replay         = TlogReplay
            , bootstrap_threshold = BootstrapThreshold
            }}.
 
+handle_info(post_init, St) ->
+    mnesia:wait_for_tables([St#s.shard], 100000),
+    {noreply, St};
 handle_info(_Info, St) ->
     {noreply, St}.
 

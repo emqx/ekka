@@ -48,10 +48,16 @@
 -type state() :: ?catchup | ?switchover | ?normal.
 
 -record(d,
-        {
+        { shard                :: ekka_rlog:shard()
+        , subscriber           :: ekka_rlog_lib:subscriber()
+        , buffer         = []  :: list()
+        , buffer_len     = 0   :: integer()
+        , flush_interval = 100 :: integer()
         }).
 
 -type data() :: #d{}.
+
+-type fsm_result() :: gen_statem:event_handler_result(state()).
 
 %%--------------------------------------------------------------------
 %% API functions
@@ -82,20 +88,30 @@ init({Shard, Subscriber, ReplaySince}) ->
                                     , shard      => Shard
                                     , subscriber => Subscriber
                                     }),
-    {ok, ?normal, #d{}}.
+    {ok, ?normal, #d{ shard          = Shard
+                    , subscriber     = Subscriber
+                    }}.
 
 -spec handle_event(gen_statem:event_type(), _EventContent, state(), data()) ->
           gen_statem:event_handler_result(state()).
+%% Events specific to `?normal' state:
+handle_event(enter, OldState, ?normal, D) ->
+    Table = D#d.shard,
+    {ok, Node} = mnesia:subscribe({table, Table, simple}),
+    ?tp(info, subscribe_realtime_stream,
+        #{ rlog => Table
+         , subscribe_node => Node
+         }),
+    handle_state_trans(OldState, ?normal, D);
+handle_event(info, {write, Record, ActivityId}, ?normal, D) ->
+    handle_tx(Record, ActivityId, D);
 %% Common actions:
-handle_event({call, From}, stop, State, Data) ->
-    handle_stop(State, Data),
-    {stop_and_reply, normal, {reply, From, ok}};
-handle_event(enter, OldState, State, Data) ->
-    handle_state_trans(OldState, State, Data),
-    keep_state_and_data;
-handle_event(EventType, Event, State, Data) ->
-    handle_unknown(EventType, Event, State, Data),
-    keep_state_and_data.
+handle_event({call, From}, stop, State, D) ->
+    handle_stop(State, From, D);
+handle_event(enter, OldState, State, D) ->
+    handle_state_trans(OldState, State, D);
+handle_event(EventType, Event, State, D) ->
+    handle_unknown(EventType, Event, State, D).
 
 code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
@@ -107,11 +123,12 @@ terminate(_Reason, _State, _Data) ->
 %% Internal functions
 %%--------------------------------------------------------------------
 
-handle_stop(State, Data) ->
+handle_stop(State, From, Data) ->
     ?tp(rlog_agent_stop,
         #{ state => State
          , data => Data
-         }).
+         }),
+    {stop_and_reply, normal, {reply, From, ok}}.
 
 handle_unknown(EventType, Event, State, Data) ->
     ?tp(warning, "rlog agent received unknown event",
@@ -119,10 +136,22 @@ handle_unknown(EventType, Event, State, Data) ->
          , event => Event
          , state => State
          , data => Data
-         }).
+         }),
+    keep_state_and_data.
 
 handle_state_trans(OldState, State, _Data) ->
     ?tp(rlog_agent_state_change,
         #{ from => OldState
          , to => State
-         }).
+         }),
+    keep_state_and_data.
+
+-spec handle_tx(tuple(), term(), data()) -> fsm_result().
+handle_tx(Record, ActivityId, D) ->
+    ?tp(rlog_realitime_op,
+        #{ record => Record
+         , activity_id => ActivityId
+         }),
+
+    %% TODO: do it in batches
+    {keep_state, D}.

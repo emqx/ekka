@@ -111,7 +111,7 @@ t_async_cluster_start(_) ->
           , {rlog_rpc_fun, fun rpc:call/4}
           ],
     ?check_trace(
-       #{timeout => 5000},
+       #{timeout => 15000},
        begin
            Nodes = ekka_ct:cluster(Cluster, Env),
            Nodes
