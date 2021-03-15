@@ -86,7 +86,7 @@ init({Shard, Config}) ->
     logger:set_process_metadata(#{ domain => [ekka, rlog, server]
                                  , shard => Shard
                                  }),
-    ?tp(rlog_server_start, #{}),
+    ?tp(rlog_server_start, #{node => node()}),
     {ok, AgentSup} = ekka_rlog_shard_sup:start_link_agent_sup(Shard),
     {ok, BootstrapperSup} = ekka_rlog_shard_sup:start_link_bootstrapper_sup(Shard),
     TlogReplay =

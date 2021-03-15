@@ -83,9 +83,7 @@ init({Shard, _Opts}) ->
     logger:update_process_metadata(#{ domain => [ekka, rlog, replica]
                                     , shard  => Shard
                                     }),
-    ?tp(notice, ekka_rlog_replica_start,
-        #{
-         }),
+    ?tp(notice, rlog_replica_start, #{node => node()}),
     D = #d{ shard = Shard
           },
     {ok, ?disconnected, D}.
@@ -303,11 +301,3 @@ handle_state_trans(OldState, State, _Data) ->
 -spec shuffle([A]) -> [A].
 shuffle(A) ->
     A. %% TODO: implement me
-
-forget_worker(Pid) ->
-    unlink(Pid),
-    receive
-        {'EXIT', Pid, _} -> ok
-    after 0 ->
-            ok
-    end.

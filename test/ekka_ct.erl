@@ -36,14 +36,14 @@ cluster(ClusterSpec, Env) ->
                 , {core_nodes, CoreNodes}
                 | Env],
          [rpc:call(Node, application, set_env, [ekka, Key, Val]) || {Key, Val} <- Env1],
-         rpc:call(Node, ekka, start, []),
+         ok = rpc:call(Node, ekka, start, []),
          Node
      end
      || {Role, Name} <- ClusterSpec].
 
 start_slave(node, Name) ->
     {ok, Node} = slave:start(host(), Name, ebin_path()),
-    snabbkaffe:forward_trace(Node),
+    ok = snabbkaffe:forward_trace(Node),
     Node;
 start_slave(ekka, Name) ->
     Node = start_slave(node, Name),
