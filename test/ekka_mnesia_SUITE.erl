@@ -114,10 +114,6 @@ t_async_cluster_start(_) ->
        #{timeout => 5000},
        begin
            Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
-           ok = ekka_mnesia:create_table(kv_tab, [{ram_copies, [N1, N2]},
-                                                  {record_name, kv_tab},
-                                                  {attributes, record_info(fields, kv_tab)},
-                                                  {storage_properties, []}]),
            wait_shards(Nodes, [foo]),
            {atomic, _} = rpc:call(N1, ekka_transaction_gen, create_keys, []),
            Nodes
@@ -127,7 +123,8 @@ t_async_cluster_start(_) ->
                ?projection_complete(node, ?of_kind(rlog_server_start, Trace), [N1, N2]),
                ?projection_complete(node, ?of_kind(rlog_replica_start, Trace), [N3]),
                %% Other tests
-               replicant_bootstrap_stages(N3, Trace)
+               replicant_bootstrap_stages(N3, Trace),
+               error(no_way)
        end).
 
 replicant_bootstrap_stages(Node, Trace) ->

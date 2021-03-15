@@ -100,7 +100,9 @@ get_tx_ops(F, Args) ->
     end.
 
 %% TODO: Implement proper filtering
-dig_ops_for_shard(Ops, Key, Shard) ->
+dig_ops_for_shard(Ops0, Key, Shard) ->
+    %% TODO: proper filtering
+    Ops = [I || I = {{kv_tab, _}, _, _} <- Ops0],
     mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write).
 
 %% we can only hope that this is not an anonymous function

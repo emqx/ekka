@@ -53,6 +53,7 @@
         , buffer         = []  :: list()
         , buffer_len     = 0   :: integer()
         , flush_interval = 100 :: integer()
+        , seqno          = 0   :: integer()
         }).
 
 -type data() :: #d{}.
@@ -152,5 +153,8 @@ handle_tx(Record, ActivityId, D) ->
         #{ record => Record
          , activity_id => ActivityId
          }),
-    %% TODO: do it in batches
-    {keep_state, D}.
+    %% TODO: implement proper batches
+    SeqNo = D#d.seqno,
+    Batch = {self(), SeqNo, [Record]},
+    ekka_rlog_replica:push_batch(D#d.subscriber, Batch),
+    {keep_state, D#d{seqno = SeqNo + 1}}.

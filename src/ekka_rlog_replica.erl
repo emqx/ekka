@@ -19,7 +19,7 @@
 -module(ekka_rlog_replica).
 
 %% API:
--export([start_link/1, push_batch/3]).
+-export([start_link/1, push_batch/2]).
 
 %% gen_statem callbacks:
 -export([init/1, terminate/3, code_change/4, callback_mode/0, handle_event/4]).
@@ -59,9 +59,9 @@
 %%================================================================================
 
 %% This function is called by the remote core node.
--spec push_batch(node(), ekka_rlog:shard(), ekka_rlog_lib:batch()) -> ok.
-push_batch(Node, Shard, Batch) ->
-    ekka_rlog_lib:rpc_call(Node, gen_statem, call, [Shard, {tlog_batch, Batch}, infinity]).
+-spec push_batch(ekka_rlog_lib:subscriber(), ekka_rlog_lib:batch()) -> ok.
+push_batch({Node, Pid}, Batch) ->
+    ekka_rlog_lib:rpc_call(Node, gen_statem, call, [Pid, {tlog_batch, Batch}, infinity]).
 
 start_link(Shard) ->
     Config = #{}, % TODO
@@ -89,8 +89,8 @@ init({Shard, _Opts}) ->
     {ok, ?disconnected, D}.
 
 -spec handle_event(gen_statem:event_type(), _EventContent, state(), data()) -> fsm_result().
-handle_event(call, {tlog_batch, Batch}, State, D) ->
-    handle_batch(State, Batch, D);
+handle_event({call, From}, {tlog_batch, Batch}, State, D) ->
+    handle_batch(State, Batch, From, D);
 %% Events specific to `disconnected' state:
 handle_event(enter, OldState, ?disconnected, D) ->
     handle_state_trans(OldState, ?disconnected, D),
@@ -134,8 +134,8 @@ terminate(_Reason, _State, _Data) ->
 %%================================================================================
 
 %% @private Consume transactions from the core node
--spec handle_batch(state(), ekka_rlog_lib:batch(), data()) -> fsm_result().
-handle_batch(?normal, {Agent, SeqNo, Transactions},
+-spec handle_batch(state(), ekka_rlog_lib:batch(), gen_statem:from(), data()) -> fsm_result().
+handle_batch(?normal, {Agent, SeqNo, Transactions}, From,
              D = #d{ agent            = Agent
                    , next_batch_seqno = SeqNo
                    }) ->
@@ -146,8 +146,8 @@ handle_batch(?normal, {Agent, SeqNo, Transactions},
          , transactions => Transactions
          }),
     ekka_rlog_lib:import_batch(transaction, Transactions),
-    {keep_state, D#d{next_batch_seqno = SeqNo + 1}, [{reply, ok}]};
-handle_batch(St, {tlog_batch, {Agent, SeqNo, Transactions}},
+    {keep_state, D#d{next_batch_seqno = SeqNo + 1}, [{reply, From, ok}]};
+handle_batch(St, {tlog_batch, {Agent, SeqNo, Transactions}}, From,
              D = #d{ agent = Agent
                    , next_batch_seqno = SeqNo
                    }) when St =:= ?bootstrap orelse
@@ -160,8 +160,8 @@ handle_batch(St, {tlog_batch, {Agent, SeqNo, Transactions}},
          , transactions => Transactions
          }),
     buffer_tlog_ops(Transactions, D),
-    {keep_state, D#d{next_batch_seqno = SeqNo + 1}, [{reply, ok}]};
-handle_batch(_State, {Agent, SeqNo, _},
+    {keep_state, D#d{next_batch_seqno = SeqNo + 1}, [{reply, From, ok}]};
+handle_batch(_State, {Agent, SeqNo, _}, From,
              #d{ agent = Agent
                , next_batch_seqno = MySeqNo
                }) when SeqNo > MySeqNo ->
@@ -169,13 +169,13 @@ handle_batch(_State, {Agent, SeqNo, _},
     %% TODO: sometimes it should be possible to restart gracefully to
     %% salvage the bootstrapped data.
     error(gap_in_the_tlog);
-handle_batch(State, {Agent, SeqNo, _Transactions}, Data) ->
+handle_batch(State, {Agent, SeqNo, _Transactions}, From, Data) ->
     ?tp(warning, rlog_replica_unexpected_batch,
         #{ state => State
          , from => Agent
          , seqno => SeqNo
          }),
-    keep_state_and_data.
+    {keep_state_and_data, [{reply, From, {error, unexpected_batch}}]}.
 
 -spec initiate_bootstrap(data()) -> fsm_result().
 initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
@@ -293,7 +293,7 @@ handle_worker_down(State, Reason, D) ->
     exit(bootstrap_failed).
 
 handle_unknown(EventType, Event, State, Data) ->
-    ?tp(warning, "rlog agent received unknown event",
+    ?tp(warning, "RLOG replicant received unknown event",
         #{ event_type => EventType
          , event => Event
          , state => State
