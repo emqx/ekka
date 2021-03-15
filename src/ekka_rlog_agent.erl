@@ -90,21 +90,16 @@ init({Shard, Subscriber, ReplaySince}) ->
                                     , shard      => Shard
                                     , subscriber => Subscriber
                                     }),
-    {ok, ?normal, #d{ shard          = Shard
-                    , subscriber     = Subscriber
-                    }}.
+    D = #d{ shard          = Shard
+          , subscriber     = Subscriber
+          },
+    %% TMP workaround until replaying from the old logs is figured out:
+    subscribe_realitime(D),
+    {ok, ?normal, D}.
 
 -spec handle_event(gen_statem:event_type(), _EventContent, state(), data()) ->
           gen_statem:event_handler_result(state()).
 %% Events specific to `?normal' state:
-handle_event(enter, OldState, ?normal, D) ->
-    Table = D#d.shard,
-    {ok, Node} = mnesia:subscribe({table, Table, simple}),
-    ?tp(info, subscribe_realtime_stream,
-        #{ rlog => Table
-         , subscribe_node => Node
-         }),
-    handle_state_trans(OldState, ?normal, D);
 handle_event(info, {mnesia_table_event, {write, Record, ActivityId}}, ?normal, D) ->
     handle_tx(Record, ActivityId, D);
 %% Common actions:
@@ -161,3 +156,12 @@ handle_tx({Shard, K, Ops}, ActivityId, D = #d{shard = Shard}) ->
     Batch = {self(), SeqNo, [Ops]},
     ok = ekka_rlog_replica:push_batch(D#d.subscriber, Batch),
     {keep_state, D#d{seqno = SeqNo + 1}}.
+
+subscribe_realitime(D) ->
+    Table = D#d.shard,
+    {ok, Node} = mnesia:subscribe({table, Table, simple}),
+    ?tp(info, subscribe_realtime_stream,
+        #{ rlog => Table
+         , subscribe_node => Node
+         }),
+    ok.
