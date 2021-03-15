@@ -111,9 +111,13 @@ t_async_cluster_start(_) ->
           , {rlog_rpc_fun, fun rpc:call/4}
           ],
     ?check_trace(
-       #{timeout => 5000},
        begin
-           Nodes = ekka_ct:cluster(Cluster, Env),
+           Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
+           ok = ekka_mnesia:create_table(kv_tab, [{ram_copies, [N1, N2]},
+                                                  {record_name, kv_tab},
+                                                  {attributes, record_info(fields, kv_tab)},
+                                                  {storage_properties, []}]),
+           wait_shards(Nodes, [foo]),
            Nodes
        end,
        fun([N1, N2, N3], Trace) ->
@@ -132,3 +136,11 @@ replicant_bootstrap_stages(Node, Trace) ->
     ?assertMatch( [disconnected, bootstrap, local_replay, normal]
                 , Transitions
                 ).
+
+wait_shards(Nodes, Shards) ->
+    [{ok, _} = ?block_until(#{ ?snk_kind := "Shard fully up"
+                             , shard     := Shard
+                             , node      := Node
+                             })
+     || Shard <- Shards, Node <- Nodes],
+    ok.

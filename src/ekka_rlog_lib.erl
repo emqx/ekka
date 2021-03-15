@@ -24,13 +24,38 @@
         , local_rpc_call/4
         ]).
 
--export_type([batch/0, subscriber/0]).
+-export_type([ batch/0
+             , subscriber/0
+             , table/0
+             , change_type/0
+             , op/0
+             , tx/0
+             , txid/0
+             , ts/0
+             , node_id/0
+             , rlog/0
+             ]).
 
--type tx() :: any().  %% TODO: proper type
+-include("ekka_rlog.hrl").
+
+-type ts() :: integer().
+-type node_id() :: integer().
+-type txid() :: {ts(), node_id()}.
+
+-type table():: atom().
+
+-type change_type() :: write | delete | delete_object.
+
+-type op() :: {{table(), term()}, term(), change_type()}
+            | {ekka_tx:func(), ekka_tx:args(), apply}.
+
+-type tx() :: [op()].
+
+-type rlog() :: #rlog{}.
 
 -type batch() :: { _Sender :: pid()
                  , _SeqNo  :: integer()
-                 , _Tx     :: list(tx())
+                 , _Tx     :: [tx()]
                  }.
 
 -type subscriber() :: {node(), pid()}.
