@@ -25,16 +25,9 @@
         ]).
 
 -export_type([ shard/0
-             , txid/0
-             , ts/0
-             , node_id/0
              ]).
 
 -type shard() :: atom().
-
--type ts() :: integer().
--type node_id() :: integer().
--type txid() :: {ts(), node_id()}.
 
 %% TODO: configurable
 node_id() ->

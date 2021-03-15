@@ -23,45 +23,24 @@
 
 -export([write/3, first_d/1, last_d/1, next_d/2]).
 
--export_type([ change_type/0
-             , op/0
-             ]).
+-include("ekka_rlog.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 -type key() :: ekka_rlog:key().
--type table_name():: atom().
--type change_type() :: write | delete | delete_object | apply.
--type op() :: {{table_name(), term()} | ekka_tx:func(), term() | ekka_tx:args(), change_type()}.
 -type shard() :: ekka_tx:shard().
 
 -boot_mnesia({mnesia, [boot]}).
 -copy_mnesia({mnesia, [copy]}).
 
--record(rlog,
-        { key :: key() %% key should be monotoic and globally unique
-        , ops :: [op()]
-        }).
-
 %% @doc Mnesia bootstrap.
-mnesia(boot) ->
-    Opts = [ {type, ordered_set}
-           , {ram_copies, [node()]}
-           , {record_name, rlog}
-           , {attributes, record_info(fields, rlog)}
-           ],
+mnesia(BootType) ->
     case ekka_rlog:role() of
-        core -> [ok = ekka_mnesia:create_table(Shard, Opts) || Shard <- ekka_rlog:shards()];
+        core -> [init(BootType, Shard) || Shard <- ekka_rlog:shards()], ok;
         _    -> ok
-    end,
-    ok;
-mnesia(copy) ->
-    case ekka_rlog:role() of
-        core -> [ok = ekka_mnesia:copy_table(Shard) || Shard <- ekka_rlog:shards()];
-        _    -> ok
-    end,
-    ok.
+    end.
 
 %% @doc Write a transaction log.
--spec write(shard(), key(), [op(),...]) -> ok.
+-spec write(ekka_rlog:shard(), ekka_rlog_lib:txid(), [ekka_rlog_lib:op(),...]) -> ok.
 write(Shard, Key, [_ | _] = Ops) ->
     Log = #rlog{ key = Key
                , ops = Ops
@@ -91,3 +70,23 @@ next_d(Shard, Key) ->
         '$end_of_table' -> [];
         Key -> [Key]
     end.
+
+init(boot, Shard) ->
+    Opts = [ {type, ordered_set}
+           , {ram_copies, [node()]}
+           , {record_name, rlog}
+           , {attributes, record_info(fields, rlog)}
+           ],
+    ?tp(notice, creating_rlog_tab,
+        #{ node => node()
+         , shard => Shard
+         , type => boot
+         }),
+    ok = ekka_mnesia:create_table(Shard, Opts);
+init(copy, Shard) ->
+    ?tp(notice, creating_rlog_tab,
+        #{ node => node()
+         , shard => Shard
+         , type => copy
+         }),
+    ok = ekka_mnesia:copy_table(Shard).

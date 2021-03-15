@@ -146,12 +146,11 @@ handle_state_trans(OldState, State, _Data) ->
          }),
     keep_state_and_data.
 
--spec handle_tx(tuple(), term(), data()) -> fsm_result().
+-spec handle_tx(ekka_rlog_lib:rlog(), term(), data()) -> fsm_result().
 handle_tx(Record, ActivityId, D) ->
     ?tp(rlog_realitime_op,
         #{ record => Record
          , activity_id => ActivityId
          }),
-
     %% TODO: do it in batches
     {keep_state, D}.

@@ -17,6 +17,8 @@
 -module(ekka_mnesia).
 
 -include("ekka.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
+
 
 %% Start and stop mnesia
 -export([ start/0
