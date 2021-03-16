@@ -26,20 +26,20 @@
         ]).
 
 -export_type([ shard/0
+             , func/1
              ]).
+
+-include("ekka_rlog.hrl").
+-include_lib("mnesia/src/mnesia.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 -type shard() :: atom().
 
 -type func(A) :: fun((...) -> A).
 
--include("ekka_rlog.hrl").
--include_lib("mnesia/src/mnesia.hrl").
-
--include_lib("stdlib/include/ms_transform.hrl").
-
 %% @doc Perform a transaction and log changes.
 %% the logged changes are to be replicated to other nodes.
--spec transaction(func(A), [term()]) -> mnesia:t_result(A).
+-spec transaction(func(A), [term()]) -> ekka_mnesia:t_result(A).
 transaction(F, Args) -> do(transaction, F, Args).
 
 %% TODO: configurable
@@ -49,7 +49,7 @@ node_id() ->
 %% TODO: persistent term
 -spec shards() -> [shard()].
 shards() ->
-    application:get_env(ekka, shards, [shard1]).
+    application:get_env(ekka, shards, []).
 
 %% TODO: persistent term
 -spec role() -> core | replicant.
@@ -79,18 +79,8 @@ do(Type, F, Args) ->
                 Result
         end,
     case Type of
-        transaction -> mnesia:transaction(TxFun);
-        async_dirty -> mnesia:async_dirty(TxFun)
-    end.
-
-get_tx_ops(F, Args) ->
-    {_, _, Store} = mnesia:get_activity_id(),
-    case Store of
-        non_transaction ->
-            args_as_op(F, Args);
-        #tidstore{store = Ets} ->
-            %% TODO This is probably wrong. Mnesia stores ops in ets?
-            AllOps = ets:tab2list(Ets)
+        transaction -> mnesia:transaction(TxFun)
+%        async_dirty -> mnesia:async_dirty(TxFun)
     end.
 
 %% TODO: Implement proper filtering
@@ -106,6 +96,16 @@ dig_ops_for_shard(Key, Shard) ->
         mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write)
     end.
 
+%% get_tx_ops(F, Args) ->
+%%     {_, _, Store} = mnesia:get_activity_id(),
+%%     case Store of
+%%         non_transaction ->
+%%             args_as_op(F, Args);
+%%         #tidstore{store = Ets} ->
+%%             %% TODO This is probably wrong. Mnesia stores ops in ets?
+%%             AllOps = ets:tab2list(Ets)
+%%     end.
+
 %% we can only hope that this is not an anonymous function
 %% add the function is idempotent.
-args_as_op(F, Args) -> [{F, Args, apply}].
+%% args_as_op(F, Args) -> [{F, Args, apply}].

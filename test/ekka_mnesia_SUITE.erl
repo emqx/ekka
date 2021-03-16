@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019-2020 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2021 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -107,20 +107,22 @@ t_async_cluster_smoke_test(_) ->
               , {core, n2}
               , {replicant, n3}
               ],
-    Env = [ {shards, [foo]}
-          , {rlog_rpc_module, rpc}
+    Env = [ {ekka, shards, [foo]}
+          , {ekka, rlog_rpc_module, rpc}
           ],
     ?check_trace(
        begin
            Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
-           wait_shards(Nodes, [foo]),
-           {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
-           stabilize(1000),
-           compare_table_contents(test_tab, Nodes),
-           {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
-           stabilize(1000),
-           compare_table_contents(test_tab, Nodes),
-           Nodes
+           try
+               wait_shards(Nodes, [foo]),
+               {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
+               stabilize(1000), compare_table_contents(test_tab, Nodes),
+               {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
+               stabilize(1000), compare_table_contents(test_tab, Nodes),
+               Nodes
+           after
+               lists:foreach(fun slave:stop/1, Nodes)
+           end
        end,
        fun([N1, N2, N3], Trace) ->
                %% Ensure that the nodes assumed designated roles:
@@ -157,9 +159,14 @@ wait_shards(Nodes, Shards) ->
     ok.
 
 stabilize(Timeout) ->
+    stabilize(Timeout, 10).
+
+stabilize(_, 0) ->
+    error(failed_to_stabilize);
+stabilize(Timeout, N) ->
     case ?block_until(#{?snk_meta := [ekka, rlog|_]}, Timeout) of
         timeout -> ok;
-        {ok, _} -> stabilize(Timeout)
+        {ok, _} -> stabilize(Timeout, N - 1)
     end.
 
 compare_table_contents(_, []) ->

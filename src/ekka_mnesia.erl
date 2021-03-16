@@ -56,7 +56,12 @@
 -export([ transaction/1
         ]).
 
+-export_type([ t_result/1
+             ]).
+
 -deprecated({copy_table, 1, next_major_release}).
+
+-type t_result(Res) :: {'atomic', Res} | {'aborted', Reason::term()}.
 
 %%--------------------------------------------------------------------
 %% Start and init mnesia
@@ -328,7 +333,7 @@ do_wait_for_tables(Tables) ->
 %% Transaction API
 %%--------------------------------------------------------------------
 
--spec(transaction(fun(() -> A)) -> mnesia:t_result(A)).
+-spec(transaction(fun(() -> A)) -> t_result(A)).
 transaction(Fun) ->
     %% TODO: it should be possible initiate transactions on replicants too
     core = ekka_rlog:role(),

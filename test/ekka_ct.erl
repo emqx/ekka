@@ -30,7 +30,7 @@ all(Suite) ->
 cluster(ClusterSpec, Env) ->
     %% Set common environment variables:
     CoreNodes = [node_id(Name) || {core, Name} <- ClusterSpec],
-    Env1 = [{core_nodes, CoreNodes} | Env],
+    Env1 = [{ekka, core_nodes, CoreNodes} | Env],
     %% Start nodes:
     start_core_nodes([N || {core, N} <- ClusterSpec], Env1),
     start_replicant_nodes([N || {replicant, N} <- ClusterSpec], Env1),
@@ -39,7 +39,7 @@ cluster(ClusterSpec, Env) ->
 start_core_nodes([], _Env) ->
     ok;
 start_core_nodes([First|Rest], Env) ->
-    Env1 = [{node_role, core} | Env],
+    Env1 = [{ekka, node_role, core} | Env],
     N1 = start_slave(ekka, First, Env1),
     [begin
          Node = start_slave(ekka, Name, Env1),
@@ -48,7 +48,7 @@ start_core_nodes([First|Rest], Env) ->
      || Name <- Rest].
 
 start_replicant_nodes(Nodes, Env) ->
-    Env1 = [{node_role, replicant} | Env],
+    Env1 = [{ekka, node_role, replicant} | Env],
     [start_slave(ekka, N, Env1) || N <- Nodes].
 
 start_slave(NodeOrEkka, Name) ->
@@ -56,7 +56,12 @@ start_slave(NodeOrEkka, Name) ->
 
 start_slave(node, Name, Env) ->
     {ok, Node} = slave:start(host(), Name, ebin_path()),
-    [rpc:call(Node, application, set_env, [ekka, Key, Val]) || {Key, Val} <- Env],
+    %% Load apps before setting the enviroment variables to avoid
+    %% overriding the environment during ekka start:
+    [rpc:call(Node, application, load, [App]) || App <- [gen_rpc, ekka]],
+    %% Disable gen_rpc listener by default:
+    Env1 = [{gen_rpc, tcp_server_port, false}|Env],
+    [rpc:call(Node, application, set_env, [App, Key, Val]) || {App, Key, Val} <- Env1],
     ok = snabbkaffe:forward_trace(Node),
     Node;
 start_slave(ekka, Name, Env) ->
@@ -91,3 +96,8 @@ is_lib(Path) ->
 
 node_id(Name) ->
     list_to_atom(lists:concat([Name, "@", host()])).
+
+run_on(Node, Fun) ->
+    %% Sending closures over erlang distribution is wrong, but for
+    %% test purposes it should be ok.
+    rpc:call(Node, erlang, apply, [Fun, []]).

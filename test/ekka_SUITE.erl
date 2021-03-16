@@ -193,4 +193,3 @@ t_lock_unlock_all(_) ->
     ?assertEqual([N0, N1], lists:sort(Nodes)),
     ok = rpc:call(N1, ekka, leave, []),
     ok = ekka_ct:stop_slave(N1).
-

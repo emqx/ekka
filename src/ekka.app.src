@@ -13,8 +13,8 @@
     stdlib,
     mnesia,
     inets,
-    eetcd %%,
-    %% gen_rpc
+    eetcd,
+    gen_rpc
    ]},
   {modules, []},
   {licenses, ["Apache 2.0"]},
