@@ -78,8 +78,8 @@ make_key_in_past(Dt) ->
 
 %% @doc Import transaction ops to the local database
 -spec import_batch(transaction | dirty, [tx()]) -> ok.
-import_batch(_ImportType, Batch) ->
-    ok. %% TODO
+import_batch(ImportType, Batch) ->
+    lists:foreach(fun(Tx) -> import_transaction(ImportType, Tx) end, Batch).
 
 %% @doc Do an RPC call
 -spec rpc_call(node(), module(), atom(), list()) -> term().
@@ -98,3 +98,27 @@ rpc_cast(Node, Module, Function, Args) ->
 %% local_rpc_call(Node, Module, Function, Args) ->
 %%     Node = node(), % assert
 %%     apply(Module, Function, Args).
+
+-spec import_transaction(transaction | dirty, [tx()]) -> ok.
+import_transaction(transaction, Ops) ->
+    {atomic, ok} = mnesia:transaction(
+                     fun() ->
+                             lists:foreach(fun import_op/1, Ops)
+                     end);
+import_transaction(dirty, Ops) ->
+    lists:foreach(fun import_op_dirty/1, Ops).
+
+-spec import_op(op()) -> ok.
+import_op(Op) ->
+    case Op of
+        {{Tab, _K}, Record, write} ->
+            mnesia:write(Tab, Record, write);
+        {{Tab, K}, _Record, delete} ->
+            mnesia:delete({Tab, K});
+        {{Tab, _K}, Record, delete_object} ->
+            mnesia:delete_object(Tab, Record, write)
+    end.
+
+-spec import_op_dirty(op()) -> ok.
+import_op_dirty({{Tab, _K}, Record, write}) ->
+    mnesia:dirty_write(Tab, Record).

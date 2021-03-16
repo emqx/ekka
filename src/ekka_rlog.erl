@@ -98,7 +98,7 @@ dig_ops_for_shard(Key, Shard) ->
     case mnesia:get_activity_id() of
       {_, _, #tidstore{store = Ets}} ->
         %% TODO: get filter from config
-        MS = ets:fun2ms(fun(A = {{T, _}, _, _}) when T =:= kv_tab;
+        MS = ets:fun2ms(fun(A = {{T, _}, _, _}) when T =:= test_tab;
                                                      T =:= foobar ->
                                 A
                         end),
