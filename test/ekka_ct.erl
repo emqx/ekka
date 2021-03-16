@@ -91,3 +91,8 @@ is_lib(Path) ->
 
 node_id(Name) ->
     list_to_atom(lists:concat([Name, "@", host()])).
+
+run_on(Node, Fun) ->
+    %% Sending closures over erlang distribution is wrong, but for
+    %% test purposes it should be ok.
+    rpc:call(Node, erlang, apply, [Fun, []]).

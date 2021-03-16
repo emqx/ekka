@@ -18,7 +18,9 @@ mnesia(boot) ->
                 {attributes, record_info(fields, test_tab)}
                 ]);
 mnesia(copy) ->
-    ok = ekka_mnesia:copy_table(test_tab, ram_copies).
+    %% TODO: ignoring the return type here, because some tests use CT
+    %% master as a replica, and it doesn't have proper schema
+    _ = ekka_mnesia:copy_table(test_tab, ram_copies).
 
 init() ->
     ekka_mnesia:transaction(

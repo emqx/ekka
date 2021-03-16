@@ -89,4 +89,4 @@ init(copy, Shard) ->
          , shard => Shard
          , type => copy
          }),
-    ok = ekka_mnesia:copy_table(Shard).
+    ok = ekka_mnesia:copy_table(Shard, ram_copies).
