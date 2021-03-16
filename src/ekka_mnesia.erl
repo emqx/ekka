@@ -128,6 +128,7 @@ copy_table(Name) ->
 
 -spec(copy_table(Name:: atom(), ram_copies | disc_copies) -> ok).
 copy_table(Name, RamOrDisc) ->
+    core = ekka_rlog:role(), % assert
     ensure_tab(mnesia:add_table_copy(Name, node(), RamOrDisc)).
 
 %% @doc Copy schema.

@@ -102,7 +102,7 @@ t_remove_from_cluster(_) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
-t_async_cluster_start(_) ->
+t_async_cluster_smoke_test(_) ->
     Cluster = [ {core, n1}
               , {core, n2}
               , {replicant, n3}
