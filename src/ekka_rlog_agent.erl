@@ -36,11 +36,6 @@
 -include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
-%% Concurrent transactions (rlog entries) may each other and result in
-%% disorder. e.g. transaction A having timestamp 1 is logged *after*
-%% transaction B with timestamp 2.
--define(CHECKPOINT_MARGIN_SECONDS, 60).
-
 %% Define macros for each state to prevent typos:
 -define(catchup, catchup).
 -define(switchover, switchover).

@@ -124,10 +124,9 @@ handle_call({subscribe, Subscriber, Checkpoint}, _From, State) ->
     {reply, {ok, NeedBootstrap, Pid}, State};
 handle_call({bootstrap, Subscriber}, _From, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),
-    {reply, {ok, Pid}, State}%% ;
-%% handle_call(_From, Call, St) ->
-%%     {reply, {error, {unknown_call, Call}}, St}.
-.
+    {reply, {ok, Pid}, State};
+handle_call(_From, Call, St) ->
+    {reply, {error, {unknown_call, Call}}, St}.
 
 code_change(_OldVsn, St, _Extra) ->
     {ok, St}.
@@ -141,15 +140,20 @@ terminate(_Reason, #{} = St) ->
 
 %% @private Check if the remote needs to bootstrap itself
 -spec needs_bootstrap(integer(), integer(), checkpoint()) -> {boolean(), integer()}.
-needs_bootstrap(BootstrapThreshold, Replay, Checkpoint) ->
-    {BootstrapDeadline, _} = ekka_rlog_lib:make_key_in_past(BootstrapThreshold),
-    case Checkpoint of
-        {TS, _Node} when TS > BootstrapDeadline ->
-            {false, TS - Replay};
-        _ ->
-            {ReplaySince, _} = ekka_rlog_lib:make_key_in_past(Replay),
-            {true, ReplaySince}
-    end.
+%% TODO: TMP workaround, always bootstrap
+needs_bootstrap(_, Replay, _) ->
+    {ReplaySince, _} = ekka_rlog_lib:make_key_in_past(Replay),
+    {true, ReplaySince}.
+
+%% needs_bootstrap(BootstrapThreshold, Replay, Checkpoint) ->
+%%     {BootstrapDeadline, _} = ekka_rlog_lib:make_key_in_past(BootstrapThreshold),
+%%     case Checkpoint of
+%%         {TS, _Node} when TS > BootstrapDeadline ->
+%%             {false, TS - Replay};
+%%         _ ->
+%%             {ReplaySince, _} = ekka_rlog_lib:make_key_in_past(Replay),
+%%             {true, ReplaySince}
+%%     end.
 
 -spec maybe_start_child(pid(), list()) -> pid().
 maybe_start_child(Supervisor, Args) ->
@@ -162,7 +166,6 @@ maybe_start_child(Supervisor, Args) ->
 %%================================================================================
 %% Internal exports (gen_rpc)
 %%================================================================================
-
 
 -spec do_bootstrap(ekka_rlog:shard(), ekka_rlog_bootstrapper:subscriber()) -> {ok, pid()}.
 do_bootstrap(Shard, Subscriber) ->

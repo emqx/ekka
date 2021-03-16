@@ -111,11 +111,15 @@ t_async_cluster_start(_) ->
           , {rlog_rpc_module, rpc}
           ],
     ?check_trace(
-       #{timeout => 5000},
        begin
            Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
            wait_shards(Nodes, [foo]),
            {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
+           stabilize(1000),
+           compare_table_contents(test_tab, Nodes),
+           {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
+           stabilize(1000),
+           compare_table_contents(test_tab, Nodes),
            Nodes
        end,
        fun([N1, N2, N3], Trace) ->
@@ -151,3 +155,20 @@ wait_shards(Nodes, Shards) ->
                              })
      || Shard <- Shards, Node <- Nodes],
     ok.
+
+stabilize(Timeout) ->
+    case ?block_until(#{?snk_meta := [ekka, rlog|_]}, Timeout) of
+        timeout -> ok;
+        {ok, _} -> stabilize(Timeout)
+    end.
+
+compare_table_contents(_, []) ->
+    ok;
+compare_table_contents(Table, Nodes) ->
+    [{_, Reference}|Rest] = [{Node, lists:sort(rpc:call(Node, ets, tab2list, [Table]))}
+                             || Node <- Nodes],
+    lists:foreach(
+      fun({Node, Contents}) ->
+              ?assertEqual({Node, Reference}, {Node, Contents})
+      end,
+      Rest).

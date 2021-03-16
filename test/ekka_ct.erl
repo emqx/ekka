@@ -28,26 +28,40 @@ all(Suite) ->
 -spec cluster([{core | replicant, Node}], [{atom(), term()}]) -> Node
               when Node :: atom().
 cluster(ClusterSpec, Env) ->
-    Host = host(),
-    CoreNodes = [list_to_atom(lists:concat([Name, "@", Host])) || {core, Name} <- ClusterSpec],
-    [begin
-         Node = start_slave(node, Name),
-         Env1 = [ {node_role, Role}
-                , {core_nodes, CoreNodes}
-                | Env],
-         [rpc:call(Node, application, set_env, [ekka, Key, Val]) || {Key, Val} <- Env1],
-         ok = rpc:call(Node, ekka, start, []),
-         Node
-     end
-     || {Role, Name} <- ClusterSpec].
+    %% Set common environment variables:
+    CoreNodes = [node_id(Name) || {core, Name} <- ClusterSpec],
+    Env1 = [{core_nodes, CoreNodes} | Env],
+    %% Start nodes:
+    start_core_nodes([N || {core, N} <- ClusterSpec], Env1),
+    start_replicant_nodes([N || {replicant, N} <- ClusterSpec], Env1),
+    [node_id(N) || {_, N} <- ClusterSpec].
 
-start_slave(node, Name) ->
+start_core_nodes([], _Env) ->
+    ok;
+start_core_nodes([First|Rest], Env) ->
+    Env1 = [{node_role, core} | Env],
+    N1 = start_slave(ekka, First, Env1),
+    [begin
+         Node = start_slave(ekka, Name, Env1),
+         ok = rpc:call(Node, ekka, join, [N1])
+     end
+     || Name <- Rest].
+
+start_replicant_nodes(Nodes, Env) ->
+    Env1 = [{node_role, replicant} | Env],
+    [start_slave(ekka, N, Env1) || N <- Nodes].
+
+start_slave(NodeOrEkka, Name) ->
+    start_slave(NodeOrEkka, Name, []).
+
+start_slave(node, Name, Env) ->
     {ok, Node} = slave:start(host(), Name, ebin_path()),
+    [rpc:call(Node, application, set_env, [ekka, Key, Val]) || {Key, Val} <- Env],
     ok = snabbkaffe:forward_trace(Node),
     Node;
-start_slave(ekka, Name) ->
-    Node = start_slave(node, Name),
-    rpc:call(Node, ekka, start, []),
+start_slave(ekka, Name, Env) ->
+    Node = start_slave(node, Name, Env),
+    ok = rpc:call(Node, ekka, start, []),
     Node.
 
 wait_running(Node) ->
@@ -74,3 +88,6 @@ ebin_path() ->
 
 is_lib(Path) ->
     string:prefix(Path, code:lib_dir()) =:= nomatch.
+
+node_id(Name) ->
+    list_to_atom(lists:concat([Name, "@", host()])).
