@@ -26,8 +26,8 @@
 -include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
--type key() :: ekka_rlog:key().
--type shard() :: ekka_tx:shard().
+-type key() :: ekka_rlog_lib:txid().
+-type shard() :: ekka_rlog:shard().
 
 -boot_mnesia({mnesia, [boot]}).
 -copy_mnesia({mnesia, [copy]}).

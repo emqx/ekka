@@ -48,7 +48,7 @@
 -type change_type() :: write | delete | delete_object.
 
 -type op() :: {{table(), term()}, term(), change_type()}
-            | {ekka_tx:func(), ekka_tx:args(), apply}.
+            | {ekka_rlog:func(_Ret), _Args :: list(), apply}.
 
 -type tx() :: [op()].
 
@@ -67,11 +67,11 @@
 %% where ts is at nanosecond precesion to ensure it is locally
 %% monotoic and unique, and node_id, which identifies the node which
 %% initiated the transaction, should ensure global uniqueness.
--spec make_key() -> ekka_rlog:txid().
+-spec make_key() -> ekka_rlog_lib:txid().
 make_key() ->
     {erlang:system_time(nanosecond), ekka_rlog:node_id()}.
 
--spec make_key_in_past(integer()) -> ekka_rlog:txid().
+-spec make_key_in_past(integer()) -> ekka_rlog_lib:txid().
 make_key_in_past(Dt) ->
     {TS, Node} = make_key(),
     {TS - Dt, Node}.

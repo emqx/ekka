@@ -46,9 +46,6 @@
 -record(d,
         { shard                :: ekka_rlog:shard()
         , subscriber           :: ekka_rlog_lib:subscriber()
-        , buffer         = []  :: list()
-        , buffer_len     = 0   :: integer()
-        , flush_interval = 100 :: integer()
         , seqno          = 0   :: integer()
         }).
 

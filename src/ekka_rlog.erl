@@ -26,20 +26,20 @@
         ]).
 
 -export_type([ shard/0
+             , func/1
              ]).
+
+-include("ekka_rlog.hrl").
+-include_lib("mnesia/src/mnesia.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 -type shard() :: atom().
 
 -type func(A) :: fun((...) -> A).
 
--include("ekka_rlog.hrl").
--include_lib("mnesia/src/mnesia.hrl").
-
--include_lib("stdlib/include/ms_transform.hrl").
-
 %% @doc Perform a transaction and log changes.
 %% the logged changes are to be replicated to other nodes.
--spec transaction(func(A), [term()]) -> mnesia:t_result(A).
+-spec transaction(func(A), [term()]) -> ekka_mnesia:t_result(A).
 transaction(F, Args) -> do(transaction, F, Args).
 
 %% TODO: configurable

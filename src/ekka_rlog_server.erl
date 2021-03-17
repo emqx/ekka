@@ -47,7 +47,7 @@
 %% Type declarations
 %%================================================================================
 
--type checkpoint() :: ekka_rlog:txid() | undefined.
+-type checkpoint() :: ekka_rlog_lib:txid() | undefined.
 
 -record(s,
         { shard               :: ekka_rlog:shard()
@@ -167,6 +167,6 @@ maybe_start_child(Supervisor, Args) ->
 %% Internal exports (gen_rpc)
 %%================================================================================
 
--spec do_bootstrap(ekka_rlog:shard(), ekka_rlog_bootstrapper:subscriber()) -> {ok, pid()}.
+-spec do_bootstrap(ekka_rlog:shard(), ekka_rlog_lib:subscriber()) -> {ok, pid()}.
 do_bootstrap(Shard, Subscriber) ->
     gen_server:call(Shard, {bootstrap, Subscriber}, infinity).
