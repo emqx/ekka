@@ -107,8 +107,8 @@ t_async_cluster_smoke_test(_) ->
               , {core, n2}
               , {replicant, n3}
               ],
-    Env = [ {shards, [foo]}
-          , {rlog_rpc_module, rpc}
+    Env = [ {ekka, shards, [foo]}
+          , {ekka, rlog_rpc_module, rpc}
           ],
     ?check_trace(
        begin
