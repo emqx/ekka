@@ -102,18 +102,16 @@ t_remove_from_cluster(_) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
-t_async_cluster_smoke_test(_) ->
-    Cluster = [ {core, n1}
-              , {core, n2}
-              , {replicant, n3}
-              ],
+t_rlog_smoke_test(_) ->
+    snabbkaffe:fix_ct_logging(),
     Env = [ {ekka, shards, [foo]}
-          , {ekka, rlog_rpc_module, rpc}
+          , {ekka, test_tabs, true}
           ],
+    Cluster = ekka_ct:cluster([core, core, replicant], Env),
     ?check_trace(
        begin
-           Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
            try
+               Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
                wait_shards(Nodes, [foo]),
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
@@ -121,7 +119,7 @@ t_async_cluster_smoke_test(_) ->
                stabilize(1000), compare_table_contents(test_tab, Nodes),
                Nodes
            after
-               lists:foreach(fun slave:stop/1, Nodes)
+               ekka_ct:teardown_cluster(Cluster)
            end
        end,
        fun([N1, N2, N3], Trace) ->
@@ -132,6 +130,58 @@ t_async_cluster_smoke_test(_) ->
                replicant_bootstrap_stages(N3, Trace),
                all_batches_received(Trace)
        end).
+
+cluster_benchmark(_) ->
+    snabbkaffe:fix_ct_logging(),
+    NReplicas = 6,
+    Config = #{ trans_size => 10
+              , max_time   => 15000
+              , delays     => [10, 100, 1000]
+              },
+    ?check_trace(
+       begin
+           do_cluster_benchmark(Config#{ backend => mnesia
+                                       , cluster => [core || I <- lists:seq(1, NReplicas)]
+                                       }),
+           do_cluster_benchmark(Config#{ backend  => ekka_mnesia
+                                       , cluster => [core, core] ++ [replicant || I <- lists:seq(3, NReplicas)]
+                                       })
+       end,
+       fun(_, _) ->
+               snabbkaffe:analyze_statistics()
+       end).
+
+do_cluster_benchmark(#{ backend    := Backend
+                      , trans_size := NKeys
+                      , max_time   := MaxTime
+                      , delays     := Delays
+                      , cluster    := ClusterSpec
+                      } = Config) ->
+    Env = [ {ekka, shards, [foo]}
+          , {ekka, rlog_rpc_module, rpc}
+          , {ekka, test_tabs, true}
+          ],
+    Cluster = ekka_ct:cluster(ClusterSpec, Env),
+    ResultFile = "/tmp/" ++ atom_to_list(Backend) ++ "_stats.csv",
+    file:write_file( ResultFile
+                   , ekka_ct:vals_to_csv([n_nodes | Delays])
+                   ),
+    [#{node := First}|_] = Cluster,
+    try
+        ekka_ct:start_cluster(node, Cluster),
+        lists:foldl(
+          fun(Node, Cnt) ->
+                  ekka_ct:start_ekka(Node),
+                  stabilize(100),
+                  ok = rpc:call(First, ekka_transaction_gen, benchmark,
+                                [ResultFile, Config, Cnt]),
+                  Cnt + 1
+          end,
+          1,
+          Cluster)
+    after
+        ekka_ct:teardown_cluster(Cluster)
+    end.
 
 replicant_bootstrap_stages(Node, Trace) ->
     Transitions = [To || #{ ?snk_kind := state_change

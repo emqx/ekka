@@ -27,6 +27,7 @@
 
 -export_type([ shard/0
              , func/1
+             , role/0
              ]).
 
 -include("ekka_rlog.hrl").
@@ -34,6 +35,8 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 
 -type shard() :: atom().
+
+-type role() :: core | replicant.
 
 -type func(A) :: fun((...) -> A).
 
@@ -52,7 +55,7 @@ shards() ->
     application:get_env(ekka, shards, []).
 
 %% TODO: persistent term
--spec role() -> core | replicant.
+-spec role() -> role().
 role() ->
     application:get_env(ekka, node_role, core).
 

@@ -54,12 +54,14 @@ status(Node) -> ekka_mnesia:cluster_status(Node).
 join(Node) when Node =:= node() ->
     ignore;
 join(Node) when is_atom(Node) ->
-    case {ekka_mnesia:is_node_in_cluster(Node), ekka_node:is_running(Node, ekka)} of
-        {false, true} ->
+    case {ekka_rlog:role(), ekka_mnesia:is_node_in_cluster(Node), ekka_node:is_running(Node, ekka)} of
+        {replicant, _, _} ->
+            ok;
+        {core, false, true} ->
             prepare(join), ok = ekka_mnesia:join_cluster(Node), reboot();
-        {false, false} ->
+        {core, false, false} ->
             {error, {node_down, Node}};
-        {true, _} ->
+        {core, true, _} ->
             {error, {already_in_cluster, Node}}
     end.
 

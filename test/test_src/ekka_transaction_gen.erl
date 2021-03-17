@@ -15,27 +15,37 @@
 %%--------------------------------------------------------------------
 -module(ekka_transaction_gen).
 
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
+
 -boot_mnesia({mnesia, [boot]}).
 -copy_mnesia({mnesia, [copy]}).
 
 -export([ init/0
         , delete/1
         , mnesia/1
+        , benchmark/3
         ]).
 
 -record(test_tab, {key, val}).
 
 mnesia(boot) ->
-    ok = ekka_mnesia:create_table(test_tab, [
-                {type, ordered_set},
-                {ram_copies, [node()]},
-                {record_name, test_tab},
-                {attributes, record_info(fields, test_tab)}
-                ]);
+    case application:get_env(ekka, test_tabs, false) of
+        true ->
+            ok = ekka_mnesia:create_table(test_tab, [{type, ordered_set},
+                                                     {ram_copies, [node()]},
+                                                     {record_name, test_tab},
+                                                     {attributes, record_info(fields, test_tab)}
+                                                    ]);
+        false ->
+            ok
+    end;
 mnesia(copy) ->
-    %% TODO: ignoring the return type here, because some tests use CT
-    %% master as a replica, and it doesn't have proper schema
-    _ = ekka_mnesia:copy_table(test_tab, ram_copies).
+    case application:get_env(ekka, test_tabs, false) of
+        true ->
+            ok = ekka_mnesia:copy_table(test_tab, ram_copies);
+        false ->
+            ok
+    end.
 
 init() ->
     ekka_mnesia:transaction(
@@ -50,3 +60,50 @@ delete(K) ->
       fun() ->
               mnesia:delete({test_tab, K})
       end).
+
+benchmark(ResultFile,
+          #{ delays := Delays
+           , backend := Backend
+           , trans_size := NKeys
+           , max_time := MaxTime
+           }, NNodes) ->
+    NReplicas = length(mnesia:table_info(test_tab, ram_copies)),
+    case Backend of
+        ekka_mnesia ->
+            true = NReplicas =< 2;
+        mnesia ->
+            NNodes = NReplicas
+    end,
+    TransTimes =
+        [begin
+             ekka_ct:set_network_delay(Delay),
+             do_benchmark(Backend, NKeys, MaxTime)
+         end
+         || Delay <- Delays],
+    [snabbkaffe:push_stat({Backend, Delay}, NNodes, T)
+     || {Delay, T} <- lists:zip(Delays, TransTimes)],
+    ok = file:write_file( ResultFile
+                        , ekka_ct:vals_to_csv([NNodes | TransTimes])
+                        , [append]
+                        ).
+
+do_benchmark(Backend, NKeys, MaxTime) ->
+    {T, NTrans} = timer:tc(fun() ->
+                                   timer:send_after(MaxTime, complete),
+                                   loop(0, Backend, NKeys)
+                           end),
+    T / NTrans.
+
+loop(Cnt, Backend, NKeys) ->
+    receive
+        complete -> Cnt
+    after 0 ->
+            {atomic, _} = Backend:transaction(
+                            fun() ->
+                                    [begin
+                                         mnesia:read({test_tab, Key}),
+                                         mnesia:write(#test_tab{key = Key, val = Cnt})
+                                     end || Key <- lists:seq(1, NKeys)]
+                            end),
+            loop(Cnt + 1, Backend, NKeys)
+    end.
