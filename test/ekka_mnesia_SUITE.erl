@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2021 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 -compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 -record(kv_tab, {key, val}).
 
@@ -101,3 +102,80 @@ t_remove_from_cluster(_) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+t_async_cluster_smoke_test(_) ->
+    Cluster = [ {core, n1}
+              , {core, n2}
+              , {replicant, n3}
+              ],
+    Env = [ {ekka, shards, [foo]}
+          , {ekka, rlog_rpc_module, rpc}
+          ],
+    ?check_trace(
+       begin
+           Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
+           try
+               wait_shards(Nodes, [foo]),
+               {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
+               stabilize(1000), compare_table_contents(test_tab, Nodes),
+               {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
+               stabilize(1000), compare_table_contents(test_tab, Nodes),
+               Nodes
+           after
+               lists:foreach(fun slave:stop/1, Nodes)
+           end
+       end,
+       fun([N1, N2, N3], Trace) ->
+               %% Ensure that the nodes assumed designated roles:
+               ?projection_complete(node, ?of_kind(rlog_server_start, Trace), [N1, N2]),
+               ?projection_complete(node, ?of_kind(rlog_replica_start, Trace), [N3]),
+               %% Other tests
+               replicant_bootstrap_stages(N3, Trace),
+               all_batches_received(Trace)
+       end).
+
+replicant_bootstrap_stages(Node, Trace) ->
+    Transitions = [To || #{ ?snk_kind := state_change
+                          , ?snk_meta := #{node := Node, domain := [ekka, rlog, replica]}
+                          , to := To
+                          } <- Trace],
+    ?assertMatch( [disconnected, bootstrap, local_replay, normal]
+                , Transitions
+                ).
+
+all_batches_received(Trace) ->
+    ?assert(
+       ?strict_causality(
+           #{?snk_kind := rlog_realtime_op, agent := _A, seqno := _S}
+         , #{?snk_kind := K, agent := _A, seqno := _S} when K =:= rlog_replica_import_batch;
+                                                            K =:= rlog_replica_store_batch
+         , Trace)).
+
+wait_shards(Nodes, Shards) ->
+    [{ok, _} = ?block_until(#{ ?snk_kind := "Shard fully up"
+                             , shard     := Shard
+                             , node      := Node
+                             })
+     || Shard <- Shards, Node <- Nodes],
+    ok.
+
+stabilize(Timeout) ->
+    stabilize(Timeout, 10).
+
+stabilize(_, 0) ->
+    error(failed_to_stabilize);
+stabilize(Timeout, N) ->
+    case ?block_until(#{?snk_meta := [ekka, rlog|_]}, Timeout) of
+        timeout -> ok;
+        {ok, _} -> stabilize(Timeout, N - 1)
+    end.
+
+compare_table_contents(_, []) ->
+    ok;
+compare_table_contents(Table, Nodes) ->
+    [{_, Reference}|Rest] = [{Node, lists:sort(rpc:call(Node, ets, tab2list, [Table]))}
+                             || Node <- Nodes],
+    lists:foreach(
+      fun({Node, Contents}) ->
+              ?assertEqual({Node, Reference}, {Node, Contents})
+      end,
+      Rest).
