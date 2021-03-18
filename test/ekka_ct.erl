@@ -25,37 +25,78 @@ all(Suite) ->
                       string:substr(atom_to_list(F), 1, 2) == "t_"
                 ]).
 
--spec cluster([{core | replicant, Node}], [{atom(), term()}]) -> Node
-              when Node :: atom().
-cluster(ClusterSpec, Env) ->
-    %% Set common environment variables:
-    CoreNodes = [node_id(Name) || {core, Name} <- ClusterSpec],
-    Env1 = [{ekka, core_nodes, CoreNodes} | Env],
-    %% Start nodes:
-    start_core_nodes([N || {core, N} <- ClusterSpec], Env1),
-    start_replicant_nodes([N || {replicant, N} <- ClusterSpec], Env1),
-    [node_id(N) || {_, N} <- ClusterSpec].
+-type env() :: [{atom(), atom(), term()}].
 
-start_core_nodes([], _Env) ->
-    ok;
-start_core_nodes([First|Rest], Env) ->
-    Env1 = [{ekka, node_role, core} | Env],
-    N1 = start_slave(ekka, First, Env1),
-    [begin
-         Node = start_slave(ekka, Name, Env1),
-         ok = rpc:call(Node, ekka, join, [N1])
-     end
-     || Name <- Rest].
+-type start_spec() ::
+        #{ name    := atom()
+         , node    := node()
+         , join_to => node()
+         , env     := env()
+         , number  := integer()
+         }.
 
-start_replicant_nodes(Nodes, Env) ->
-    Env1 = [{ekka, node_role, replicant} | Env],
-    [start_slave(ekka, N, Env1) || N <- Nodes].
+-type node_spec() :: ekka_rlog:role() % name automatically, use default environment
+                   | {ekka_rlog:role(), env()} % name automatically
+                   | {ekka_rlog:role(), atom()} % give name, use default environment
+                   | {ekka_rlog:role(), atom(), env()}. % customize everything
 
-start_slave(NodeOrEkka, Name) ->
+%% @doc Generate cluster config with all necessary connectivity
+%% options, that should be able to run on the localhost
+-spec cluster([node_spec()], env()) -> [start_spec()].
+cluster(Specs0, CommonEnv) ->
+    Specs1 = lists:zip(Specs0, lists:seq(1, length(Specs0))),
+    Specs = expand_node_specs(Specs1, CommonEnv),
+    CoreNodes = [node_id(Name) || {{core, Name, _}, _} <- Specs],
+    %% Assign grpc ports:
+    BaseGenRpcPort = 9000,
+    GenRpcPorts = maps:from_list([{Name, {tcp, BaseGenRpcPort + Num}}
+                                  || {{_, Name, _}, Num} <- Specs]),
+    %% Set the default node of the cluster:
+    JoinTo = case CoreNodes of
+                 [First|_] -> #{join_to => First};
+                 _         -> #{}
+             end,
+    [JoinTo#{ name   => Name
+            , node   => node_id(Name)
+            , env    => [ {ekka, core_nodes, CoreNodes}
+                        , {ekka, node_role, Role}
+                        , {gen_rpc, tcp_server_port, BaseGenRpcPort + Number}
+                        , {gen_rpc, client_config_per_node, {internal, GenRpcPorts}}
+                        | Env]
+            , number => Number
+            }
+     || {{Role, Name, Env}, Number} <- Specs].
+
+start_cluster(node, Specs) ->
+    [start_slave(node, I) || I <- Specs];
+start_cluster(ekka, Specs) ->
+    start_cluster(node, Specs),
+    [start_ekka(I) || I <- Specs].
+
+teardown_cluster(Specs) ->
+    Nodes = [I || #{node := I} <- Specs],
+    [rpc:call(I, mnesia, stop, []) || I <- Nodes],
+    ok = mnesia:delete_schema(Nodes),
+    [ok = slave:stop(I) || I <- Nodes].
+
+start_slave(NodeOrEkka, #{name := Name, env := Env}) ->
+    start_slave(NodeOrEkka, Name, Env);
+start_slave(NodeOrEkka, Name) when is_atom(Name) ->
     start_slave(NodeOrEkka, Name, []).
 
+start_ekka(#{node := Node, join_to := JoinTo}) ->
+    ok = rpc:call(Node, ekka, start, []),
+    case rpc:call(Node, ekka, join, [JoinTo]) of
+        ok -> ok;
+        ignore -> ok
+    end,
+    Node.
+
 start_slave(node, Name, Env) ->
-    {ok, Node} = slave:start(host(), Name, ebin_path()),
+    CommonBeamOpts = "+S 1:1 " % We want VMs to only occupy a single core
+        "-kernel inet_dist_listen_min 3000 " % Avoid collisions with gen_rpc ports
+        "-kernel inet_dist_listen_max 3050 ",
+    {ok, Node} = slave:start(host(), Name, CommonBeamOpts ++ ebin_path()),
     %% Load apps before setting the enviroment variables to avoid
     %% overriding the environment during ekka start:
     [rpc:call(Node, application, load, [App]) || App <- [gen_rpc, ekka]],
@@ -110,3 +151,24 @@ vals_to_csv(L) ->
 
 setenv(Node, Env) ->
     [rpc:call(Node, application, set_env, [App, Key, Val]) || {App, Key, Val} <- Env].
+
+expand_node_specs(Specs, CommonEnv) ->
+    lists:map(
+      fun({Spec, Num}) ->
+              {case Spec of
+                   core ->
+                       {core, gen_node_name(Num), CommonEnv};
+                   replicant ->
+                       {replicant, gen_node_name(Num), CommonEnv};
+                   {Role, Name} when is_atom(Name) ->
+                       {Role, Name, CommonEnv};
+                   {Role, Env} when is_list(Env) ->
+                       {Role, gen_node_name(Num), CommonEnv ++ Env};
+                   {Role, Name, Env} ->
+                       {Role, Name, CommonEnv ++ Env}
+               end, Num}
+      end,
+      Specs).
+
+gen_node_name(N) ->
+    list_to_atom("n" ++ integer_to_list(N)).

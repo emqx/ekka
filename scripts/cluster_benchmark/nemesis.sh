@@ -1,4 +1,6 @@
 #!/bin/bash
+# This script runs as root, receives commands from the common test
+# suite over FIFO, and forwards them to slowdown.sh
 set -uo pipefail
 
 FIFO=/tmp/nemesis

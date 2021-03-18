@@ -104,16 +104,13 @@ t_remove_from_cluster(_) ->
 
 t_async_cluster_smoke_test(_) ->
     snabbkaffe:fix_ct_logging(),
-    Cluster = [ {core, n1}
-              , {core, n2}
-              , {replicant, n3}
-              ],
     Env = [ {ekka, shards, [foo]}
           , {ekka, rlog_rpc_module, rpc}
           ],
+    Cluster = ekka_ct:cluster([core, core, replicant], Env),
     ?check_trace(
        begin
-           Nodes = [N1, N2, N3] = ekka_ct:cluster(Cluster, Env),
+           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
            try
                wait_shards(Nodes, [foo]),
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
@@ -136,30 +133,18 @@ t_async_cluster_smoke_test(_) ->
 
 cluster_benchmark(_) ->
     snabbkaffe:fix_ct_logging(),
-    Env = [ {ekka, shards, [foo]}
-          , {ekka, rlog_rpc_module, rpc}
-          ],
-    Config = #{ n_replicas => 6
-              , trans_size => 100
-              , max_time   => 5000
-              , delays     => [2, 10, 100, 1000]
+    NReplicas = 6,
+    Config = #{ trans_size => 10
+              , max_time   => 10000
+              , delays     => [10, 100, 1000]
               },
-    MnesiaEnv = fun(_) -> [] end,
-    RlogEnv = fun(N) when N < 3 ->
-                      Env;
-                 (N) ->
-                      [ {ekka, node_role, replicant}
-                      , {ekka, core_nodes, ['n1@127.0.0.1']}
-                      | Env
-                      ]
-              end,
     ?check_trace(
        begin
-           do_cluster_benchmark(Config#{ backend  => mnesia
-                                       , make_env => MnesiaEnv
+           do_cluster_benchmark(Config#{ backend => mnesia
+                                       , cluster => [core || I <- lists:seq(1, NReplicas)]
                                        }),
            do_cluster_benchmark(Config#{ backend  => ekka_mnesia
-                                       , make_env => RlogEnv
+                                       , cluster => [core, core] ++ [replicant || I <- lists:seq(3, NReplicas)]
                                        })
        end,
        fun(_, _) ->
@@ -167,41 +152,34 @@ cluster_benchmark(_) ->
        end).
 
 do_cluster_benchmark(#{ backend    := Backend
-                      , n_replicas := NNodes
                       , trans_size := NKeys
                       , max_time   := MaxTime
                       , delays     := Delays
-                      , make_env   := MakeEnv
+                      , cluster    := ClusterSpec
                       } = Config) ->
-    First = ekka_ct:start_slave(ekka, node_name(1), MakeEnv(1)),
-    Nodes = [ekka_ct:start_slave(node, node_name(I), MakeEnv(I))
-             || I <- lists:seq(2, NNodes)],
-    Name = maps:get(name, Config, Backend),
-    ResultFile = "/tmp/" ++ atom_to_list(Name) ++ "_stats.csv",
+    Env = [ {ekka, shards, [foo]}
+          , {ekka, rlog_rpc_module, rpc}
+          ],
+    Cluster = ekka_ct:cluster(ClusterSpec, Env),
+    ekka_ct:start_cluster(node, Cluster),
+    ResultFile = "/tmp/" ++ atom_to_list(Backend) ++ "_stats.csv",
     file:write_file( ResultFile
                    , ekka_ct:vals_to_csv([n_nodes | Delays])
                    ),
-    DoIt = fun(NNodes) ->
-                   ok = rpc:call(First, ekka_transaction_gen, benchmark,
-                                 [ResultFile, Config, NNodes])
-           end,
+    [#{node := First}|_] = Cluster,
     try
-        DoIt(1),
         lists:foldl(
           fun(Node, Cnt) ->
-                  ok = rpc:call(Node, ekka, start, []),
-                  ok = rpc:call(Node, ekka, join, [First]),
+                  ekka_ct:start_ekka(Node),
                   stabilize(100),
-                  DoIt(Cnt),
+                  ok = rpc:call(First, ekka_transaction_gen, benchmark,
+                                [ResultFile, Config, Cnt]),
                   Cnt + 1
           end,
-          2,
-          Nodes)
+          1,
+          Cluster)
     after
-        AllNodes = [First|Nodes],
-        [rpc:call(I, mnesia, stop, []) || I <- AllNodes],
-        ok = mnesia:delete_schema(AllNodes),
-        [ok = slave:stop(I) || I <- AllNodes]
+        ekka_ct:teardown_cluster(Cluster)
     end.
 
 replicant_bootstrap_stages(Node, Trace) ->
@@ -250,6 +228,3 @@ compare_table_contents(Table, Nodes) ->
               ?assertEqual({Node, Reference}, {Node, Contents})
       end,
       Rest).
-
-node_name(N) ->
-    list_to_atom("n" ++ integer_to_list(N)).
