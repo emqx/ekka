@@ -62,7 +62,7 @@ start_slave(node, Name, Env) ->
     %% Disable gen_rpc listener by default:
     Env1 = [{gen_rpc, tcp_server_port, false}|Env],
     [rpc:call(Node, application, set_env, [App, Key, Val]) || {App, Key, Val} <- Env1],
-    ok = snabbkaffe:forward_trace(Node),
+    %ok = snabbkaffe:forward_trace(Node),
     Node;
 start_slave(ekka, Name, Env) ->
     Node = start_slave(node, Name, Env),
@@ -101,3 +101,9 @@ run_on(Node, Fun) ->
     %% Sending closures over erlang distribution is wrong, but for
     %% test purposes it should be ok.
     rpc:call(Node, erlang, apply, [Fun, []]).
+
+set_network_delay(N) ->
+    ok = file:write_file("/tmp/nemesis", integer_to_list(N) ++ "us\n").
+
+vals_to_csv(L) ->
+    string:join([lists:flatten(io_lib:format("~p", [N])) || N <- L], ",") ++ "\n".

@@ -21,6 +21,7 @@
 -export([ init/0
         , delete/1
         , mnesia/1
+        , benchmark/4
         ]).
 
 -record(test_tab, {key, val}).
@@ -50,3 +51,38 @@ delete(K) ->
       fun() ->
               mnesia:delete({test_tab, K})
       end).
+
+benchmark(Delays, Backend, NKeys, MaxTime) ->
+    N = length(ekka:members()),
+    TransTimes =
+        [begin
+             ekka_ct:set_network_delay(Delay),
+             do_benchmark(Backend, NKeys, MaxTime)
+         end
+         || Delay <- Delays],
+    ok = file:write_file( "/tmp/mnesia_stats.csv"
+                        , ekka_ct:vals_to_csv([N | TransTimes])
+                        , [append]
+                        ).
+
+
+do_benchmark(Backend, NKeys, MaxTime) ->
+    {T, NTrans} = timer:tc(fun() ->
+                                   timer:send_after(MaxTime, complete),
+                                   loop(0, Backend, NKeys)
+                           end),
+    T / NTrans.
+
+loop(Cnt, Backend, NKeys) ->
+    receive
+        complete -> Cnt
+    after 0 ->
+            {atomic, _} = Backend:transaction(
+                            fun() ->
+                                    [begin
+                                         mnesia:read({test_tab, Key}),
+                                         mnesia:write(#test_tab{key = Key, val = Cnt})
+                                     end || Key <- lists:seq(1, NKeys)]
+                            end),
+            loop(Cnt + 1, Backend, NKeys)
+    end.

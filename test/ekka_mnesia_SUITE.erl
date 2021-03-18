@@ -133,6 +133,53 @@ t_async_cluster_smoke_test(_) ->
                all_batches_received(Trace)
        end).
 
+cluster_bench(_) ->
+    NNodes = 8,
+    NKeys = 5,
+    MaxTime = 5000,
+    [First|Nodes] = [ ekka_ct:start_slave(ekka, list_to_atom("n" ++ integer_to_list(I)))
+                      || I <- lists:seq(1, NNodes)],
+    Delays = [2, 10, 100, 1000],
+    snabbkaffe:fix_ct_logging(),
+    file:write_file("/tmp/mnesia_stats.csv", ekka_ct:vals_to_csv([n_nodes | Delays])),
+    try
+        ?check_trace(
+           begin
+               ok = rpc:call(First, ekka_transaction_gen, benchmark,
+                             [Delays, mnesia, NKeys, MaxTime]),
+               lists:map(
+                 fun(Node) ->
+                         ok = rpc:call(Node, ekka, join, [First]),
+                         ok = rpc:call(First, ekka_transaction_gen, benchmark,
+                                       [Delays, mnesia, NKeys, MaxTime])
+                 end,
+                 Nodes)
+           end,
+           fun(_, _) ->
+                   snabbkaffe:analyze_statistics()
+           end)
+    after
+        [slave:stop(I) || I <- Nodes]
+    end.
+
+do_cluster_benchmark(Backend, StartNode, First, Nodes) ->
+    ?check_trace(
+       begin
+           ok = rpc:call(First, ekka_transaction_gen, benchmark,
+                         [Delays, mnesia, NKeys, MaxTime]),
+           lists:map(
+             fun(Node) ->
+                     ok = rpc:call(Node, ekka, join, [First]),
+                     ok = rpc:call(First, ekka_transaction_gen, benchmark,
+                                   [Delays, Backend, NKeys, MaxTime])
+             end,
+             Nodes)
+       end,
+       fun(_, _) ->
+               snabbkaffe:analyze_statistics()
+       end).
+
+
 replicant_bootstrap_stages(Node, Trace) ->
     Transitions = [To || #{ ?snk_kind := state_change
                           , ?snk_meta := #{node := Node, domain := [ekka, rlog, replica]}
