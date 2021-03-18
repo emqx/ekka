@@ -103,6 +103,7 @@ t_remove_from_cluster(_) ->
     end.
 
 t_async_cluster_smoke_test(_) ->
+    snabbkaffe:fix_ct_logging(),
     Cluster = [ {core, n1}
               , {core, n2}
               , {replicant, n3}
@@ -133,52 +134,75 @@ t_async_cluster_smoke_test(_) ->
                all_batches_received(Trace)
        end).
 
-cluster_bench(_) ->
-    NNodes = 8,
-    NKeys = 5,
-    MaxTime = 5000,
-    [First|Nodes] = [ ekka_ct:start_slave(ekka, list_to_atom("n" ++ integer_to_list(I)))
-                      || I <- lists:seq(1, NNodes)],
-    Delays = [2, 10, 100, 1000],
+cluster_benchmark(_) ->
     snabbkaffe:fix_ct_logging(),
-    file:write_file("/tmp/mnesia_stats.csv", ekka_ct:vals_to_csv([n_nodes | Delays])),
-    try
-        ?check_trace(
-           begin
-               ok = rpc:call(First, ekka_transaction_gen, benchmark,
-                             [Delays, mnesia, NKeys, MaxTime]),
-               lists:map(
-                 fun(Node) ->
-                         ok = rpc:call(Node, ekka, join, [First]),
-                         ok = rpc:call(First, ekka_transaction_gen, benchmark,
-                                       [Delays, mnesia, NKeys, MaxTime])
-                 end,
-                 Nodes)
-           end,
-           fun(_, _) ->
-                   snabbkaffe:analyze_statistics()
-           end)
-    after
-        [slave:stop(I) || I <- Nodes]
-    end.
-
-do_cluster_benchmark(Backend, StartNode, First, Nodes) ->
+    Env = [ {ekka, shards, [foo]}
+          , {ekka, rlog_rpc_module, rpc}
+          ],
+    Config = #{ n_replicas => 6
+              , trans_size => 100
+              , max_time   => 5000
+              , delays     => [2, 10, 100, 1000]
+              },
+    MnesiaEnv = fun(_) -> [] end,
+    RlogEnv = fun(N) when N < 3 ->
+                      Env;
+                 (N) ->
+                      [ {ekka, node_role, replicant}
+                      , {ekka, core_nodes, ['n1@127.0.0.1']}
+                      | Env
+                      ]
+              end,
     ?check_trace(
        begin
-           ok = rpc:call(First, ekka_transaction_gen, benchmark,
-                         [Delays, mnesia, NKeys, MaxTime]),
-           lists:map(
-             fun(Node) ->
-                     ok = rpc:call(Node, ekka, join, [First]),
-                     ok = rpc:call(First, ekka_transaction_gen, benchmark,
-                                   [Delays, Backend, NKeys, MaxTime])
-             end,
-             Nodes)
+           do_cluster_benchmark(Config#{ backend  => mnesia
+                                       , make_env => MnesiaEnv
+                                       }),
+           do_cluster_benchmark(Config#{ backend  => ekka_mnesia
+                                       , make_env => RlogEnv
+                                       })
        end,
        fun(_, _) ->
                snabbkaffe:analyze_statistics()
        end).
 
+do_cluster_benchmark(#{ backend    := Backend
+                      , n_replicas := NNodes
+                      , trans_size := NKeys
+                      , max_time   := MaxTime
+                      , delays     := Delays
+                      , make_env   := MakeEnv
+                      } = Config) ->
+    First = ekka_ct:start_slave(ekka, node_name(1), MakeEnv(1)),
+    Nodes = [ekka_ct:start_slave(node, node_name(I), MakeEnv(I))
+             || I <- lists:seq(2, NNodes)],
+    Name = maps:get(name, Config, Backend),
+    ResultFile = "/tmp/" ++ atom_to_list(Name) ++ "_stats.csv",
+    file:write_file( ResultFile
+                   , ekka_ct:vals_to_csv([n_nodes | Delays])
+                   ),
+    DoIt = fun(NNodes) ->
+                   ok = rpc:call(First, ekka_transaction_gen, benchmark,
+                                 [ResultFile, Config, NNodes])
+           end,
+    try
+        DoIt(1),
+        lists:foldl(
+          fun(Node, Cnt) ->
+                  ok = rpc:call(Node, ekka, start, []),
+                  ok = rpc:call(Node, ekka, join, [First]),
+                  stabilize(100),
+                  DoIt(Cnt),
+                  Cnt + 1
+          end,
+          2,
+          Nodes)
+    after
+        AllNodes = [First|Nodes],
+        [rpc:call(I, mnesia, stop, []) || I <- AllNodes],
+        ok = mnesia:delete_schema(AllNodes),
+        [ok = slave:stop(I) || I <- AllNodes]
+    end.
 
 replicant_bootstrap_stages(Node, Trace) ->
     Transitions = [To || #{ ?snk_kind := state_change
@@ -226,3 +250,6 @@ compare_table_contents(Table, Nodes) ->
               ?assertEqual({Node, Reference}, {Node, Contents})
       end,
       Rest).
+
+node_name(N) ->
+    list_to_atom("n" ++ integer_to_list(N)).

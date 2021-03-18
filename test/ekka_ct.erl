@@ -61,8 +61,8 @@ start_slave(node, Name, Env) ->
     [rpc:call(Node, application, load, [App]) || App <- [gen_rpc, ekka]],
     %% Disable gen_rpc listener by default:
     Env1 = [{gen_rpc, tcp_server_port, false}|Env],
-    [rpc:call(Node, application, set_env, [App, Key, Val]) || {App, Key, Val} <- Env1],
-    %ok = snabbkaffe:forward_trace(Node),
+    setenv(Node, Env1),
+    ok = snabbkaffe:forward_trace(Node),
     Node;
 start_slave(ekka, Name, Env) ->
     Node = start_slave(node, Name, Env),
@@ -107,3 +107,6 @@ set_network_delay(N) ->
 
 vals_to_csv(L) ->
     string:join([lists:flatten(io_lib:format("~p", [N])) || N <- L], ",") ++ "\n".
+
+setenv(Node, Env) ->
+    [rpc:call(Node, application, set_env, [App, Key, Val]) || {App, Key, Val} <- Env].

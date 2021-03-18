@@ -15,13 +15,15 @@
 %%--------------------------------------------------------------------
 -module(ekka_transaction_gen).
 
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
+
 -boot_mnesia({mnesia, [boot]}).
 -copy_mnesia({mnesia, [copy]}).
 
 -export([ init/0
         , delete/1
         , mnesia/1
-        , benchmark/4
+        , benchmark/3
         ]).
 
 -record(test_tab, {key, val}).
@@ -36,7 +38,7 @@ mnesia(boot) ->
 mnesia(copy) ->
     %% TODO: ignoring the return type here, because some tests use CT
     %% master as a replica, and it doesn't have proper schema
-    _ = ekka_mnesia:copy_table(test_tab, ram_copies).
+    ok = ekka_mnesia:copy_table(test_tab, ram_copies).
 
 init() ->
     ekka_mnesia:transaction(
@@ -52,16 +54,27 @@ delete(K) ->
               mnesia:delete({test_tab, K})
       end).
 
-benchmark(Delays, Backend, NKeys, MaxTime) ->
-    N = length(ekka:members()),
+benchmark(ResultFile,
+          #{ delays := Delays
+           , backend := Backend
+           , trans_size := NKeys
+           , max_time := MaxTime
+           }, NNodes) ->
+    NReplicas = length(mnesia:table_info(test_tab, ram_copies)),
+    case Backend of
+        ekka_mnesia ->
+            true = NReplicas =< 2;
+        mnesia ->
+            NNodes = NReplicas
+    end,
     TransTimes =
         [begin
              ekka_ct:set_network_delay(Delay),
              do_benchmark(Backend, NKeys, MaxTime)
          end
          || Delay <- Delays],
-    ok = file:write_file( "/tmp/mnesia_stats.csv"
-                        , ekka_ct:vals_to_csv([N | TransTimes])
+    ok = file:write_file( ResultFile
+                        , ekka_ct:vals_to_csv([NNodes | TransTimes])
                         , [append]
                         ).
 
