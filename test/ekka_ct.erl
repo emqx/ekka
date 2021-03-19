@@ -68,7 +68,9 @@ cluster(Specs0, CommonEnv) ->
      || {{Role, Name, Env}, Number} <- Specs].
 
 start_cluster(node, Specs) ->
-    [start_slave(node, I) || I <- Specs];
+    Nodes = [start_slave(node, I) || I <- Specs],
+    mnesia:delete_schema(Nodes),
+    Nodes;
 start_cluster(ekka, Specs) ->
     start_cluster(node, Specs),
     [start_ekka(I) || I <- Specs].
