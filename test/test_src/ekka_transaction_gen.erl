@@ -29,16 +29,23 @@
 -record(test_tab, {key, val}).
 
 mnesia(boot) ->
-    ok = ekka_mnesia:create_table(test_tab, [
-                {type, ordered_set},
-                {ram_copies, [node()]},
-                {record_name, test_tab},
-                {attributes, record_info(fields, test_tab)}
-                ]);
+    case application:get_env(ekka, test_tabs, false) of
+        true ->
+            ok = ekka_mnesia:create_table(test_tab, [{type, ordered_set},
+                                                     {ram_copies, [node()]},
+                                                     {record_name, test_tab},
+                                                     {attributes, record_info(fields, test_tab)}
+                                                    ]);
+        false ->
+            ok
+    end;
 mnesia(copy) ->
-    %% TODO: ignoring the return type here, because some tests use CT
-    %% master as a replica, and it doesn't have proper schema
-    ok = ekka_mnesia:copy_table(test_tab, ram_copies).
+    case application:get_env(ekka, test_tabs, false) of
+        true ->
+            ok = ekka_mnesia:copy_table(test_tab, ram_copies);
+        false ->
+            ok
+    end.
 
 init() ->
     ekka_mnesia:transaction(

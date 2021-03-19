@@ -49,7 +49,7 @@ cluster(Specs0, CommonEnv) ->
     CoreNodes = [node_id(Name) || {{core, Name, _}, _} <- Specs],
     %% Assign grpc ports:
     BaseGenRpcPort = 9000,
-    GenRpcPorts = maps:from_list([{Name, {tcp, BaseGenRpcPort + Num}}
+    GenRpcPorts = maps:from_list([{node_id(Name), {tcp, BaseGenRpcPort + Num}}
                                   || {{_, Name, _}, Num} <- Specs]),
     %% Set the default node of the cluster:
     JoinTo = case CoreNodes of
@@ -76,7 +76,7 @@ start_cluster(ekka, Specs) ->
 teardown_cluster(Specs) ->
     Nodes = [I || #{node := I} <- Specs],
     [rpc:call(I, mnesia, stop, []) || I <- Nodes],
-    ok = mnesia:delete_schema(Nodes),
+    mnesia:delete_schema(Nodes),
     [ok = slave:stop(I) || I <- Nodes].
 
 start_slave(NodeOrEkka, #{name := Name, env := Env}) ->
@@ -96,7 +96,7 @@ start_slave(node, Name, Env) ->
     CommonBeamOpts = "+S 1:1 " % We want VMs to only occupy a single core
         "-kernel inet_dist_listen_min 3000 " % Avoid collisions with gen_rpc ports
         "-kernel inet_dist_listen_max 3050 ",
-    {ok, Node} = slave:start(host(), Name, CommonBeamOpts ++ ebin_path()),
+    {ok, Node} = slave:start_link(host(), Name, CommonBeamOpts ++ ebin_path()),
     %% Load apps before setting the enviroment variables to avoid
     %% overriding the environment during ekka start:
     [rpc:call(Node, application, load, [App]) || App <- [gen_rpc, ekka]],

@@ -102,16 +102,16 @@ t_remove_from_cluster(_) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
-t_async_cluster_smoke_test(_) ->
+t_rlog_smoke_test(_) ->
     snabbkaffe:fix_ct_logging(),
     Env = [ {ekka, shards, [foo]}
-          , {ekka, rlog_rpc_module, rpc}
+          , {ekka, test_tabs, true}
           ],
     Cluster = ekka_ct:cluster([core, core, replicant], Env),
     ?check_trace(
        begin
-           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
            try
+               Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
                wait_shards(Nodes, [foo]),
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
@@ -119,7 +119,7 @@ t_async_cluster_smoke_test(_) ->
                stabilize(1000), compare_table_contents(test_tab, Nodes),
                Nodes
            after
-               lists:foreach(fun slave:stop/1, Nodes)
+               ekka_ct:teardown_cluster(Cluster)
            end
        end,
        fun([N1, N2, N3], Trace) ->
@@ -135,7 +135,7 @@ cluster_benchmark(_) ->
     snabbkaffe:fix_ct_logging(),
     NReplicas = 6,
     Config = #{ trans_size => 10
-              , max_time   => 10000
+              , max_time   => 15000
               , delays     => [10, 100, 1000]
               },
     ?check_trace(
@@ -159,15 +159,16 @@ do_cluster_benchmark(#{ backend    := Backend
                       } = Config) ->
     Env = [ {ekka, shards, [foo]}
           , {ekka, rlog_rpc_module, rpc}
+          , {ekka, test_tabs, true}
           ],
     Cluster = ekka_ct:cluster(ClusterSpec, Env),
-    ekka_ct:start_cluster(node, Cluster),
     ResultFile = "/tmp/" ++ atom_to_list(Backend) ++ "_stats.csv",
     file:write_file( ResultFile
                    , ekka_ct:vals_to_csv([n_nodes | Delays])
                    ),
     [#{node := First}|_] = Cluster,
     try
+        ekka_ct:start_cluster(node, Cluster),
         lists:foldl(
           fun(Node, Cnt) ->
                   ekka_ct:start_ekka(Node),
