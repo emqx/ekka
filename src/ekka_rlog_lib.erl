@@ -22,6 +22,9 @@
         , import_batch/2
         , rpc_call/4
         , rpc_cast/4
+        , load_shard_config/0
+        , read_shard_config/0
+        , make_shard_match_spec/1
         %% , local_rpc_call/4
         ]).
 
@@ -37,7 +40,12 @@
              , rlog/0
              ]).
 
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 -include("ekka_rlog.hrl").
+
+%%================================================================================
+%% Type declarations
+%%================================================================================
 
 -type ts() :: integer().
 -type node_id() :: integer().
@@ -61,6 +69,10 @@
 
 -type subscriber() :: {node(), pid()}.
 
+%%================================================================================
+%% RLOG key creation
+%%================================================================================
+
 %% Log key should be globally unique.
 %%
 %% it is a tuple of a timestamp (ts) and the node id (node_id),
@@ -76,22 +88,14 @@ make_key_in_past(Dt) ->
     {TS, Node} = make_key(),
     {TS - Dt, Node}.
 
+%%================================================================================
+%% Transaction import
+%%================================================================================
+
 %% @doc Import transaction ops to the local database
 -spec import_batch(transaction | dirty, [tx()]) -> ok.
 import_batch(ImportType, Batch) ->
     lists:foreach(fun(Tx) -> import_transaction(ImportType, Tx) end, Batch).
-
-%% @doc Do an RPC call
--spec rpc_call(node(), module(), atom(), list()) -> term().
-rpc_call(Node, Module, Function, Args) ->
-    Mod = persistent_term:get(ekka_rlog_rpc_mod, gen_rpc),
-    apply(Mod, call, [Node, Module, Function, Args]).
-
-%% @doc Do an RPC cast
--spec rpc_cast(node(), module(), atom(), list()) -> term().
-rpc_cast(Node, Module, Function, Args) ->
-    Mod = persistent_term:get(ekka_rlog_rpc_mod, gen_rpc),
-    apply(Mod, cast, [Node, Module, Function, Args]).
 
 %% %% @doc Do a local RPC call, used for testing
 %% -spec local_rpc_call(node(), module(), atom(), list()) -> term().
@@ -122,3 +126,58 @@ import_op(Op) ->
 -spec import_op_dirty(op()) -> ok.
 import_op_dirty({{Tab, _K}, Record, write}) ->
     mnesia:dirty_write(Tab, Record).
+
+%%================================================================================
+%% RPC
+%%================================================================================
+
+%% @doc Do an RPC call
+-spec rpc_call(node(), module(), atom(), list()) -> term().
+rpc_call(Node, Module, Function, Args) ->
+    Mod = persistent_term:get({ekka, rlog_rpc_mod}, gen_rpc),
+    apply(Mod, call, [Node, Module, Function, Args]).
+
+%% @doc Do an RPC cast
+-spec rpc_cast(node(), module(), atom(), list()) -> term().
+rpc_cast(Node, Module, Function, Args) ->
+    Mod = persistent_term:get({ekka, rlog_rpc_mod}, gen_rpc),
+    apply(Mod, cast, [Node, Module, Function, Args]).
+
+%%================================================================================
+%% Shard configuration
+%%================================================================================
+
+-spec load_shard_config() -> ok.
+load_shard_config() ->
+    Raw = read_shard_config(),
+    Shards = proplists:get_keys(Raw),
+    ok = persistent_term:put({ekka, shards}, Shards),
+    lists:foreach(fun({Shard, Tables}) ->
+                          Config = #{ tables => Tables
+                                    , match_spec => make_shard_match_spec(Tables)
+                                    },
+                          ?tp(notice, "Setting RLOG shard config",
+                              #{ shard => Shard
+                               , tables => Tables
+                               }),
+                          ok = persistent_term:put({ekka_shard, Shard}, Config)
+                  end,
+                  Raw).
+
+-spec read_shard_config() -> [{ekka_rlog:shard(), [table()]}].
+read_shard_config() ->
+    L = lists:flatmap( fun({_App, _Module, Attrs}) ->
+                               Attrs
+                       end
+                     , ekka_boot:all_module_attributes(rlog_shard)
+                     ),
+    Shards = proplists:get_keys(L),
+    [{Shard, lists:usort(proplists:get_all_values(Shard, L))}
+     || Shard <- Shards].
+
+-spec make_shard_match_spec([ekka_rlog_lib:table()]) -> ets:match_spec().
+make_shard_match_spec(Tables) ->
+    [{ {{Table, '_'}, '_', '_'}
+     , []
+     , ['$_']
+     } || Table <- Tables].

@@ -17,8 +17,10 @@
 %% API and management functions for asynchronous Mnesia replication
 -module(ekka_rlog).
 
--export([ transaction/2
+-export([ init/0
+        , transaction/2
         , shards/0
+        , shard_config/1
         , core_nodes/0
         , role/0
         , node_id/0
@@ -28,6 +30,7 @@
 -export_type([ shard/0
              , func/1
              , role/0
+             , shard_config/0
              ]).
 
 -include("ekka_rlog.hrl").
@@ -40,6 +43,14 @@
 
 -type func(A) :: fun((...) -> A).
 
+
+-type shard_config() :: #{ tables := [ekka_rlog_lib:table()]
+                         , match_spec := ets:match_spec()
+                         }.
+
+init() ->
+    setup_persistent_terms().
+
 %% @doc Perform a transaction and log changes.
 %% the logged changes are to be replicated to other nodes.
 -spec transaction(func(A), [term()]) -> ekka_mnesia:t_result(A).
@@ -49,10 +60,13 @@ transaction(F, Args) -> do(transaction, F, Args).
 node_id() ->
     0.
 
-%% TODO: persistent term
 -spec shards() -> [shard()].
 shards() ->
-    application:get_env(ekka, shards, []).
+    persistent_term:get({ekka, shards}, []).
+
+-spec shard_config(shard()) -> shard_config().
+shard_config(Shard) ->
+    persistent_term:get({ekka_shard, Shard}, []).
 
 %% TODO: persistent term
 -spec role() -> role().
@@ -70,7 +84,6 @@ subscribe(Shard, RemoteNode, Subscriber, Checkpoint) ->
     MyNode = node(),
     Args = [Shard, {MyNode, Subscriber}, Checkpoint],
     ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe, Args).
-
 
 do(Type, F, Args) ->
     Shards = ekka_rlog:shards(),
@@ -90,11 +103,7 @@ do(Type, F, Args) ->
 dig_ops_for_shard(Key, Shard) ->
     case mnesia:get_activity_id() of
       {_, _, #tidstore{store = Ets}} ->
-        %% TODO: get filter from config
-        MS = ets:fun2ms(fun(A = {{T, _}, _, _}) when T =:= test_tab;
-                                                     T =:= foobar ->
-                                A
-                        end),
+        #{match_spec := MS} = ekka_rlog:shard_config(Shard),
         Ops = ets:select(Ets, MS),
         mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write)
     end.
@@ -112,3 +121,15 @@ dig_ops_for_shard(Key, Shard) ->
 %% we can only hope that this is not an anonymous function
 %% add the function is idempotent.
 %% args_as_op(F, Args) -> [{F, Args, apply}].
+
+-spec setup_persistent_terms() -> ok.
+setup_persistent_terms() ->
+    copy_from_env(rlog_rpc_module),
+    ekka_rlog_lib:load_shard_config().
+
+-spec copy_from_env(atom()) -> ok.
+copy_from_env(Key) ->
+    case application:get_env(ekka, Key) of
+        {ok, Val} -> persistent_term:put({ekka, Key}, Val);
+        undefined -> ok
+    end.

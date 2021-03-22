@@ -1,5 +1,6 @@
 #!/bin/bash
 # Run full cluster benchmark
+set -eu pipefail
 
 # Perform OS check (we need `netem' and `iptables' features to inject
 # faults/delays into the system, those are Linux-only):
@@ -11,8 +12,8 @@
 export SCRIPT_DIR=$(dirname $0)
 
 # Start nemesis process:
-echo "Root permissions are needed to start nemeesis process"
-sudo ${SCRIPT_DIR}/nemesis.sh &
+echo "Root permissions are needed to start nemesis process"
+sudo -b ${SCRIPT_DIR}/nemesis.sh
 
 # Run benchmark:
 rebar3 do ct --name ct@127.0.0.1 --suite ekka_mnesia_SUITE --case cluster_benchmark --readable=true
