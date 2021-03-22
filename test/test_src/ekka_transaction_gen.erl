@@ -80,11 +80,12 @@ benchmark(ResultFile,
              do_benchmark(Backend, NKeys, MaxTime)
          end
          || Delay <- Delays],
+    [snabbkaffe:push_stat({Backend, Delay}, NNodes, T)
+     || {Delay, T} <- lists:zip(Delays, TransTimes)],
     ok = file:write_file( ResultFile
                         , ekka_ct:vals_to_csv([NNodes | TransTimes])
                         , [append]
                         ).
-
 
 do_benchmark(Backend, NKeys, MaxTime) ->
     {T, NTrans} = timer:tc(fun() ->

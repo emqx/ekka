@@ -1,4 +1,6 @@
 #!/usr/bin/env -S gnuplot -persist
+# GNUplot script to render plots of ekka_mnesia performance
+
 set datafile separator ','
 
 set ylabel "Transaction time (μs)"

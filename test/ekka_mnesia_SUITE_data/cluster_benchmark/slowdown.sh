@@ -30,8 +30,8 @@ JITTER=$2
 shift 2
 
 # Clean up:
-iptables -t mangle -F OUTPUT
-tc qdisc del dev lo root
+iptables -t mangle -F OUTPUT || true
+tc qdisc del dev lo root || true
 
 # Shape packets marked as 12
 MARK=12
