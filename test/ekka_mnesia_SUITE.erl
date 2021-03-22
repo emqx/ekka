@@ -104,15 +104,14 @@ t_remove_from_cluster(_) ->
 
 t_rlog_smoke_test(_) ->
     snabbkaffe:fix_ct_logging(),
-    Env = [ {ekka, shards, [foo]}
-          , {ekka, test_tabs, true}
+    Env = [ {ekka, test_tabs, true}
           ],
     Cluster = ekka_ct:cluster([core, core, replicant], Env),
     ?check_trace(
        begin
            try
                Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
-               wait_shards(Nodes, [foo]),
+               wait_shards(Nodes, [test_shard]),
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
@@ -157,8 +156,7 @@ do_cluster_benchmark(#{ backend    := Backend
                       , delays     := Delays
                       , cluster    := ClusterSpec
                       } = Config) ->
-    Env = [ {ekka, shards, [foo]}
-          , {ekka, rlog_rpc_module, rpc}
+    Env = [ {ekka, rlog_rpc_module, rpc}
           , {ekka, test_tabs, true}
           ],
     Cluster = ekka_ct:cluster(ClusterSpec, Env),

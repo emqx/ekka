@@ -19,6 +19,7 @@
 
 -boot_mnesia({mnesia, [boot]}).
 -copy_mnesia({mnesia, [copy]}).
+-rlog_shard({test_shard, test_tab}).
 
 -export([ init/0
         , delete/1

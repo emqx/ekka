@@ -26,7 +26,6 @@
 %%================================================================================
 
 start_link() ->
-    setup_persistent_terms(),
     Shards = ekka_rlog:shards(),
     Role = ekka_rlog:role(),
     supervisor:start_link(?MODULE, [Role, Shards]).
@@ -71,14 +70,3 @@ replicant_worker(Shard) ->
      , shutdown => 5000
      , type => worker
      }.
-
--spec setup_persistent_terms() -> ok.
-setup_persistent_terms() ->
-    copy_from_env(rlog_rpc_module, ekka_rlog_rpc_mod).
-
--spec copy_from_env(atom(), term()) -> ok.
-copy_from_env(Env, PersistentTermKey) ->
-    case application:get_env(ekka, Env) of
-        {ok, Val} -> persistent_term:put(PersistentTermKey, Val);
-        undefined -> ok
-    end.

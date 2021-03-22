@@ -73,6 +73,7 @@ start() ->
     ensure_ok(ensure_data_dir()),
     ensure_ok(init_schema()),
     ok = mnesia:start(),
+    ok = ekka_rlog:init(),
     init_tables(),
     wait_for(tables).
 

@@ -4,13 +4,20 @@
 set -uo pipefail
 
 FIFO=/tmp/nemesis
-rm $FIFO
+
+if [ -p $FIFO ]; then
+    echo "Nemesis is already running"
+    exit 0
+fi
+
+trap "rm -f $FIFO" EXIT
+
 mkfifo $FIFO
 chmod 666 $FIFO
 
 while true; do
-    if read line; then
+    if read line < $FIFO; then
         echo "Received command ${line}"
         $(dirname $0)/slowdown.sh $line 1 epmd
     fi
-done < $FIFO
+done
