@@ -30,6 +30,7 @@
 -export_type([ shard/0
              , func/1
              , role/0
+             , shard_config/0
              ]).
 
 -include("ekka_rlog.hrl").
@@ -41,6 +42,11 @@
 -type role() :: core | replicant.
 
 -type func(A) :: fun((...) -> A).
+
+
+-type shard_config() :: #{ tables := [ekka_rlog_lib:table()]
+                         , match_spec := ets:match_spec()
+                         }.
 
 init() ->
     setup_persistent_terms().
@@ -58,7 +64,7 @@ node_id() ->
 shards() ->
     persistent_term:get({ekka, shards}, []).
 
--spec shard_config(shard()) -> ekka_rlog_lib:shard_config().
+-spec shard_config(shard()) -> shard_config().
 shard_config(Shard) ->
     persistent_term:get({ekka_shard, Shard}, []).
 

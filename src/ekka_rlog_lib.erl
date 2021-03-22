@@ -69,10 +69,6 @@
 
 -type subscriber() :: {node(), pid()}.
 
--type shard_config() :: #{ tables := [table()]
-                         , match_spec := ets:match_spec()
-                         }.
-
 %%================================================================================
 %% RLOG key creation
 %%================================================================================
@@ -179,7 +175,7 @@ read_shard_config() ->
     [{Shard, lists:usort(proplists:get_all_values(Shard, L))}
      || Shard <- Shards].
 
--spec make_shard_match_spec([table()]) -> ets:match_spec().
+-spec make_shard_match_spec([ekka_rlog_lib:table()]) -> ets:match_spec().
 make_shard_match_spec(Tables) ->
     [{ {{Table, '_'}, '_', '_'}
      , []
