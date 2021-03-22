@@ -79,7 +79,8 @@ teardown_cluster(Specs) ->
     Nodes = [I || #{node := I} <- Specs],
     [rpc:call(I, mnesia, stop, []) || I <- Nodes],
     mnesia:delete_schema(Nodes),
-    [ok = slave:stop(I) || I <- Nodes].
+    [ok = slave:stop(I) || I <- Nodes],
+    ok.
 
 start_slave(NodeOrEkka, #{name := Name, env := Env}) ->
     start_slave(NodeOrEkka, Name, Env);
@@ -126,6 +127,7 @@ wait_running(Node, Timeout) ->
     end.
 
 stop_slave(Node) ->
+    mnesia:delete_schema([Node]),
     slave:stop(Node).
 
 host() ->

@@ -30,23 +30,13 @@
 -record(test_tab, {key, val}).
 
 mnesia(boot) ->
-    case application:get_env(ekka, test_tabs, false) of
-        true ->
-            ok = ekka_mnesia:create_table(test_tab, [{type, ordered_set},
-                                                     {ram_copies, [node()]},
-                                                     {record_name, test_tab},
-                                                     {attributes, record_info(fields, test_tab)}
-                                                    ]);
-        false ->
-            ok
-    end;
+    ok = ekka_mnesia:create_table(test_tab, [{type, ordered_set},
+                                             {ram_copies, [node()]},
+                                             {record_name, test_tab},
+                                             {attributes, record_info(fields, test_tab)}
+                                            ]);
 mnesia(copy) ->
-    case application:get_env(ekka, test_tabs, false) of
-        true ->
-            ok = ekka_mnesia:copy_table(test_tab, ram_copies);
-        false ->
-            ok
-    end.
+    ok = ekka_mnesia:copy_table(test_tab, ram_copies).
 
 init() ->
     ekka_mnesia:transaction(
