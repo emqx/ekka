@@ -127,6 +127,7 @@ wait_running(Node, Timeout) ->
     end.
 
 stop_slave(Node) ->
+    mnesia:delete_schema([Node]),
     slave:stop(Node).
 
 host() ->

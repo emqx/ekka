@@ -22,6 +22,7 @@
 -include("ekka.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 -define(CONTENT_TYPE, "application/x-www-form-urlencoded").
 
 all() -> ekka_ct:all(?MODULE).
@@ -35,7 +36,8 @@ init_per_suite(Config) ->
     AppConfig = filename:join([DataDir, "ekka.config"]),
     {ok, Envs} = file:consult(AppConfig),
     ok = lists:foreach(fun set_env/1, Envs),
-    application:ensure_all_started(ekka),
+    application:load(ekka),
+    ekka:start(),
     Config.
 
 set_env({Par, Val}) ->
@@ -94,17 +96,18 @@ t_join_leave_cluster(_Config) ->
         ok = rpc:call(N2, ekka, join, [N0]),
         [N0, N1, N2] = ekka:info(running_nodes),
         %% Restart N1
-        ok = ekka_ct:stop_slave(N1),
-        ok = timer:sleep(100),
-        [N0, N2] = ekka:info(running_nodes),
+        ok = slave:stop(N1),
+        ?retry(100, 100,
+               [N0, N2] = ekka:info(running_nodes)),
         [N1] = ekka:info(stopped_nodes),
         N1 = ekka_ct:start_slave(ekka, n1),
-        ok = timer:sleep(100),
-        [N0, N1, N2] = ekka:info(running_nodes),
+        ?retry(100, 100,
+               [N0, N1, N2] = ekka:info(running_nodes)),
         %% Force Leave
         ok = ekka:force_leave(N1),
         ok = ekka:force_leave(N2),
-        [N0] = ekka:info(running_nodes)
+        ?retry(100, 100,
+               [N0] = ekka:info(running_nodes))
     after
         ok = ekka_ct:stop_slave(N1),
         ok = ekka_ct:stop_slave(N2),
@@ -162,7 +165,8 @@ t_nodelist(_) ->
     ok = rpc:call(N1, ekka, join, [N0]),
     [N0, N1] = lists:sort(ekka:nodelist(up)),
     ok = rpc:call(N1, ekka, leave, []),
-    [N0] = lists:sort(ekka:nodelist()),
+    ?retry(100, 100,
+           [N0] = lists:sort(ekka:nodelist())),
     ok = ekka_ct:stop_slave(N1).
 
 %% -spec(local_member() -> member()).
