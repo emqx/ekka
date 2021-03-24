@@ -102,15 +102,34 @@ t_remove_from_cluster(_) ->
         ok = ekka_ct:teardown_cluster(Cluster)
     end.
 
+%% This test runs should walk the replicant state machine through all
+%% stages of replications, so it can be used to check if anything is
+%% _obviously_ broken.
 t_rlog_smoke_test(_) ->
     snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, core, replicant], []),
     ?check_trace(
        begin
+           %% Delay replica state transitions to make sure
+           %% transactions are being produced while it is in every
+           %% possible state:
+           ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 5}
+                          , #{?snk_kind := state_change, to := disconnected}
+                          ),
+           ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 10}
+                          , #{?snk_kind := state_change, to := local_replay}
+                          ),
+           ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 15}
+                          , #{?snk_kind := state_change, to := normal}
+                          ),
            try
                Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
-               wait_shards(Nodes, [test_shard]),
+               wait_shards([N1, N2], [test_shard]),
+               %% Generate some transactions:
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
+               ok = rpc:call(N1, ekka_transaction_gen, counter, [42, 20]),
+               %% Wait the replica
+               ?block_until(#{?snk_kind := state_change, to := normal}, infinity),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
                stabilize(1000), compare_table_contents(test_tab, Nodes),

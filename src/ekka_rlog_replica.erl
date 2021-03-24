@@ -41,6 +41,10 @@
                | ?normal
                | ?disconnected.
 
+%% Timeouts:
+-define(local_replay_loop, local_replay_loop).
+-define(reconnect, reconnect).
+
 -record(d,
         { shard                        :: ekka_rlog:shard()
         , remote_core_node = undefined :: node() | undefined
@@ -48,6 +52,7 @@
         , tmp_worker       = undefined :: pid() | undefined
         , checkpoint       = undefined :: ekka_rlog_server:checkpoint()
         , next_batch_seqno = 0         :: integer()
+        , replayq                      :: replayq:q() | undefined
         }).
 
 -type data() :: #d{}.
@@ -94,8 +99,8 @@ handle_event(cast, {tlog_batch, Batch}, State, D) ->
 %% Events specific to `disconnected' state:
 handle_event(enter, OldState, ?disconnected, D) ->
     handle_state_trans(OldState, ?disconnected, D),
-    {keep_state_and_data, [{timeout, 0, reconnect}]};
-handle_event(timeout, reconnect, ?disconnected, D) ->
+    {keep_state_and_data, [{timeout, 0, ?reconnect}]};
+handle_event(timeout, ?reconnect, ?disconnected, D) ->
     handle_reconnect(D);
 %% Events specific to `bootstrap' state:
 handle_event(enter, OldState, ?bootstrap, D) ->
@@ -107,6 +112,8 @@ handle_event(info, {bootstrap_complete, Pid, Checkpoint}, ?bootstrap, D = #d{tmp
 handle_event(enter, OldState, ?local_replay, D) ->
     handle_state_trans(OldState, ?local_replay, D),
     initiate_local_replay(D);
+handle_event(timeout, ?local_replay_loop, ?local_replay, D) ->
+    replay_local(D);
 handle_event(info, {local_replay_complete, Worker}, ?local_replay, D = #d{tmp_worker = Worker}) ->
     complete_initialization(D);
 %% Events specific to `normal' state:
@@ -147,19 +154,19 @@ handle_batch(?normal, {Agent, SeqNo, Transactions},
          }),
     ekka_rlog_lib:import_batch(transaction, Transactions),
     {keep_state, D#d{next_batch_seqno = SeqNo + 1}};
-handle_batch(St, {tlog_batch, {Agent, SeqNo, Transactions}},
-             D = #d{ agent = Agent
-                   , next_batch_seqno = SeqNo
-                   }) when St =:= ?bootstrap orelse
-                           St =:= ?local_replay ->
+handle_batch(St, {Agent, SeqNo, Transactions},
+             D0 = #d{ agent = Agent
+                    , next_batch_seqno = SeqNo
+                    }) when St =:= ?bootstrap orelse
+                            St =:= ?local_replay ->
     %% Historical data is being replayed, realtime transactions should
     %% be buffered up for later consumption:
     ?tp(rlog_replica_store_batch,
         #{ agent => Agent
          , seqno => SeqNo
-         , transactions   => Transactions
+         , transactions => Transactions
          }),
-    buffer_tlog_ops(Transactions, D),
+    D = buffer_tlog_ops(Transactions, D0),
     {keep_state, D#d{next_batch_seqno = SeqNo + 1}};
 handle_batch(_State, {Agent, SeqNo, _},
              #d{ agent = Agent
@@ -168,7 +175,7 @@ handle_batch(_State, {Agent, SeqNo, _},
     %% Gap in the TLOG. Consuming it now will cause inconsistency, so we must restart.
     %% TODO: sometimes it should be possible to restart gracefully to
     %% salvage the bootstrapped data.
-    error(gap_in_the_tlog);
+    error({gap_in_the_tlog, SeqNo, MySeqNo});
 handle_batch(State, {Agent, SeqNo, _Transactions}, Data) ->
     ?tp(warning, rlog_replica_unexpected_batch,
         #{ state => State
@@ -180,13 +187,19 @@ handle_batch(State, {Agent, SeqNo, _Transactions}, Data) ->
 -spec initiate_bootstrap(data()) -> fsm_result().
 initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
     {ok, Pid} = ekka_rlog_bootstrapper:start_link_client(Shard, Remote, self()),
-    {keep_state, D#d{tmp_worker = Pid}}.
+    Q = replayq:open(#{ mem_only => true
+                      , sizer => fun(_) -> 1 end
+                      }), % TODO
+    {keep_state, D#d{ tmp_worker = Pid
+                    , replayq    = Q
+                    }}.
 
 -spec handle_bootstrap_complete(ekka_rlog_server:checkpoint(), data()) -> fsm_result().
 handle_bootstrap_complete(Checkpoint, D) ->
     ?tp(notice, "Bootstrap of the shard is complete",
         #{ checkpoint => Checkpoint
          }),
+    forget_tmp_worker(D),
     {next_state, ?local_replay, D#d{ tmp_worker = undefined
                                    , checkpoint = Checkpoint
                                    }}.
@@ -206,13 +219,22 @@ handle_agent_down(State, Reason, D) ->
     end.
 
 -spec initiate_local_replay(data()) -> fsm_result().
-initiate_local_replay(D) ->
-    %% TODO: Not implemented
-    Parent = self(),
-    Worker = spawn_link(fun() ->
-                                Parent ! {local_replay_complete, self()}
-                        end),
-    {keep_state, D#d{tmp_worker = Worker}}.
+initiate_local_replay(_D) ->
+    {keep_state_and_data, [{timeout, 0, ?local_replay_loop}]}.
+
+-spec replay_local(data()) -> fsm_result().
+replay_local(D0 = #d{replayq = Q0}) ->
+    {Q, AckRef, Items} = replayq:pop(Q0, #{}),
+    ekka_rlog_lib:import_batch(dirty, Items),
+    case replayq:is_empty(Q) of
+        true ->
+            replayq:close(Q),
+            D = D0#d{replayq = undefined},
+            {next_state, ?normal, D};
+        false ->
+            D = D0#d{replayq = Q},
+            {keep_state, D, [{timeout, 0, ?local_replay_loop}]}
+    end.
 
 -spec complete_initialization(data()) -> fsm_result().
 complete_initialization(D) ->
@@ -243,7 +265,7 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
             {next_state, ?normal, D};
         {error, Err} ->
             ReconnectTimeout = application:get_env(ekka, rlog_replica_reconnect_interval, 5000),
-            {keep_state_and_data, [{timeout, ReconnectTimeout, reconnect}]}
+            {keep_state_and_data, [{timeout, ReconnectTimeout, ?reconnect}]}
     end.
 
 -spec try_connect(ekka_rlog:shard(), ekka_rlog_server:checkpoint()) ->
@@ -272,9 +294,10 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
             try_connect(Rest, Shard, Checkpoint)
     end.
 
--spec buffer_tlog_ops([ekka_rlog_lib:tx()], data()) -> ok.
-buffer_tlog_ops(Batch, D) ->
-    ok. %% TODO
+-spec buffer_tlog_ops([ekka_rlog_lib:tx()], data()) -> data().
+buffer_tlog_ops(Transactions, D = #d{replayq = Q0}) ->
+    Q = replayq:append(Q0, Transactions),
+    D#d{replayq = Q}.
 
 -spec handle_normal(data()) -> ok.
 handle_normal(D) ->
@@ -311,3 +334,11 @@ handle_state_trans(OldState, State, _Data) ->
 -spec shuffle([A]) -> [A].
 shuffle(A) ->
     A. %% TODO: implement me
+
+-spec forget_tmp_worker(data()) -> ok.
+forget_tmp_worker(#d{tmp_worker = Pid}) ->
+    unlink(Pid),
+    receive
+        {'EXIT', Pid, normal} -> ok
+    after 0 -> ok
+    end.
