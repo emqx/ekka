@@ -102,6 +102,7 @@ handle_info(chunk_loop, St = #server{tables = [_|_]}) ->
     traverse_queue(St);
 handle_info(_Info, St) ->
     {noreply, St}.
+
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
@@ -138,7 +139,7 @@ complete({Node, Pid}, Server) ->
     ekka_rlog_lib:rpc_call(Node, ?MODULE, do_complete, [Pid, Server]).
 
 handle_batch(Table, Records) ->
-    lists:foreach(fun(I) -> handle_batch(Table, I) end, Records).
+    lists:foreach(fun(I) -> mnesia:dirty_write(Table, I) end, Records).
 
 start_table_traverse(St = #server{tables = [], subscriber = Subscriber}) ->
     ok = complete(Subscriber, self()),
@@ -148,7 +149,9 @@ start_table_traverse(St0 = #server{shard = Shard, subscriber = Subscriber, table
         #{ shard => Shard
          , table => Table
          }),
-    Q0 = replayq:open(#{mem_only => true}),
+    Q0 = replayq:open(#{ mem_only => true
+                       , sizer => fun(_) -> 1 end
+                       }),
     Q = replayq:append(Q0, mnesia:dirty_all_keys(Table)),
     St = St0#server{ key_queue = Q },
     self() ! chunk_loop,
@@ -156,23 +159,24 @@ start_table_traverse(St0 = #server{shard = Shard, subscriber = Subscriber, table
 
 traverse_queue(St0 = #server{key_queue = Q0, subscriber = Subscriber, tables = [Table|Rest]}) ->
     {Q, AckRef, Items} = replayq:pop(Q0, #{}),
-    case Items of
-        [] ->
+    Records = prepare_batch(Table, Items),
+    Batch = {self(), Table, Records},
+    ok = push_batch(Subscriber, Batch),
+    ok = replayq:ack(Q, AckRef),
+    case replayq:is_empty(Q) of
+        true ->
             replayq:close(Q),
             self() ! table_loop,
             St = St0#server{ key_queue = undefined
-                           , tables = Rest
+                           , tables    = Rest
                            },
             {noreply, St};
-        _ ->
-            Records = prepare_batch(Table, Items),
-            Batch = {self(), Table, Records},
-            ok = push_batch(Subscriber, Batch),
-            ok = replayq:ack(Q, AckRef),
+        false ->
             self() ! chunk_loop,
             {noreply, St0#server{key_queue = Q}}
     end.
 
+-spec prepare_batch(ekka_rlog_lib:table(), list()) -> [tuple()].
 prepare_batch(Table, Keys) ->
     lists:foldl( fun(Key, Acc) -> mnesia:dirty_read(Table, Key) ++ Acc end
                , []
