@@ -25,6 +25,7 @@
         , delete/1
         , mnesia/1
         , benchmark/3
+        , counter/2
         ]).
 
 -record(test_tab, {key, val}).
@@ -51,6 +52,25 @@ delete(K) ->
       fun() ->
               mnesia:delete({test_tab, K})
       end).
+
+counter(_Key, 0) ->
+    ok;
+counter(Key, NIter) ->
+    {atomic, Val} =
+        ekka_mnesia:transaction(
+          fun() ->
+                  case mnesia:read(test_tab, Key) of
+                      [] -> V = 0;
+                      [#test_tab{val = V}] -> V
+                  end,
+                  ok = mnesia:write(#test_tab{key = Key, val = V + 1}),
+                  V
+          end),
+    ?tp(trans_gen_counter_update,
+        #{ key => Key
+         , value => Val
+         }),
+    counter(Key, NIter - 1).
 
 benchmark(ResultFile,
           #{ delays := Delays
