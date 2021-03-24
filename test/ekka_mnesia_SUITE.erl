@@ -103,23 +103,30 @@ t_remove_from_cluster(_) ->
     end.
 
 %% This test runs should walk the replicant state machine through all
-%% stages of replications, so it can be used to check if anything is
-%% _obviously_ broken.
+%% the stages of startup and online transaction replication, so it can
+%% be used to check if anything is _obviously_ broken.
 t_rlog_smoke_test(_) ->
     snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, core, replicant], []),
     ?check_trace(
        begin
-           %% Delay replica state transitions to make sure
-           %% transactions are being produced while it is in every
-           %% possible state:
+           %% Inject some orderings to make sure the replicant
+           %% receives transactions in all states.
+           %%
+           %% 1. Commit some transactions before the replicant start:
            ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 5}
                           , #{?snk_kind := state_change, to := disconnected}
                           ),
+           %% 2. Delay entering local_replay until more transactions are produced:
            ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 10}
                           , #{?snk_kind := state_change, to := local_replay}
                           ),
+           %% 3. Delay entering normal until more transactions are produced:
            ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 15}
+                          , #{?snk_kind := state_change, to := normal}
+                          ),
+           %% 4. Make sure some transactions are produced while in normal mode
+           ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 20}
                           , #{?snk_kind := state_change, to := normal}
                           ),
            try
@@ -127,10 +134,11 @@ t_rlog_smoke_test(_) ->
                wait_shards([N1, N2], [test_shard]),
                %% Generate some transactions:
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
-               ok = rpc:call(N1, ekka_transaction_gen, counter, [42, 20]),
+               ok = rpc:call(N1, ekka_transaction_gen, counter, [42, 30]),
                %% Wait the replica
                ?block_until(#{?snk_kind := state_change, to := normal}, infinity),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
+               %% Create a delete transaction, to see if deletes are handled too:
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
                Nodes

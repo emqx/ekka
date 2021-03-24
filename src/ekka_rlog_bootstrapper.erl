@@ -102,6 +102,7 @@ handle_info(chunk_loop, St = #server{tables = [_|_]}) ->
     traverse_queue(St);
 handle_info(_Info, St) ->
     {noreply, St}.
+
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
