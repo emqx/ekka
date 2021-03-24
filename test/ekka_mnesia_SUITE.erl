@@ -118,9 +118,9 @@ t_rlog_smoke_test(_) ->
            ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 5}
                           , #{?snk_kind := state_change, to := disconnected}
                           ),
-           %% 2. Delay entering local_replay until more transactions are produced:
-           ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 10}
-                          , #{?snk_kind := state_change, to := local_replay}
+           %% 2. Make sure the rest of transactions are produced after the agent starts:
+           ?force_ordering( #{?snk_kind := subscribe_realtime_stream}
+                          , #{?snk_kind := trans_gen_counter_update, value := 10}
                           ),
            %% 3. Delay entering normal until more transactions are produced:
            ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 15}
@@ -152,6 +152,8 @@ t_rlog_smoke_test(_) ->
                %% Ensure that the nodes assumed designated roles:
                ?projection_complete(node, ?of_kind(rlog_server_start, Trace), [N1, N2]),
                ?projection_complete(node, ?of_kind(rlog_replica_start, Trace), [N3]),
+               %% Check that some transactions have been buffered during catchup:
+               ?assertMatch([_|_], ?of_kind(rlog_replica_store_batch, Trace)),
                %% Other tests
                replicant_bootstrap_stages(N3, Trace),
                all_batches_received(Trace),
