@@ -78,8 +78,7 @@ start_cluster(ekka, Specs) ->
 teardown_cluster(Specs) ->
     Nodes = [I || #{node := I} <- Specs],
     [rpc:call(I, mnesia, stop, []) || I <- Nodes],
-    mnesia:delete_schema(Nodes),
-    [ok = slave:stop(I) || I <- Nodes],
+    [ok = stop_slave(I) || I <- Nodes],
     ok.
 
 start_slave(NodeOrEkka, #{name := Name, env := Env}) ->
@@ -102,7 +101,8 @@ start_slave(node, Name, Env) ->
     {ok, Node} = slave:start_link(host(), Name, CommonBeamOpts ++ ebin_path()),
     %% Load apps before setting the enviroment variables to avoid
     %% overriding the environment during ekka start:
-    [rpc:call(Node, application, load, [App]) || App <- [gen_rpc, ekka]],
+    [rpc:call(Node, application, load, [App]) || App <- [gen_rpc]],
+    {ok, _} = cover:start([Node]),
     %% Disable gen_rpc listener by default:
     Env1 = [{gen_rpc, tcp_server_port, false}|Env],
     setenv(Node, Env1),
@@ -128,6 +128,7 @@ wait_running(Node, Timeout) ->
 
 stop_slave(Node) ->
     mnesia:delete_schema([Node]),
+    ok = cover:stop([Node]),
     slave:stop(Node).
 
 host() ->

@@ -114,8 +114,6 @@ handle_event(enter, OldState, ?local_replay, D) ->
     initiate_local_replay(D);
 handle_event(timeout, ?local_replay_loop, ?local_replay, D) ->
     replay_local(D);
-handle_event(info, {local_replay_complete, Worker}, ?local_replay, D = #d{tmp_worker = Worker}) ->
-    complete_initialization(D);
 %% Events specific to `normal' state:
 handle_event(enter, OldState, ?normal, D) ->
     handle_normal(D),
