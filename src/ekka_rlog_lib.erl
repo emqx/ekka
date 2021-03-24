@@ -105,11 +105,19 @@ import_batch(ImportType, Batch) ->
 
 -spec import_transaction(transaction | dirty, [tx()]) -> ok.
 import_transaction(transaction, Ops) ->
+    ?tp(rlog_import_trans,
+        #{ type => transaction
+         , ops  => Ops
+         }),
     {atomic, ok} = mnesia:transaction(
                      fun() ->
                              lists:foreach(fun import_op/1, Ops)
                      end);
 import_transaction(dirty, Ops) ->
+    ?tp(rlog_import_trans,
+        #{ type => dirty
+         , ops  => Ops
+         }),
     lists:foreach(fun import_op_dirty/1, Ops).
 
 -spec import_op(op()) -> ok.
