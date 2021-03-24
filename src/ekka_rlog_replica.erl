@@ -234,13 +234,6 @@ replay_local(D0 = #d{replayq = Q0}) ->
             {keep_state, D, [{timeout, 0, ?local_replay_loop}]}
     end.
 
--spec complete_initialization(data()) -> fsm_result().
-complete_initialization(D) ->
-    ?tp(notice, "Shard replica is ready",
-        #{
-         }),
-    {next_state, ?normal, D#d{tmp_worker = undefined}}.
-
 %% @private Try connecting to a core node
 -spec handle_reconnect(data()) -> fsm_result().
 handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
@@ -313,6 +306,7 @@ handle_worker_down(State, Reason, D) ->
          }),
     exit(bootstrap_failed).
 
+-spec handle_unknown(term(), term(), state(), data()) -> fsm_result().
 handle_unknown(EventType, Event, State, Data) ->
     ?tp(warning, "RLOG replicant received unknown event",
         #{ event_type => EventType

@@ -108,6 +108,7 @@ t_remove_from_cluster(_) ->
 t_rlog_smoke_test(_) ->
     snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, core, replicant], []),
+    CounterKey = counter,
     ?check_trace(
        begin
            %% Inject some orderings to make sure the replicant
@@ -117,9 +118,9 @@ t_rlog_smoke_test(_) ->
            ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 5}
                           , #{?snk_kind := state_change, to := disconnected}
                           ),
-           %% 2. Delay entering local_replay until more transactions are produced:
-           ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 10}
-                          , #{?snk_kind := state_change, to := local_replay}
+           %% 2. Make sure the rest of transactions are produced after the agent starts:
+           ?force_ordering( #{?snk_kind := subscribe_realtime_stream}
+                          , #{?snk_kind := trans_gen_counter_update, value := 10}
                           ),
            %% 3. Delay entering normal until more transactions are produced:
            ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 15}
@@ -134,13 +135,14 @@ t_rlog_smoke_test(_) ->
                wait_shards([N1, N2], [test_shard]),
                %% Generate some transactions:
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
-               ok = rpc:call(N1, ekka_transaction_gen, counter, [42, 30]),
+               ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 30]),
                %% Wait the replica
                ?block_until(#{?snk_kind := state_change, to := normal}, infinity),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
                %% Create a delete transaction, to see if deletes are handled too:
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
+               ekka_ct:stop_slave(N3),
                Nodes
            after
                ekka_ct:teardown_cluster(Cluster)
@@ -150,9 +152,12 @@ t_rlog_smoke_test(_) ->
                %% Ensure that the nodes assumed designated roles:
                ?projection_complete(node, ?of_kind(rlog_server_start, Trace), [N1, N2]),
                ?projection_complete(node, ?of_kind(rlog_replica_start, Trace), [N3]),
+               %% Check that some transactions have been buffered during catchup:
+               ?assertMatch([_|_], ?of_kind(rlog_replica_store_batch, Trace)),
                %% Other tests
                replicant_bootstrap_stages(N3, Trace),
-               all_batches_received(Trace)
+               all_batches_received(Trace),
+               counter_import_check(CounterKey, Trace)
        end).
 
 cluster_benchmark(_) ->
@@ -251,3 +256,20 @@ compare_table_contents(Table, Nodes) ->
               ?assertEqual({Node, Reference}, {Node, Contents})
       end,
       Rest).
+
+counter_import_check(CounterKey, Trace) ->
+    Writes = [element(3, Rec) || #{ ?snk_kind := rlog_import_trans
+                                  , ops := [{{test_tab, K}, Rec, write}]
+                                  } <- Trace, K =:= CounterKey],
+    ?assert(length(Writes) > 0),
+    ok = check_sequence(Writes).
+
+
+check_sequence([First|Rest]) ->
+    check_sequence(First, Rest).
+
+check_sequence(Pred, []) ->
+    ok;
+check_sequence(Pred, [Next|Rest]) ->
+    ?assertEqual(Next, Pred + 1),
+    check_sequence(Next, Rest).
