@@ -93,7 +93,7 @@ init({Shard, Subscriber, ReplaySince}) ->
           gen_statem:event_handler_result(state()).
 %% Events specific to `?normal' state:
 handle_event(info, {mnesia_table_event, {write, Record, ActivityId}}, ?normal, D) ->
-    handle_tx(Record, ActivityId, D);
+    handle_mnesia_event(Record, ActivityId, D);
 %% Common actions:
 handle_event({call, From}, stop, State, D) ->
     handle_stop(State, From, D);
@@ -135,18 +135,18 @@ handle_state_trans(OldState, State, _Data) ->
          }),
     keep_state_and_data.
 
--spec handle_tx(ekka_rlog_lib:rlog(), term(), data()) -> fsm_result().
-handle_tx({Shard, K, Ops}, ActivityId, D = #d{shard = Shard}) ->
+-spec handle_mnesia_event(ekka_rlog_lib:rlog(), term(), data()) -> fsm_result().
+handle_mnesia_event({Shard, TXID, Ops}, ActivityId, D = #d{shard = Shard}) ->
     SeqNo = D#d.seqno,
     ?tp(rlog_realtime_op,
         #{ ops         => Ops
-         , key         => K
+         , txid        => TXID
          , activity_id => ActivityId
          , agent       => self()
          , seqno       => SeqNo
          }),
-    Batch = {self(), SeqNo, [Ops]},
-    ok = ekka_rlog_replica:push_batch(D#d.subscriber, Batch),
+    Tx = {self(), SeqNo, TXID, [Ops]},
+    ok = ekka_rlog_replica:push_tlog_entry(D#d.subscriber, Tx),
     {keep_state, D#d{seqno = SeqNo + 1}}.
 
 subscribe_realitime(D) ->

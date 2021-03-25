@@ -107,7 +107,8 @@ t_remove_from_cluster(_) ->
 %% be used to check if anything is _obviously_ broken.
 t_rlog_smoke_test(_) ->
     snabbkaffe:fix_ct_logging(),
-    Cluster = ekka_ct:cluster([core, core, replicant], []),
+    Env = [{ekka, bootstrapper_chunk_config, #{count_limit => 3}}],
+    Cluster = ekka_ct:cluster([core, core, replicant], Env),
     CounterKey = counter,
     ?check_trace(
        begin
@@ -115,31 +116,21 @@ t_rlog_smoke_test(_) ->
            %% receives transactions in all states.
            %%
            %% 1. Commit some transactions before the replicant start:
-           ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 5}
-                          , #{?snk_kind := state_change, to := disconnected}
-                          ),
+           ?force_ordering(#{?snk_kind := trans_gen_counter_update, value := 5}, #{?snk_kind := state_change, to := disconnected}),
            %% 2. Make sure the rest of transactions are produced after the agent starts:
-           ?force_ordering( #{?snk_kind := subscribe_realtime_stream}
-                          , #{?snk_kind := trans_gen_counter_update, value := 10}
-                          ),
-           %% 3. Delay entering normal until more transactions are produced:
-           ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 15}
-                          , #{?snk_kind := state_change, to := normal}
-                          ),
+           ?force_ordering(#{?snk_kind := subscribe_realtime_stream}, #{?snk_kind := trans_gen_counter_update, value := 10}),
+           %% 3. Make sure transactions are sent during TLOG replay: (TODO)
+           ?force_ordering(#{?snk_kind := state_change, to := bootstrap}, #{?snk_kind := trans_gen_counter_update, value := 15}),
            %% 4. Make sure some transactions are produced while in normal mode
-           ?force_ordering( #{?snk_kind := trans_gen_counter_update, value := 20}
-                          , #{?snk_kind := state_change, to := normal}
-                          ),
+           ?force_ordering(#{?snk_kind := state_change, to := normal}, #{?snk_kind := trans_gen_counter_update, value := 25}),
            try
                Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
                wait_shards([N1, N2], [test_shard]),
                %% Generate some transactions:
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
                ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 30]),
-               %% Wait the replica
-               ?block_until(#{?snk_kind := state_change, to := normal}, infinity),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
-               %% Create a delete transaction, to see if deletes are handled too:
+               %% Create a delete transaction, to see if deletes are propagated too:
                {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
                stabilize(1000), compare_table_contents(test_tab, Nodes),
                ekka_ct:stop_slave(N3),
@@ -152,8 +143,8 @@ t_rlog_smoke_test(_) ->
                %% Ensure that the nodes assumed designated roles:
                ?projection_complete(node, ?of_kind(rlog_server_start, Trace), [N1, N2]),
                ?projection_complete(node, ?of_kind(rlog_replica_start, Trace), [N3]),
-               %% Check that some transactions have been buffered during catchup:
-               ?assertMatch([_|_], ?of_kind(rlog_replica_store_batch, Trace)),
+               %% TODO: Check that some transactions have been buffered during catchup (to increase coverage):
+               %?assertMatch([_|_], ?of_kind(rlog_replica_store_batch, Trace)),
                %% Other tests
                replicant_bootstrap_stages(N3, Trace),
                all_batches_received(Trace),
