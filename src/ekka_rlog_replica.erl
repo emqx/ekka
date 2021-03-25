@@ -24,6 +24,9 @@
 %% gen_statem callbacks:
 -export([init/1, terminate/3, code_change/4, callback_mode/0, handle_event/4]).
 
+%% Internal exports:
+-export([do_push_tlog_entry/2]).
+
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 %%================================================================================
@@ -66,7 +69,10 @@
 %% This function is called by the remote core node.
 -spec push_tlog_entry(ekka_rlog_lib:subscriber(), ekka_rlog_lib:tlog_entry()) -> ok.
 push_tlog_entry({Node, Pid}, Batch) ->
-    ekka_rlog_lib:rpc_cast(Node, gen_statem, cast, [Pid, {tlog_entry, Batch}]),
+    %% TODO: this should be a cast, but gen_rpc doesn't guarantee the
+    %% ordering of cast messages. In the production code this will be
+    %% horrible!
+    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_push_tlog_entry, [Pid, Batch]),
     ok.
 
 start_link(Shard) ->
@@ -346,3 +352,10 @@ forget_tmp_worker(#d{tmp_worker = Pid}) ->
         {'EXIT', Pid, normal} -> ok
     after 0 -> ok
     end.
+
+-spec do_push_tlog_entry(pid(), ekka_rlog_lib:tlog_entry()) -> ok.
+do_push_tlog_entry(Pid, Batch) ->
+    ?tp(receive_tlog_entry,
+        #{ entry => Batch
+         }),
+    gen_statem:cast(Pid, {tlog_entry, Batch}).
