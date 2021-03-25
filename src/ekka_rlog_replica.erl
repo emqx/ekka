@@ -19,7 +19,7 @@
 -module(ekka_rlog_replica).
 
 %% API:
--export([start_link/1, push_batch/2]).
+-export([start_link/1, push_tlog_entry/2]).
 
 %% gen_statem callbacks:
 -export([init/1, terminate/3, code_change/4, callback_mode/0, handle_event/4]).
@@ -64,9 +64,10 @@
 %%================================================================================
 
 %% This function is called by the remote core node.
--spec push_batch(ekka_rlog_lib:subscriber(), ekka_rlog_lib:batch()) -> ok.
-push_batch({Node, Pid}, Batch) ->
-    ekka_rlog_lib:rpc_cast(Node, gen_statem, cast, [Pid, {tlog_batch, Batch}]), ok.
+-spec push_tlog_entry(ekka_rlog_lib:subscriber(), ekka_rlog_lib:tlog_entry()) -> ok.
+push_tlog_entry({Node, Pid}, Batch) ->
+    ekka_rlog_lib:rpc_cast(Node, gen_statem, cast, [Pid, {tlog_entry, Batch}]),
+    ok.
 
 start_link(Shard) ->
     Config = #{}, % TODO
@@ -94,8 +95,8 @@ init({Shard, _Opts}) ->
     {ok, ?disconnected, D}.
 
 -spec handle_event(gen_statem:event_type(), _EventContent, state(), data()) -> fsm_result().
-handle_event(cast, {tlog_batch, Batch}, State, D) ->
-    handle_batch(State, Batch, D);
+handle_event(cast, {tlog_entry, Tx}, State, D) ->
+    handle_tlog_entry(State, Tx, D);
 %% Events specific to `disconnected' state:
 handle_event(enter, OldState, ?disconnected, D) ->
     handle_state_trans(OldState, ?disconnected, D),
@@ -139,45 +140,48 @@ terminate(_Reason, _State, _Data) ->
 %%================================================================================
 
 %% @private Consume transactions from the core node
--spec handle_batch(state(), ekka_rlog_lib:batch(), data()) -> fsm_result().
-handle_batch(?normal, {Agent, SeqNo, Transactions},
-             D = #d{ agent            = Agent
-                   , next_batch_seqno = SeqNo
-                   }) ->
+-spec handle_tlog_entry(state(), ekka_rlog_lib:tlog_entry(), data()) -> fsm_result().
+handle_tlog_entry(?normal, {Agent, SeqNo, TXID, Transactions},
+                  D = #d{ agent            = Agent
+                        , next_batch_seqno = SeqNo
+                        }) ->
     %% Normal flow, transactions are applied directly to the replica:
     ?tp(rlog_replica_import_batch,
-        #{ agent => Agent
-         , seqno => SeqNo
+        #{ agent        => Agent
+         , seqno        => SeqNo
+         , txid         => TXID
          , transactions => Transactions
          }),
     ekka_rlog_lib:import_batch(transaction, Transactions),
     {keep_state, D#d{next_batch_seqno = SeqNo + 1}};
-handle_batch(St, {Agent, SeqNo, Transactions},
-             D0 = #d{ agent = Agent
-                    , next_batch_seqno = SeqNo
-                    }) when St =:= ?bootstrap orelse
-                            St =:= ?local_replay ->
+handle_tlog_entry(St, {Agent, SeqNo, TXID, Transactions},
+                  D0 = #d{ agent = Agent
+                         , next_batch_seqno = SeqNo
+                         }) when St =:= ?bootstrap orelse
+                                 St =:= ?local_replay ->
     %% Historical data is being replayed, realtime transactions should
     %% be buffered up for later consumption:
     ?tp(rlog_replica_store_batch,
-        #{ agent => Agent
-         , seqno => SeqNo
+        #{ agent        => Agent
+         , seqno        => SeqNo
+         , txid         => TXID
          , transactions => Transactions
          }),
     D = buffer_tlog_ops(Transactions, D0),
     {keep_state, D#d{next_batch_seqno = SeqNo + 1}};
-handle_batch(_State, {Agent, SeqNo, _},
+handle_tlog_entry(_State, {Agent, SeqNo, TXID, _},
              #d{ agent = Agent
                , next_batch_seqno = MySeqNo
                }) when SeqNo > MySeqNo ->
     %% Gap in the TLOG. Consuming it now will cause inconsistency, so we must restart.
     %% TODO: sometimes it should be possible to restart gracefully to
     %% salvage the bootstrapped data.
-    error({gap_in_the_tlog, SeqNo, MySeqNo});
-handle_batch(State, {Agent, SeqNo, _Transactions}, Data) ->
+    error({gap_in_the_tlog, TXID, SeqNo, MySeqNo});
+handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transactions}, Data) ->
     ?tp(warning, rlog_replica_unexpected_batch,
         #{ state => State
-         , from => Agent
+         , from  => Agent
+         , txid  => TXID
          , seqno => SeqNo
          }),
     keep_state_and_data.

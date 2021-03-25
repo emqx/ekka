@@ -28,7 +28,7 @@
         %% , local_rpc_call/4
         ]).
 
--export_type([ batch/0
+-export_type([ tlog_entry/0
              , subscriber/0
              , table/0
              , change_type/0
@@ -62,10 +62,11 @@
 
 -type rlog() :: #rlog{}.
 
--type batch() :: { _Sender :: pid()
-                 , _SeqNo  :: integer()
-                 , _Tx     :: [tx()]
-                 }.
+-type tlog_entry() :: { _Sender :: pid()
+                      , _SeqNo  :: integer()
+                      , _Key    :: txid()
+                      , _Tx     :: [tx()]
+                      }.
 
 -type subscriber() :: {node(), pid()}.
 

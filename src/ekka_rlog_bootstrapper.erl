@@ -81,10 +81,14 @@ init({server, Shard, Subscriber}) ->
                                  }),
     #{tables := Tables} = ekka_rlog:shard_config(Shard),
     ?tp(info, rlog_bootstrapper_start, #{shard => Shard}),
+    Queue = replayq:open(#{ mem_only => true
+                          , sizer    => fun(_) -> 1 end
+                          }),
     self() ! table_loop,
     {ok, #server{ shard      = Shard
                 , subscriber = Subscriber
                 , tables     = Tables
+                , key_queue  = Queue
                 }};
 init({client, Shard, RemoteNode, Parent}) ->
     logger:set_process_metadata(#{ domain => [ekka, rlog, bootstrapper, client]
@@ -120,10 +124,10 @@ handle_call(Call, _From, St) ->
 code_change(_OldVsn, St, _Extra) ->
     {ok, St}.
 
-terminate(_Reason, St = #server{key_queue = Q}) when Q =/= undefined ->
+terminate(_Reason, St = #server{key_queue = Q}) ->
     replayq:close(Q),
     {ok, St};
-terminate(_Reason, St) ->
+terminate(_Reason, St = #client{}) ->
     {ok, St}.
 
 %%================================================================================
@@ -144,32 +148,31 @@ handle_batch(Table, Records) ->
 start_table_traverse(St = #server{tables = [], subscriber = Subscriber}) ->
     ok = complete(Subscriber, self()),
     {stop, normal, St};
-start_table_traverse(St0 = #server{shard = Shard, subscriber = Subscriber, tables = [Table|Rest]}) ->
+start_table_traverse(St0 = #server{ shard = Shard
+                                  , subscriber = Subscriber
+                                  , tables = [Table|Rest]
+                                  , key_queue = Q0
+                                  }) ->
     ?tp(info, start_shard_table_bootstrap,
         #{ shard => Shard
          , table => Table
          }),
-    Q0 = replayq:open(#{ mem_only => true
-                       , sizer => fun(_) -> 1 end
-                       }),
     Q = replayq:append(Q0, mnesia:dirty_all_keys(Table)),
     St = St0#server{ key_queue = Q },
     self() ! chunk_loop,
     {noreply, St}.
 
 traverse_queue(St0 = #server{key_queue = Q0, subscriber = Subscriber, tables = [Table|Rest]}) ->
-    {Q, AckRef, Items} = replayq:pop(Q0, #{}),
+    ChunkConfig = application:get_env(ekka, bootstrapper_chunk_config, #{}),
+    {Q, AckRef, Items} = replayq:pop(Q0, ChunkConfig),
     Records = prepare_batch(Table, Items),
     Batch = {self(), Table, Records},
     ok = push_batch(Subscriber, Batch),
     ok = replayq:ack(Q, AckRef),
     case replayq:is_empty(Q) of
         true ->
-            replayq:close(Q),
             self() ! table_loop,
-            St = St0#server{ key_queue = undefined
-                           , tables    = Rest
-                           },
+            St = St0#server{tables = Rest},
             {noreply, St};
         false ->
             self() ! chunk_loop,
