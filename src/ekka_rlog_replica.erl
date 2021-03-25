@@ -153,7 +153,9 @@ handle_tlog_entry(?normal, {Agent, SeqNo, TXID, Transactions},
          , transactions => Transactions
          }),
     ekka_rlog_lib:import_batch(transaction, Transactions),
-    {keep_state, D#d{next_batch_seqno = SeqNo + 1}};
+    {keep_state, D#d{ next_batch_seqno = SeqNo + 1
+                    , checkpoint       = TXID
+                    }};
 handle_tlog_entry(St, {Agent, SeqNo, TXID, Transactions},
                   D0 = #d{ agent = Agent
                          , next_batch_seqno = SeqNo
@@ -168,7 +170,13 @@ handle_tlog_entry(St, {Agent, SeqNo, TXID, Transactions},
          , transactions => Transactions
          }),
     D = buffer_tlog_ops(Transactions, D0),
-    {keep_state, D#d{next_batch_seqno = SeqNo + 1}};
+    MaybeCheckpoint = case St of
+                          ?local_replay -> TXID;
+                          ?bootstrap    -> undefined
+                      end,
+    {keep_state, D#d{ next_batch_seqno = SeqNo + 1
+                    , checkpoint       = MaybeCheckpoint
+                    }};
 handle_tlog_entry(_State, {Agent, SeqNo, TXID, _},
              #d{ agent = Agent
                , next_batch_seqno = MySeqNo
