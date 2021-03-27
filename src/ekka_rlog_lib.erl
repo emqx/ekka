@@ -25,6 +25,7 @@
         , load_shard_config/0
         , read_shard_config/0
         , make_shard_match_spec/1
+        , shuffle/1
         %% , local_rpc_call/4
         ]).
 
@@ -190,3 +191,13 @@ make_shard_match_spec(Tables) ->
      , []
      , ['$_']
      } || Table <- Tables].
+
+%%================================================================================
+%% Misc functions
+%%================================================================================
+
+%% @doc Random shuffle of a small list.
+-spec shuffle([A]) -> [A].
+shuffle(L0) ->
+    {_, L} = lists:unzip(lists:sort([{rand:uniform(), I} || I <- L0])),
+    L.
