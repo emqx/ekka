@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2021 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -53,7 +53,9 @@
         ]).
 
 %% Transaction API
--export([ transaction/1
+-export([ ro_transaction/1
+        , transaction/2
+        , transaction/1
         ]).
 
 -export_type([ t_result/1
@@ -334,14 +336,20 @@ do_wait_for_tables(Tables) ->
 %% Transaction API
 %%--------------------------------------------------------------------
 
--spec(transaction(fun(() -> A)) -> t_result(A)).
-transaction(Fun) ->
-    %% TODO: it should be possible initiate transactions on replicants too
-    core = ekka_rlog:role(),
-    %% TODO: this is wrong, we need to unwrap the result of the nested
-    %% transaction in the transaction, and match it with `{atomic,
-    %% Ret}'. For now, we don't need this.
-    case ekka_rlog:transaction(fun mnesia:transaction/1, [Fun]) of
-        {atomic, Ret} -> Ret;
-        Err -> Err
+-spec ro_transaction(fun(() -> A)) -> t_result(A).
+ro_transaction(Fun) ->
+    mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]).
+
+-spec transaction(fun((...) -> A), list()) -> t_result(A).
+transaction(Fun, Args) ->
+    case ekka_rlog:role() of
+        core ->
+            ekka_rlog:transaction(fun ekka_rlog_activity:transaction/2, [Fun, Args]);
+        replicant ->
+            Core = ekka_rlog_replica:upstream(),
+            ekka_rlog_lib:rpc_call(Core, ?MODULE, transaction, [Fun, Args])
     end.
+
+-spec transaction(fun(() -> A)) -> t_result(A).
+transaction(Fun) ->
+    transaction(fun erlang:apply/2, [Fun, []]).

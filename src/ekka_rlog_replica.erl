@@ -19,7 +19,7 @@
 -module(ekka_rlog_replica).
 
 %% API:
--export([start_link/1, push_tlog_entry/2]).
+-export([start_link/1, push_tlog_entry/2, upstream/0]).
 
 %% gen_statem callbacks:
 -export([init/1, terminate/3, code_change/4, callback_mode/0, handle_event/4]).
@@ -62,6 +62,10 @@
 
 -type fsm_result() :: gen_statem:event_handler_result(state()).
 
+%% Tables and table keys:
+-define(replica_tab, ekka_rlog_replica_tab).
+-define(upstream_node, upstream_node).
+
 %%================================================================================
 %% API funcions
 %%================================================================================
@@ -78,6 +82,13 @@ push_tlog_entry({Node, Pid}, Batch) ->
 start_link(Shard) ->
     Config = #{}, % TODO
     gen_statem:start_link(?MODULE, {Shard, Config}, []).
+
+-spec upstream() -> node().
+upstream() ->
+    case ets:lookup(?replica_tab, ?upstream_node) of
+        [{_, Node}] -> Node;
+        []          -> error(disconnected)
+    end.
 
 %%================================================================================
 %% gen_statem callbacks
@@ -96,6 +107,12 @@ init({Shard, _Opts}) ->
                                     , shard  => Shard
                                     }),
     ?tp(notice, rlog_replica_start, #{node => node()}),
+    ets:new(?replica_tab, [ ordered_set
+                          , named_table
+                          , protected
+                          , {write_concurrency, false}
+                          , {read_concurrency, true}
+                          ]),
     D = #d{ shard = Shard
           },
     {ok, ?disconnected, D}.
@@ -106,7 +123,7 @@ handle_event(cast, {tlog_entry, Tx}, State, D) ->
 %% Events specific to `disconnected' state:
 handle_event(enter, OldState, ?disconnected, D) ->
     handle_state_trans(OldState, ?disconnected, D),
-    {keep_state_and_data, [{timeout, 0, ?reconnect}]};
+    initiate_reconnect(D);
 handle_event(timeout, ?reconnect, ?disconnected, D) ->
     handle_reconnect(D);
 %% Events specific to `bootstrap' state:
@@ -252,6 +269,11 @@ replay_local(D0 = #d{replayq = Q0}) ->
             {keep_state, D, [{timeout, 0, ?local_replay_loop}]}
     end.
 
+-spec initiate_reconnect(data()) -> fsm_result().
+initiate_reconnect(_Data) ->
+    ets:delete(?replica_tab, ?upstream_node),
+    {keep_state_and_data, [{timeout, 0, ?reconnect}]}.
+
 %% @private Try connecting to a core node
 -spec handle_reconnect(data()) -> fsm_result().
 handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
@@ -310,6 +332,7 @@ buffer_tlog_ops(Transactions, D = #d{replayq = Q0}) ->
 
 -spec handle_normal(data()) -> ok.
 handle_normal(D) ->
+    ets:insert(?replica_tab, {?upstream_node, D#d.remote_core_node}),
     ?tp(notice, "Shard fully up",
         #{ node => node()
          , shard => D#d.shard

@@ -36,21 +36,20 @@
              , op/0
              , tx/0
              , txid/0
-             , ts/0
              , node_id/0
              , rlog/0
              ]).
 
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 -include("ekka_rlog.hrl").
+-include_lib("mnesia/src/mnesia.hrl").
 
 %%================================================================================
 %% Type declarations
 %%================================================================================
 
--type ts() :: integer().
 -type node_id() :: integer().
--type txid() :: {ts(), node_id()}.
+-type txid() :: #tid{}.
 
 -type table():: atom().
 

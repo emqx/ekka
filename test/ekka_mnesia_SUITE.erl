@@ -151,6 +151,25 @@ t_rlog_smoke_test(_) ->
                counter_import_check(CounterKey, Trace)
        end).
 
+t_transaction_on_replicant(_) ->
+    Cluster = ekka_ct:cluster([core, replicant], []),
+    ?check_trace(
+       try
+           Nodes = [N1, N2] = ekka_ct:start_cluster(ekka, Cluster),
+           stabilize(1000),
+           {atomic, _} = rpc:call(N2, ekka_transaction_gen, init, []),
+           stabilize(1000), compare_table_contents(test_tab, Nodes),
+           {atomic, KeyVals} = rpc:call(N2, ekka_transaction_gen, ro_read_all_keys, []),
+           {atomic, KeyVals} = rpc:call(N1, ekka_transaction_gen, ro_read_all_keys, []),
+           Nodes
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun([N1, N2], Trace) ->
+               replicant_bootstrap_stages(N2, Trace),
+               all_batches_received(Trace)
+       end).
+
 cluster_benchmark(_) ->
     snabbkaffe:fix_ct_logging(),
     NReplicas = 6,

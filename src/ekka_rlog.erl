@@ -85,13 +85,20 @@ subscribe(Shard, RemoteNode, Subscriber, Checkpoint) ->
     Args = [Shard, {MyNode, Subscriber}, Checkpoint],
     ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe, Args).
 
+-spec get_internals() -> {ekka_rlog_lib:txid(), ets:tab()}.
+get_internals() ->
+    case mnesia:get_activity_id() of
+        {_, TID, #tidstore{store = TS}} ->
+            {TID, TS}
+    end.
+
 do(Type, F, Args) ->
     Shards = ekka_rlog:shards(),
     TxFun =
         fun() ->
                 Result = apply(F, Args),
-                Key = ekka_rlog_lib:make_key(),
-                [dig_ops_for_shard(Key, Shard) || Shard <- Shards],
+                {Key, TS} = get_internals(),
+                [dig_ops_for_shard(Key, TS, Shard) || Shard <- Shards],
                 Result
         end,
     case Type of
@@ -100,13 +107,10 @@ do(Type, F, Args) ->
     end.
 
 %% TODO: Implement proper filtering
-dig_ops_for_shard(Key, Shard) ->
-    case mnesia:get_activity_id() of
-      {_, _, #tidstore{store = Ets}} ->
-        #{match_spec := MS} = ekka_rlog:shard_config(Shard),
-        Ops = ets:select(Ets, MS),
-        mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write)
-    end.
+dig_ops_for_shard(Key, TS, Shard) ->
+    #{match_spec := MS} = ekka_rlog:shard_config(Shard),
+    Ops = ets:select(TS, MS),
+    mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write).
 
 %% get_tx_ops(F, Args) ->
 %%     {_, _, Store} = mnesia:get_activity_id(),
