@@ -281,7 +281,7 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
                 {ok, boolean(), node(), pid()}
               | {error, term()}.
 try_connect(Shard, Checkpoint) ->
-    try_connect(shuffle(ekka_rlog:core_nodes()), Shard, Checkpoint).
+    try_connect(ekka_rlog_lib:shuffle(ekka_rlog:core_nodes()), Shard, Checkpoint).
 
 -spec try_connect([node()], ekka_rlog:shard(), ekka_rlog_server:checkpoint()) ->
                 {ok, boolean(), node(), pid()}
@@ -340,10 +340,6 @@ handle_state_trans(OldState, State, _Data) ->
          , to => State
          }),
     keep_state_and_data.
-
--spec shuffle([A]) -> [A].
-shuffle(A) ->
-    A. %% TODO: implement me
 
 -spec forget_tmp_worker(data()) -> ok.
 forget_tmp_worker(#d{tmp_worker = Pid}) ->
