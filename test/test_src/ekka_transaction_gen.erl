@@ -26,6 +26,7 @@
         , mnesia/1
         , benchmark/3
         , counter/2
+        , ro_read_all_keys/0
         ]).
 
 -record(test_tab, {key, val}).
@@ -45,6 +46,13 @@ init() ->
               [mnesia:write(#test_tab{ key = I
                                      , val = 0
                                      }) || I <- lists:seq(0, 4)]
+      end).
+
+ro_read_all_keys() ->
+    ekka_mnesia:ro_transaction(
+      fun() ->
+              Keys = mnesia:all_keys(test_tab),
+              [mnesia:read(test_tab, K) || K <- Keys]
       end).
 
 delete(K) ->
