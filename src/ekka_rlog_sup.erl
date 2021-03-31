@@ -38,14 +38,14 @@ init([core, Shards]) ->
     %% Shards should be restarted individually to avoid bootstrapping
     %% of too many replicants simulataneously, hence `one_for_one':
     SupFlags = #{ strategy => one_for_one
-                , intensity => 0
+                , intensity => 100
                 , period => 1
                 },
     Children = lists:map(fun shard_sup/1, Shards),
     {ok, {SupFlags, Children}};
 init([replicant, Shards]) ->
     SupFlags = #{ strategy => one_for_one
-                , intensity => 0
+                , intensity => 100
                 , period => 1
                 },
     Children = lists:map(fun replicant_worker/1, Shards),

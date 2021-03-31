@@ -18,7 +18,7 @@
 
 -export([ replicant_bootstrap_stages/2
         , all_batches_received/1
-        , counter_import_check/2
+        , counter_import_check/3
 
         , check_sequence/1
         ]).
@@ -50,10 +50,11 @@ all_batches_received(Trace0) ->
                                                          K =:= rlog_replica_store_trans
       , Trace).
 
-counter_import_check(CounterKey, Trace) ->
+counter_import_check(CounterKey, Node, Trace) ->
     Writes = [element(3, Rec) || #{ ?snk_kind := rlog_import_trans
+                                  , ?snk_meta := #{node := N}
                                   , ops := [{{test_tab, K}, Rec, write}]
-                                  } <- Trace, K =:= CounterKey],
+                                  } <- Trace, K =:= CounterKey, N =:= Node],
     ?assert(length(Writes) > 0),
     ?assert(check_sequence(Writes)).
 
