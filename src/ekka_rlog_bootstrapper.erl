@@ -31,7 +31,7 @@
         ]).
 
 %% Internal exports:
--export([do_push_batch/2, do_complete/2]).
+-export([do_push_batch/2, do_complete/3]).
 
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
@@ -110,9 +110,9 @@ handle_info(_Info, St) ->
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
-handle_call({complete, Server}, From, St = #client{server = Server, parent = Parent}) ->
+handle_call({complete, Server, Checkpoint}, From, St = #client{server = Server, parent = Parent}) ->
     ?tp(info, shard_bootstrap_complete, #{}),
-    Parent ! {bootstrap_complete, self(), ekka_rlog_lib:make_key()},
+    Parent ! {bootstrap_complete, self(), Checkpoint},
     gen_server:reply(From, ok),
     {stop, normal, St};
 handle_call({batch, {Server, Table, Records}}, _From, St = #client{server = Server}) ->
@@ -138,15 +138,15 @@ terminate(_Reason, St = #client{}) ->
 push_batch({Node, Pid}, Batch = {_, _, _}) ->
     ekka_rlog_lib:rpc_call(Node, ?MODULE, do_push_batch, [Pid, Batch]).
 
--spec complete(ekka_rlog_lib:subscriber(), pid()) -> ok.
-complete({Node, Pid}, Server) ->
-    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_complete, [Pid, Server]).
+-spec complete(ekka_rlog_lib:subscriber(), pid(), ekka_rlog_server:checkpoint()) -> ok.
+complete({Node, Pid}, Server, Checkpoint) ->
+    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_complete, [Pid, Server, Checkpoint]).
 
 handle_batch(Table, Records) ->
     lists:foreach(fun(I) -> mnesia:dirty_write(Table, I) end, Records).
 
 start_table_traverse(St = #server{tables = [], subscriber = Subscriber}) ->
-    ok = complete(Subscriber, self()),
+    ok = complete(Subscriber, self(), ekka_rlog_lib:approx_snapshot()),
     {stop, normal, St};
 start_table_traverse(St0 = #server{ shard = Shard
                                   , subscriber = Subscriber
@@ -194,6 +194,6 @@ prepare_batch(Table, Keys) ->
 do_push_batch(Pid, Batch) ->
     gen_server:call(Pid, {batch, Batch}, infinity).
 
--spec do_complete(pid(), pid()) -> ok.
-do_complete(Client, Server) ->
-    gen_server:call(Client, {complete, Server}, infinity).
+-spec do_complete(pid(), pid(), ekka_rlog_server:checkpoint()) -> ok.
+do_complete(Client, Server, Snapshot) ->
+    gen_server:call(Client, {complete, Server, Snapshot}, infinity).

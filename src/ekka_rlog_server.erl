@@ -47,7 +47,7 @@
 %% Type declarations
 %%================================================================================
 
--type checkpoint() :: ekka_rlog_lib:txid() | undefined.
+-type checkpoint() :: integer().
 
 -record(s,
         { shard               :: ekka_rlog:shard()
@@ -142,8 +142,7 @@ terminate(_Reason, #{} = St) ->
 -spec needs_bootstrap(integer(), integer(), checkpoint()) -> {boolean(), integer()}.
 %% TODO: TMP workaround, always bootstrap
 needs_bootstrap(_, Replay, _) ->
-    {ReplaySince, _} = ekka_rlog_lib:make_key_in_past(Replay),
-    {true, ReplaySince}.
+    {true, Replay}.
 
 %% needs_bootstrap(BootstrapThreshold, Replay, Checkpoint) ->
 %%     {BootstrapDeadline, _} = ekka_rlog_lib:make_key_in_past(BootstrapThreshold),

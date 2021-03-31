@@ -53,7 +53,7 @@
         , remote_core_node = undefined :: node() | undefined
         , agent                        :: pid() | undefined
         , tmp_worker       = undefined :: pid() | undefined
-        , checkpoint       = undefined :: ekka_rlog_server:checkpoint()
+        , checkpoint       = undefined :: ekka_rlog_server:checkpoint() | undefined
         , next_batch_seqno = 0         :: integer()
         , replayq                      :: replayq:q() | undefined
         }).
@@ -164,35 +164,35 @@ terminate(_Reason, _State, _Data) ->
 
 %% @private Consume transactions from the core node
 -spec handle_tlog_entry(state(), ekka_rlog_lib:tlog_entry(), data()) -> fsm_result().
-handle_tlog_entry(?normal, {Agent, SeqNo, TXID, Transactions},
+handle_tlog_entry(?normal, {Agent, SeqNo, TXID, Transaction},
                   D = #d{ agent            = Agent
                         , next_batch_seqno = SeqNo
                         }) ->
     %% Normal flow, transactions are applied directly to the replica:
-    ?tp(rlog_replica_import_batch,
-        #{ agent        => Agent
-         , seqno        => SeqNo
-         , txid         => TXID
-         , transactions => Transactions
+    ?tp(rlog_replica_import_trans,
+        #{ agent       => Agent
+         , seqno       => SeqNo
+         , txid        => TXID
+         , transaction => Transaction
          }),
-    ekka_rlog_lib:import_batch(transaction, Transactions),
+    ekka_rlog_lib:import_batch(transaction, Transaction),
     {keep_state, D#d{ next_batch_seqno = SeqNo + 1
                     , checkpoint       = TXID
                     }};
-handle_tlog_entry(St, {Agent, SeqNo, TXID, Transactions},
+handle_tlog_entry(St, {Agent, SeqNo, TXID, Transaction},
                   D0 = #d{ agent = Agent
                          , next_batch_seqno = SeqNo
                          }) when St =:= ?bootstrap orelse
                                  St =:= ?local_replay ->
     %% Historical data is being replayed, realtime transactions should
     %% be buffered up for later consumption:
-    ?tp(rlog_replica_store_batch,
-        #{ agent        => Agent
-         , seqno        => SeqNo
-         , txid         => TXID
-         , transactions => Transactions
+    ?tp(rlog_replica_store_trans,
+        #{ agent       => Agent
+         , seqno       => SeqNo
+         , txid        => TXID
+         , transaction => Transaction
          }),
-    D = buffer_tlog_ops(Transactions, D0),
+    D = buffer_tlog_ops(Transaction, D0),
     MaybeCheckpoint = case St of
                           ?local_replay -> TXID;
                           ?bootstrap    -> undefined
@@ -208,8 +208,8 @@ handle_tlog_entry(_State, {Agent, SeqNo, TXID, _},
     %% TODO: sometimes it should be possible to restart gracefully to
     %% salvage the bootstrapped data.
     error({gap_in_the_tlog, TXID, SeqNo, MySeqNo});
-handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transactions}, Data) ->
-    ?tp(warning, rlog_replica_unexpected_batch,
+handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transaction}, Data) ->
+    ?tp(warning, rlog_replica_unexpected_trans,
         #{ state => State
          , from  => Agent
          , txid  => TXID
@@ -325,9 +325,9 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
             try_connect(Rest, Shard, Checkpoint)
     end.
 
--spec buffer_tlog_ops([ekka_rlog_lib:tx()], data()) -> data().
-buffer_tlog_ops(Transactions, D = #d{replayq = Q0}) ->
-    Q = replayq:append(Q0, Transactions),
+-spec buffer_tlog_ops(ekka_rlog_lib:tx(), data()) -> data().
+buffer_tlog_ops(Transaction, D = #d{replayq = Q0}) ->
+    Q = replayq:append(Q0, Transaction),
     D#d{replayq = Q}.
 
 -spec handle_normal(data()) -> ok.

@@ -19,6 +19,8 @@
 -compile(export_all).
 -compile(nowarn_export_all).
 
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
+
 %% @doc Get all the test cases in a CT suite.
 all(Suite) ->
     lists:usort([F || {F, 1} <- Suite:module_info(exports),
@@ -93,6 +95,14 @@ start_ekka(#{node := Node, join_to := JoinTo}) ->
         ignore -> ok
     end,
     Node.
+
+write(Record) ->
+    ?tp_span(trans_write, #{record => Record, txid => get_txid()},
+             mnesia:write(Record)).
+
+read(Tab, Key) ->
+    ?tp_span(trans_read, #{tab => Tab, txid => get_txid()},
+             mnesia:read(Tab, Key)).
 
 start_slave(node, Name, Env) ->
     CommonBeamOpts = "+S 1:1 " % We want VMs to only occupy a single core
@@ -177,3 +187,9 @@ expand_node_specs(Specs, CommonEnv) ->
 
 gen_node_name(N) ->
     list_to_atom("n" ++ integer_to_list(N)).
+
+get_txid() ->
+    case mnesia:get_activity_id() of
+        {_, TID, _} ->
+            TID
+    end.

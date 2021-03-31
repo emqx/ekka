@@ -52,7 +52,7 @@ ro_read_all_keys() ->
     ekka_mnesia:ro_transaction(
       fun() ->
               Keys = mnesia:all_keys(test_tab),
-              [mnesia:read(test_tab, K) || K <- Keys]
+              [ekka_ct:read(test_tab, K) || K <- Keys]
       end).
 
 delete(K) ->
@@ -67,11 +67,11 @@ counter(Key, NIter) ->
     {atomic, Val} =
         ekka_mnesia:transaction(
           fun() ->
-                  case mnesia:read(test_tab, Key) of
+                  case ekka_ct:read(test_tab, Key) of
                       [] -> V = 0;
                       [#test_tab{val = V}] -> V
                   end,
-                  ok = mnesia:write(#test_tab{key = Key, val = V + 1}),
+                  ok = ekka_ct:write(#test_tab{key = Key, val = V + 1}),
                   V
           end),
     ?tp(trans_gen_counter_update,
