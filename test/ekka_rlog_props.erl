@@ -19,14 +19,17 @@
 -export([ replicant_bootstrap_stages/2
         , all_batches_received/1
         , counter_import_check/2
+
+        , check_sequence/1
         ]).
 
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 -include_lib("stdlib/include/assert.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 replicant_bootstrap_stages(Node, Trace0) ->
     Trace = ?of_domain([ekka, rlog, replica|_], Trace0),
-    ?causality(# {?snk_kind := state_change, to := disconnected, ?snk_meta := #{pid := _Pid}}
+    ?causality( #{?snk_kind := state_change, to := disconnected, ?snk_meta := #{pid := _Pid}}
               , #{?snk_kind := state_change, to := bootstrap,    ?snk_meta := #{pid := _Pid}}
               , Trace
               ),
@@ -52,13 +55,51 @@ counter_import_check(CounterKey, Trace) ->
                                   , ops := [{{test_tab, K}, Rec, write}]
                                   } <- Trace, K =:= CounterKey],
     ?assert(length(Writes) > 0),
-    ok = check_sequence(Writes).
+    ?assert(check_sequence(Writes)).
 
+%% Check sequence of numbers. It should be increasing by no more than
+%% 1, with possible restarts from an earler point. If restart
+%% happened, then the last element of the sequence must be greater
+%% than any other element seen before.
+check_sequence([]) ->
+    true;
 check_sequence([First|Rest]) ->
-    check_sequence(First, Rest).
+    check_sequence(First, First, Rest).
 
-check_sequence(Pred, []) ->
-    ok;
-check_sequence(Pred, [Next|Rest]) ->
-    ?assertEqual(Next, Pred + 1),
-    check_sequence(Next, Rest).
+check_sequence(Max, LastElem, []) ->
+    LastElem >= Max orelse
+        ?panic("invalid sequence restart",
+               #{ maximum   => Max
+                , last_elem => LastElem
+                }),
+    true;
+check_sequence(Max, Prev, [Next|Rest]) when Next =:= Prev + 1 ->
+    check_sequence(max(Max, Prev), Next, Rest);
+check_sequence(Max, Prev, [Next|Rest]) when Next =< Prev ->
+    check_sequence(max(Max, Prev), Next, Rest);
+check_sequence(Max, Prev, [Next|_]) ->
+    ?panic("gap in the sequence",
+           #{ maximum => Max
+            , elem => Prev
+            , next_elem => Next
+            }).
+
+%%================================================================================
+%% Unit tests
+%%================================================================================
+
+check_sequence_test() ->
+    ?assert(check_sequence([])),
+    ?assert(check_sequence([1, 2])),
+    ?assert(check_sequence([2, 3, 4])),
+    %% Gap:
+    ?assertError(_, check_sequence([0, 1, 3])),
+    ?assertError(_, check_sequence([0, 1, 13, 14])),
+    %% Replays:
+    ?assert(check_sequence([1, 1, 2, 3, 3])),
+    ?assert(check_sequence([1, 2, 3,   1, 2, 3, 4])),
+    ?assert(check_sequence([1, 2, 3,   1, 2, 3, 4,   3, 4])),
+    %% Invalid replays:
+    ?assertError(_, check_sequence([1, 2, 3,   2])),
+    ?assertError(_, check_sequence([1, 2, 3,   2, 4])),
+    ?assertError(_, check_sequence([1, 2, 3,   2, 3, 4, 5,   3, 4])).
