@@ -147,7 +147,7 @@ t_rlog_smoke_test(_) ->
                %% Other tests
                ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
                ?assert(ekka_rlog_props:all_batches_received(Trace)),
-               ekka_rlog_props:counter_import_check(CounterKey, Trace)
+               ekka_rlog_props:counter_import_check(CounterKey, N3, Trace)
        end).
 
 t_transaction_on_replicant(_) ->
@@ -167,6 +167,30 @@ t_transaction_on_replicant(_) ->
        fun([N1, N2], Trace) ->
                ?assert(ekka_rlog_props:replicant_bootstrap_stages(N2, Trace)),
                ?assert(ekka_rlog_props:all_batches_received(Trace))
+       end).
+
+t_rand_error_injection(_) ->
+    snabbkaffe:fix_ct_logging(),
+    Cluster = ekka_ct:cluster([core, core, replicant], []),
+    CounterKey = counter,
+    ?check_trace(
+       try
+           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           stabilize(1000),
+           %% Everything in ekka replicant will crash
+           ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog, replica|_]}}
+                        , snabbkaffe_nemesis:random_crash(0.1)
+                        ),
+           ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 100, 100]),
+           stabilize(5000), compare_table_contents(test_tab, Nodes),
+           N3
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(N3, Trace) ->
+               ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
+               %ekka_rlog_props:counter_import_check(CounterKey, N3, Trace),
+               ?assert(length(?of_kind(snabbkaffe_crash, Trace)) > 1)
        end).
 
 cluster_benchmark(_) ->
@@ -228,14 +252,11 @@ wait_shards(Nodes, Shards) ->
     ok.
 
 stabilize(Timeout) ->
-    stabilize(Timeout, 10).
-
-stabilize(_, 0) ->
-    error(failed_to_stabilize);
-stabilize(Timeout, N) ->
-    case ?block_until(#{?snk_meta := [ekka, rlog|_]}, Timeout) of
+    case ?block_until(#{?snk_meta := #{domain := [ekka, rlog|_]}}, Timeout, 0) of
         timeout -> ok;
-        {ok, _} -> stabilize(Timeout, N - 1)
+        {ok, Evt} ->
+            %%ct:pal("Restart waiting for cluster stabilize sue to ~p", [Evt]),
+            stabilize(Timeout)
     end.
 
 compare_table_contents(_, []) ->

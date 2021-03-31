@@ -26,6 +26,7 @@
         , mnesia/1
         , benchmark/3
         , counter/2
+        , counter/3
         , ro_read_all_keys/0
         ]).
 
@@ -61,9 +62,12 @@ delete(K) ->
               mnesia:delete({test_tab, K})
       end).
 
-counter(_Key, 0) ->
+counter(Key, N) ->
+    counter(Key, N, 0).
+
+counter(_Key, 0, _) ->
     ok;
-counter(Key, NIter) ->
+counter(Key, NIter, Delay) ->
     {atomic, Val} =
         ekka_mnesia:transaction(
           fun() ->
@@ -78,6 +82,7 @@ counter(Key, NIter) ->
         #{ key => Key
          , value => Val
          }),
+    timer:sleep(Delay),
     counter(Key, NIter - 1).
 
 benchmark(ResultFile,
