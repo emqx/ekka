@@ -111,7 +111,7 @@ t_rlog_smoke_test(_) ->
     Cluster = ekka_ct:cluster([core, core, replicant], Env),
     CounterKey = counter,
     ?check_trace(
-       begin
+       try
            %% Inject some orderings to make sure the replicant
            %% receives transactions in all states.
            %%
@@ -123,32 +123,31 @@ t_rlog_smoke_test(_) ->
            ?force_ordering(#{?snk_kind := state_change, to := bootstrap}, #{?snk_kind := trans_gen_counter_update, value := 15}),
            %% 4. Make sure some transactions are produced while in normal mode
            ?force_ordering(#{?snk_kind := state_change, to := normal}, #{?snk_kind := trans_gen_counter_update, value := 25}),
-           try
-               Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
-               wait_shards([N1, N2], [test_shard]),
-               %% Generate some transactions:
-               {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
-               ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 30]),
-               stabilize(1000), compare_table_contents(test_tab, Nodes),
-               %% Create a delete transaction, to see if deletes are propagated too:
-               {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
-               stabilize(1000), compare_table_contents(test_tab, Nodes),
-               ekka_ct:stop_slave(N3),
-               Nodes
-           after
-               ekka_ct:teardown_cluster(Cluster)
-           end
+
+           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           wait_shards([N1, N2], [test_shard]),
+           %% Generate some transactions:
+           {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
+           ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 30]),
+           stabilize(1000), compare_table_contents(test_tab, Nodes),
+           %% Create a delete transaction, to see if deletes are propagated too:
+           {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
+           stabilize(1000), compare_table_contents(test_tab, Nodes),
+           ekka_ct:stop_slave(N3),
+           Nodes
+       after
+           ekka_ct:teardown_cluster(Cluster)
        end,
        fun([N1, N2, N3], Trace) ->
                %% Ensure that the nodes assumed designated roles:
                ?projection_complete(node, ?of_kind(rlog_server_start, Trace), [N1, N2]),
                ?projection_complete(node, ?of_kind(rlog_replica_start, Trace), [N3]),
                %% TODO: Check that some transactions have been buffered during catchup (to increase coverage):
-               %?assertMatch([_|_], ?of_kind(rlog_replica_store_batch, Trace)),
+               %?assertMatch([_|_], ?of_kind(rlog_replica_store_trans, Trace)),
                %% Other tests
-               replicant_bootstrap_stages(N3, Trace),
-               all_batches_received(Trace),
-               counter_import_check(CounterKey, Trace)
+               ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
+               ?assert(ekka_rlog_props:all_batches_received(Trace)),
+               ekka_rlog_props:counter_import_check(CounterKey, Trace)
        end).
 
 t_transaction_on_replicant(_) ->
@@ -166,8 +165,8 @@ t_transaction_on_replicant(_) ->
            ekka_ct:teardown_cluster(Cluster)
        end,
        fun([N1, N2], Trace) ->
-               replicant_bootstrap_stages(N2, Trace),
-               all_batches_received(Trace)
+               ?assert(ekka_rlog_props:replicant_bootstrap_stages(N2, Trace)),
+               ?assert(ekka_rlog_props:all_batches_received(Trace))
        end).
 
 cluster_benchmark(_) ->
@@ -220,23 +219,6 @@ do_cluster_benchmark(#{ backend    := Backend
         ekka_ct:teardown_cluster(Cluster)
     end.
 
-replicant_bootstrap_stages(Node, Trace) ->
-    Transitions = [To || #{ ?snk_kind := state_change
-                          , ?snk_meta := #{node := Node, domain := [ekka, rlog, replica]}
-                          , to := To
-                          } <- Trace],
-    ?assertMatch( [disconnected, bootstrap, local_replay, normal]
-                , Transitions
-                ).
-
-all_batches_received(Trace) ->
-    ?assert(
-       ?strict_causality(
-           #{?snk_kind := rlog_realtime_op, agent := _A, seqno := _S}
-         , #{?snk_kind := K, agent := _A, seqno := _S} when K =:= rlog_replica_import_batch;
-                                                            K =:= rlog_replica_store_batch
-         , Trace)).
-
 wait_shards(Nodes, Shards) ->
     [{ok, _} = ?block_until(#{ ?snk_kind := "Shard fully up"
                              , shard     := Shard
@@ -266,20 +248,3 @@ compare_table_contents(Table, Nodes) ->
               ?assertEqual({Node, Reference}, {Node, Contents})
       end,
       Rest).
-
-counter_import_check(CounterKey, Trace) ->
-    Writes = [element(3, Rec) || #{ ?snk_kind := rlog_import_trans
-                                  , ops := [{{test_tab, K}, Rec, write}]
-                                  } <- Trace, K =:= CounterKey],
-    ?assert(length(Writes) > 0),
-    ok = check_sequence(Writes).
-
-
-check_sequence([First|Rest]) ->
-    check_sequence(First, Rest).
-
-check_sequence(Pred, []) ->
-    ok;
-check_sequence(Pred, [Next|Rest]) ->
-    ?assertEqual(Next, Pred + 1),
-    check_sequence(Next, Rest).

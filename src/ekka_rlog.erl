@@ -23,7 +23,6 @@
         , shard_config/1
         , core_nodes/0
         , role/0
-        , node_id/0
         , subscribe/4
         ]).
 
@@ -56,10 +55,6 @@ init() ->
 -spec transaction(func(A), [term()]) -> ekka_mnesia:t_result(A).
 transaction(F, Args) -> do(transaction, F, Args).
 
-%% TODO: configurable
-node_id() ->
-    0.
-
 -spec shards() -> [shard()].
 shards() ->
     persistent_term:get({ekka, shards}, []).
@@ -85,11 +80,11 @@ subscribe(Shard, RemoteNode, Subscriber, Checkpoint) ->
     Args = [Shard, {MyNode, Subscriber}, Checkpoint],
     ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe, Args).
 
--spec get_internals() -> {ekka_rlog_lib:txid(), ets:tab()}.
+-spec get_internals() -> {ekka_rlog_lib:mnesia_tid(), ets:tab()}.
 get_internals() ->
     case mnesia:get_activity_id() of
-        {_, TID, #tidstore{store = TS}} ->
-            {TID, TS}
+        {_, TID, #tidstore{store = TxStore}} ->
+            {TID, TxStore}
     end.
 
 do(Type, F, Args) ->
@@ -97,8 +92,9 @@ do(Type, F, Args) ->
     TxFun =
         fun() ->
                 Result = apply(F, Args),
-                {Key, TS} = get_internals(),
-                [dig_ops_for_shard(Key, TS, Shard) || Shard <- Shards],
+                {TID, TxStore} = get_internals(),
+                Key = ekka_rlog_lib:make_key(TID),
+                [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
                 Result
         end,
     case Type of
@@ -107,9 +103,9 @@ do(Type, F, Args) ->
     end.
 
 %% TODO: Implement proper filtering
-dig_ops_for_shard(Key, TS, Shard) ->
+dig_ops_for_shard(Key, TxStore, Shard) ->
     #{match_spec := MS} = ekka_rlog:shard_config(Shard),
-    Ops = ets:select(TS, MS),
+    Ops = ets:select(TxStore, MS),
     mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write).
 
 %% get_tx_ops(F, Args) ->

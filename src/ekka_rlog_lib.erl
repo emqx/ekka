@@ -17,8 +17,8 @@
 %% Internal functions
 -module(ekka_rlog_lib).
 
--export([ make_key/0
-        , make_key_in_past/1
+-export([ approx_snapshot/0
+        , make_key/1
         , import_batch/2
         , rpc_call/4
         , rpc_cast/4
@@ -35,8 +35,8 @@
              , change_type/0
              , op/0
              , tx/0
+             , mnesia_tid/0
              , txid/0
-             , node_id/0
              , rlog/0
              ]).
 
@@ -48,8 +48,8 @@
 %% Type declarations
 %%================================================================================
 
--type node_id() :: integer().
--type txid() :: #tid{}.
+-type mnesia_tid() :: #tid{}.
+-type txid() :: {ekka_rlog_server:checkpoint(), pid()}.
 
 -type table():: atom().
 
@@ -74,20 +74,23 @@
 %% RLOG key creation
 %%================================================================================
 
+-spec approx_snapshot() -> ekka_rlog_server:checkpoint().
+approx_snapshot() ->
+    erlang:system_time(millisecond).
+
 %% Log key should be globally unique.
 %%
-%% it is a tuple of a timestamp (ts) and the node id (node_id),
-%% where ts is at nanosecond precesion to ensure it is locally
-%% monotoic and unique, and node_id, which identifies the node which
-%% initiated the transaction, should ensure global uniqueness.
--spec make_key() -> ekka_rlog_lib:txid().
-make_key() ->
-    {erlang:system_time(nanosecond), ekka_rlog:node_id()}.
+%% it is a tuple of a timestamp (ts) and the node id (node_id), where
+%% ts is at millisecond precesion to ensure it is locally monotoic and
+%% unique, and transaction pid, should ensure global uniqueness.
+-spec make_key(ekka_rlog_lib:mnesia_tid()) -> ekka_rlog_lib:txid().
+make_key(#tid{pid = Pid}) ->
+    {approx_snapshot(), Pid}.
 
--spec make_key_in_past(integer()) -> ekka_rlog_lib:txid().
-make_key_in_past(Dt) ->
-    {TS, Node} = make_key(),
-    {TS - Dt, Node}.
+%% -spec make_key_in_past(integer()) -> ekka_rlog_lib:txid().
+%% make_key_in_past(Dt) ->
+%%     {TS, Node} = make_key(),
+%%     {TS - Dt, Node}.
 
 %%================================================================================
 %% Transaction import
