@@ -219,6 +219,10 @@ handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transaction}, Data) ->
 
 -spec initiate_bootstrap(data()) -> fsm_result().
 initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
+    %% Discard all data of the shard:
+    #{tables := Tables} = ekka_rlog:shard_config(Shard),
+    [{atomic, ok} = mnesia:clear_table(Tab) || Tab <- Tables],
+    %% Do bootstrap:
     {ok, Pid} = ekka_rlog_bootstrapper:start_link_client(Shard, Remote, self()),
     Q = replayq:open(#{ mem_only => true
                       , sizer => fun(_) -> 1 end
