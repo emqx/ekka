@@ -338,6 +338,10 @@ do_wait_for_tables(Tables) ->
 
 -spec ro_transaction(fun(() -> A)) -> t_result(A).
 ro_transaction(Fun) ->
+    case ekka_rlog:role() of
+        core      -> ok;
+        replicant -> _ = ekka_rlog_replica:upstream() % assert that replica is fully up
+    end,
     mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]).
 
 -spec transaction(fun((...) -> A), list()) -> t_result(A).
