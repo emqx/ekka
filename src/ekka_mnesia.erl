@@ -310,7 +310,6 @@ wait_for(start) ->
         stopping -> {error, mnesia_unexpectedly_stopping};
         starting -> timer:sleep(1000), wait_for(start)
     end;
-
 wait_for(stop) ->
     case mnesia:system_info(is_running) of
         no       -> ok;
@@ -318,7 +317,6 @@ wait_for(stop) ->
         starting -> {error, mnesia_unexpectedly_starting};
         stopping -> timer:sleep(1000), wait_for(stop)
     end;
-
 wait_for(tables) ->
     Tables = mnesia:system_info(local_tables),
     do_wait_for_tables(Tables).
@@ -338,10 +336,11 @@ do_wait_for_tables(Tables) ->
 
 -spec ro_transaction(fun(() -> A)) -> t_result(A).
 ro_transaction(Fun) ->
-    case ekka_rlog:role() of
-        core      -> ok;
-        replicant -> _ = ekka_rlog_replica:upstream() % assert that replica is fully up
-    end,
+    %% TODO:
+    %% case ekka_rlog:role() of
+    %%     core      -> ok;
+    %%     replicant -> _ = ekka_rlog_replica:upstream() % assert that replica is fully up
+    %% end,
     mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]).
 
 -spec transaction(fun((...) -> A), list()) -> t_result(A).
@@ -350,7 +349,9 @@ transaction(Fun, Args) ->
         core ->
             ekka_rlog:transaction(fun ekka_rlog_activity:transaction/2, [Fun, Args]);
         replicant ->
-            Core = ekka_rlog_replica:upstream(),
+            %% TODO: This is rather dumb:
+            [Shard|_] = ekka_rlog:shards(),
+            Core = ekka_rlog_replica:upstream(Shard),
             ekka_rlog_lib:rpc_call(Core, ?MODULE, transaction, [Fun, Args])
     end.
 

@@ -24,6 +24,7 @@
         , core_nodes/0
         , role/0
         , subscribe/4
+        , wait_for_shards/2
         ]).
 
 -export_type([ shard/0
@@ -102,7 +103,15 @@ do(Type, F, Args) ->
 %        async_dirty -> mnesia:async_dirty(TxFun)
     end.
 
-%% TODO: Implement proper filtering
+-spec wait_for_shards([shard()], timeout()) -> ok | timeout.
+wait_for_shards(Shards, Timeout) ->
+    case role() of
+        core ->
+            ok;
+        replicant ->
+            ekka_rlog_event_mgr:wait_for_shards(Shards, Timeout)
+    end.
+
 dig_ops_for_shard(Key, TxStore, Shard) ->
     #{match_spec := MS} = ekka_rlog:shard_config(Shard),
     Ops = ets:select(TxStore, MS),
