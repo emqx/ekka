@@ -103,7 +103,7 @@ do(Type, F, Args) ->
 %        async_dirty -> mnesia:async_dirty(TxFun)
     end.
 
--spec wait_for_shards([shard()], timeout()) -> ok | timeout.
+-spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.
 wait_for_shards(Shards, Timeout) ->
     case role() of
         core ->

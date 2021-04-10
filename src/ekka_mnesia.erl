@@ -17,6 +17,7 @@
 -module(ekka_mnesia).
 
 -include("ekka.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 
@@ -103,17 +104,29 @@ ensure_stopped() ->
 %% @private
 %% @doc Init mnesia schema or tables.
 init_schema() ->
-    case mnesia:system_info(extra_db_nodes) of
-        []    -> mnesia:create_schema([node()]);
-        [_|_] -> ok
+    IsAlone = case mnesia:system_info(extra_db_nodes) of
+                  []    -> true;
+                  [_|_] -> false
+              end,
+    case (ekka_rlog:role() =:= replicant) orelse IsAlone of
+        true ->
+            mnesia:create_schema([node()]);
+        false ->
+            ok
     end.
 
 %% @private
 %% @doc Init mnesia tables.
 init_tables() ->
-    case mnesia:system_info(extra_db_nodes) of
-        []    -> create_tables();
-        [_|_] -> copy_tables()
+    IsAlone = case mnesia:system_info(extra_db_nodes) of
+                  []    -> true;
+                  [_|_] -> false
+              end,
+    case (ekka_rlog:role() =:= replicant) orelse IsAlone of
+        true ->
+            create_tables();
+        false ->
+            copy_tables()
     end.
 
 %% @doc Create mnesia tables.
@@ -136,8 +149,12 @@ copy_table(Name) ->
 
 -spec(copy_table(Name:: atom(), ram_copies | disc_copies) -> ok).
 copy_table(Name, RamOrDisc) ->
-    core = ekka_rlog:role(), % assert
-    ensure_tab(mnesia:add_table_copy(Name, node(), RamOrDisc)).
+    case ekka_rlog:role() of
+        core ->
+            ensure_tab(mnesia:add_table_copy(Name, node(), RamOrDisc));
+        replicant ->
+            ?LOG(warning, "Ignoring illegal attempt to create a table copy ~p on replicant node ~p", [Name, node()])
+    end.
 
 %% @doc Copy schema.
 copy_schema(Node) ->
