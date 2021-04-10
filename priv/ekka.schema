@@ -1,3 +1,4 @@
+%%-*- mode: erlang -*-
 %%--------------------------------------------------------------------
 %% Cluster
 %%--------------------------------------------------------------------
@@ -103,6 +104,7 @@
 
 {mapping, "cluster.etcd.server", "ekka.cluster_discovery", [
   {datatype, string}
+
 ]}.
 
 {mapping, "cluster.etcd.prefix", "ekka.cluster_discovery", [
@@ -198,3 +200,23 @@
   {Strategy, Filter(Options(Strategy))}
 end}.
 
+
+%%--------------------------------------------------------------------
+%% RLOG
+%%--------------------------------------------------------------------
+{mapping, "rlog.role", "ekka.node_role", [
+  {default, core},
+  {datatype, {enum, [core, replicant]}},
+  {override_env, "NODE_ROLE"}
+]}.
+
+{mapping, "rlog.core_nodes", "ekka.core_nodes", [
+  {default, ""},
+  {datatype, string},
+  {override_env, "CORE_NODES"}
+]}.
+
+{translation, "ekka.core_nodes", fun(Conf) ->
+    Setting = cuttlefish:conf_get("rlog.core_nodes", Conf),
+    lists:map(fun erlang:list_to_atom/1, string:lexemes(Setting, " "))
+end}.

@@ -20,7 +20,11 @@
 
 -behaviour(supervisor).
 
--export([init/1, start_link/1, start_link_agent_sup/1, start_link_bootstrapper_sup/1]).
+%% API:
+-export([start_link/1, start_link_agent_sup/1, start_link_bootstrapper_sup/1]).
+
+%% supervisor callbacks:
+-export([init/1]).
 
 %%================================================================================
 %% API funcions

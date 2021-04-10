@@ -26,7 +26,8 @@
         , read_shard_config/0
         , make_shard_match_spec/1
         , shuffle/1
-        %% , local_rpc_call/4
+        , send_after/3
+        , cancel_timer/1
         ]).
 
 -export_type([ tlog_entry/0
@@ -203,3 +204,15 @@ make_shard_match_spec(Tables) ->
 shuffle(L0) ->
     {_, L} = lists:unzip(lists:sort([{rand:uniform(), I} || I <- L0])),
     L.
+
+-spec send_after(timeout(), pid(), _Message) -> reference() | undefined.
+send_after(infinity, _, _) ->
+    undefined;
+send_after(Timeout, To, Message) ->
+    erlang:send_after(Timeout, To, Message).
+
+-spec cancel_timer(reference() | undefined) -> ok.
+cancel_timer(undefined) ->
+    ok;
+cancel_timer(TRef) ->
+    erlang:cancel_timer(TRef).

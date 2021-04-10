@@ -19,7 +19,10 @@
 -module(ekka_rlog_replica).
 
 %% API:
--export([start_link/1, push_tlog_entry/2, upstream/0]).
+-export([ start_link/1
+        , push_tlog_entry/2
+        , upstream/1
+        ]).
 
 %% gen_statem callbacks:
 -export([init/1, terminate/3, code_change/4, callback_mode/0, handle_event/4]).
@@ -27,6 +30,7 @@
 %% Internal exports:
 -export([do_push_tlog_entry/2]).
 
+-include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 %%================================================================================
@@ -62,10 +66,6 @@
 
 -type fsm_result() :: gen_statem:event_handler_result(state()).
 
-%% Tables and table keys:
--define(replica_tab, ekka_rlog_replica_tab).
--define(upstream_node, upstream_node).
-
 %%================================================================================
 %% API funcions
 %%================================================================================
@@ -83,9 +83,9 @@ start_link(Shard) ->
     Config = #{}, % TODO
     gen_statem:start_link(?MODULE, {Shard, Config}, []).
 
--spec upstream() -> node().
-upstream() ->
-    case ets:lookup(?replica_tab, ?upstream_node) of
+-spec upstream(ekka_rlog:shard()) -> node().
+upstream(Shard) ->
+    case ets:lookup(?replica_tab, {?upstream_node, Shard}) of
         [{_, Node}] -> Node;
         []          -> error(disconnected)
     end.
@@ -107,12 +107,6 @@ init({Shard, _Opts}) ->
                                     , shard  => Shard
                                     }),
     ?tp(notice, rlog_replica_start, #{node => node()}),
-    ets:new(?replica_tab, [ ordered_set
-                          , named_table
-                          , protected
-                          , {write_concurrency, false}
-                          , {read_concurrency, true}
-                          ]),
     D = #d{ shard = Shard
           },
     {ok, ?disconnected, D}.
@@ -155,7 +149,7 @@ handle_event(EventType, Event, State, Data) ->
 code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
 
-terminate(_Reason, _State, _Data) ->
+terminate(_Reason, _State, #d{}) ->
     ok.
 
 %%================================================================================
@@ -274,8 +268,8 @@ replay_local(D0 = #d{replayq = Q0}) ->
     end.
 
 -spec initiate_reconnect(data()) -> fsm_result().
-initiate_reconnect(_Data) ->
-    ets:delete(?replica_tab, ?upstream_node),
+initiate_reconnect(#d{shard = Shard}) ->
+    ets:delete(?replica_tab, {?upstream_node, Shard}),
     {keep_state_and_data, [{timeout, 0, ?reconnect}]}.
 
 %% @private Try connecting to a core node
@@ -335,8 +329,9 @@ buffer_tlog_ops(Transaction, D = #d{replayq = Q0}) ->
     D#d{replayq = Q}.
 
 -spec handle_normal(data()) -> ok.
-handle_normal(D) ->
-    ets:insert(?replica_tab, {?upstream_node, D#d.remote_core_node}),
+handle_normal(D = #d{shard = Shard}) ->
+    ets:insert(?replica_tab, {{?upstream_node, Shard}, D#d.remote_core_node}),
+    ekka_rlog_event_mgr:notify_shard_up(Shard),
     ?tp(notice, "Shard fully up",
         #{ node => node()
          , shard => D#d.shard

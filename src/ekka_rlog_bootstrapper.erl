@@ -149,7 +149,6 @@ start_table_traverse(St = #server{tables = [], subscriber = Subscriber}) ->
     ok = complete(Subscriber, self(), ekka_rlog_lib:approx_snapshot()),
     {stop, normal, St};
 start_table_traverse(St0 = #server{ shard = Shard
-                                  , subscriber = Subscriber
                                   , tables = [Table|Rest]
                                   , key_queue = Q0
                                   }) ->
