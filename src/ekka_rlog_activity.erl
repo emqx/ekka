@@ -18,7 +18,7 @@
 -module(ekka_rlog_activity).
 
 -include("ekka.hrl").
--include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 -include_lib("mnesia/src/mnesia.hrl").
 
 -export([ transaction/1

@@ -34,7 +34,7 @@
 -export([init/1, terminate/3, code_change/4, callback_mode/0, handle_event/4]).
 
 -include("ekka_rlog.hrl").
--include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 
 %% Define macros for each state to prevent typos:
 -define(catchup, catchup).

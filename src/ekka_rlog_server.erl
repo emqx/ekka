@@ -41,7 +41,7 @@
 
 -export_type([checkpoint/0]).
 
--include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 
 %%================================================================================
 %% Type declarations

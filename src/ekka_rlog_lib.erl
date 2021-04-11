@@ -41,7 +41,7 @@
              , rlog/0
              ]).
 
--include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 -include("ekka_rlog.hrl").
 -include_lib("mnesia/src/mnesia.hrl").
 

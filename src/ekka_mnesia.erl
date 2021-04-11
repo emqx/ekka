@@ -18,7 +18,7 @@
 
 -include("ekka.hrl").
 -include_lib("kernel/include/logger.hrl").
--include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 
 
 %% Start and stop mnesia

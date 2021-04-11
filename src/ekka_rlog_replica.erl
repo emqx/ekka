@@ -31,7 +31,7 @@
 -export([do_push_tlog_entry/2]).
 
 -include("ekka_rlog.hrl").
--include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 
 %%================================================================================
 %% Type declarations
@@ -275,7 +275,7 @@ initiate_reconnect(#d{shard = Shard}) ->
 %% @private Try connecting to a core node
 -spec handle_reconnect(data()) -> fsm_result().
 handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
-    ?tp(rlog_replica_reconnect,
+    ?tp(warning, rlog_replica_reconnect,
         #{ node => node()
          }),
     case try_connect(Shard, Checkpoint) of
@@ -309,7 +309,7 @@ try_connect(Shard, Checkpoint) ->
 try_connect([], _, _) ->
     {error, no_core_available};
 try_connect([Node|Rest], Shard, Checkpoint) ->
-    ?tp(try_connect,
+    ?tp(info, try_connect,
         #{ node => Node
          }),
     case ekka_rlog:subscribe(Shard, Node, self(), Checkpoint) of

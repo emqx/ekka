@@ -24,7 +24,7 @@
 -export([write/3, first_d/1, last_d/1, next_d/2]).
 
 -include("ekka_rlog.hrl").
--include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 
 -type key() :: ekka_rlog_lib:txid().
 -type shard() :: ekka_rlog:shard().
