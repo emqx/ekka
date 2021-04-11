@@ -23,7 +23,7 @@
         , check_sequence/1
         ]).
 
--include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("snabbkaffe/include/test_macros.hrl").
 -include_lib("stdlib/include/assert.hrl").
 -include_lib("eunit/include/eunit.hrl").
 

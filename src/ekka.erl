@@ -100,7 +100,7 @@ start() ->
             error(Reason)
     end,
     {ok, _Apps} = application:ensure_all_started(ekka),
-    ekka_rlog:wait_for_shards(ekka_rlog:shards(), 15000),
+    ekka_rlog:wait_for_shards(ekka_rlog:shards(), infinity),
     ok.
 
 -spec(stop() -> ok).

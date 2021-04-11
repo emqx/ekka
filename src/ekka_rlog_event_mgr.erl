@@ -32,6 +32,7 @@
         }).
 
 -include("ekka_rlog.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 
 %%================================================================================
 %% API funcions
@@ -59,6 +60,10 @@ unsubscribe_events(Ref) ->
 
 -spec wait_for_shards([ekka_rlog:shard()], timeout()) -> ok | {timeout, [ekka_rlog:shard()]}.
 wait_for_shards(Shards, Timeout) ->
+    ?tp(notice, "Waiting for shards",
+        #{ shards => Shards
+         , timeout => Timeout
+         }),
     TRef = ekka_rlog_lib:send_after(Timeout, self(), timeout),
     ERef = subscribe_events(),
     %% Exclude shards that are up, since they are not going to send any events:
@@ -66,6 +71,10 @@ wait_for_shards(Shards, Timeout) ->
     Ret = do_wait_shards(ERef, DownShards),
     ekka_rlog_lib:cancel_timer(TRef),
     unsubscribe_events(ERef),
+    ?tp(notice, "Done waiting for shards",
+        #{ shards => Shards
+         , result =>  Ret
+         }),
     Ret.
 
 %%================================================================================

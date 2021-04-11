@@ -33,7 +33,7 @@
 %% Internal exports:
 -export([do_push_batch/2, do_complete/3]).
 
--include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 
 %%================================================================================
 %% Type declarations
