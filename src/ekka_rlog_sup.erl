@@ -55,21 +55,14 @@ init([core, Shards]) ->
                 , intensity => 100
                 , period => 1
                 },
-    Children = [event_mgr()|lists:map(fun shard_sup/1, Shards)],
+    Children = [status_mgr()|lists:map(fun shard_sup/1, Shards)],
     {ok, {SupFlags, Children}};
 init([replicant, Shards]) ->
-    %% Create a table that holds state of the replicas:
-    ets:new(?replica_tab, [ ordered_set
-                          , named_table
-                          , public
-                          , {write_concurrency, false}
-                          , {read_concurrency, true}
-                          ]),
     SupFlags = #{ strategy => one_for_one
                 , intensity => 100
                 , period => 1
                 },
-    Children = [event_mgr()|lists:map(fun replicant_worker/1, Shards)],
+    Children = [status_mgr()|lists:map(fun replicant_worker/1, Shards)],
     {ok, {SupFlags, Children}}.
 
 %%================================================================================
@@ -92,9 +85,9 @@ replicant_worker(Shard) ->
      , type => worker
      }.
 
-event_mgr() ->
-    #{ id => ekka_rlog_event_mgr
-     , start => {ekka_rlog_event_mgr, start_link, []}
+status_mgr() ->
+    #{ id => ekka_rlog_status
+     , start => {ekka_rlog_status, start_link, []}
      , restart => permanent
      , shutdown => 5000
      , type => worker
