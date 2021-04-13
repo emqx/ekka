@@ -18,6 +18,6 @@ chmod 666 $FIFO
 while true; do
     if read line < $FIFO; then
         echo "Received command ${line}"
-        $(dirname $0)/slowdown.sh $line 1 epmd
+        $(dirname $0)/slowdown.sh -d $line -j 1 epmd
     fi
 done

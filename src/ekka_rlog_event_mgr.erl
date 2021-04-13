@@ -44,6 +44,10 @@ start_link() ->
 
 -spec notify_shard_up(ekka_rlog:shard()) -> ok.
 notify_shard_up(Shard) ->
+    ?tp(notify_shard_up,
+        #{ shard => Shard
+         , node  => node()
+         }),
     gen_event:notify(?SERVER, {shard_up, Shard}).
 
 -spec subscribe_events() -> reference().
@@ -82,6 +86,11 @@ wait_for_shards(Shards, Timeout) ->
 %%================================================================================
 
 init([Ref, Subscriber]) ->
+    logger:set_process_metadata(#{domain => [ekka, rlog, evnet_mgr]}),
+    ?tp(start_event_monitor,
+        #{ reference => Ref
+         , subscriber => Subscriber
+         }),
     State = #s{ ref = Ref
               , subscriber = Subscriber
               },

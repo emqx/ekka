@@ -1,12 +1,12 @@
 #!/bin/bash
-set -eo pipefail
+set -euo pipefail
 
 [ $(uname) = Linux ] || {
     echo "Sorry, this script only works on Linux";
     exit 1;
 }
 
-[ -z $2 ] && {
+[ -z ${1+1} ] && {
     echo "Emulate network latency on the localhost.
 
 Usage:
@@ -25,30 +25,45 @@ Example:
     exit 1;
 }
 
-DELAY=$1
-JITTER=$2
-shift 2
+DELAY="10ms"
+JITTER=1
+INTERFACE=lo
+RATE=1000Mbps
 
+while getopts "r:i:d:j:" flag; do
+    case "$flag" in
+        i) INTERFACE="$OPTARG";;
+        d) DELAY="$OPTARG";;
+        j) JITTER="$OPTARG";;
+        r) RATE="$OPTARG";;
+    esac
+done
+shift $((OPTIND-1))
+
+CHAIN="OUTPUT"
 # Clean up:
-iptables -t mangle -F OUTPUT || true
-tc qdisc del dev lo root || true
+iptables -t mangle -F "$CHAIN" || true
+tc qdisc del dev "$INTERFACE" root || true
+
+echo "Delay=${DELAY} jitter=${JITTER} interface=${INTERFACE}"
 
 # Shape packets marked as 12
 MARK=12
 ID=$MARK
-tc qdisc add dev lo root handle 1: htb
-tc class add dev lo parent 1: classid 1:$ID htb rate 1000Mbps
-tc qdisc add dev lo parent 1:$ID handle $MARK netem delay $DELAY $JITTER distribution normal
-tc filter add dev lo parent 1: prio 1 protocol ip handle $MARK fw flowid 1:$ID
+tc qdisc add dev "$INTERFACE" root handle 1: htb
+tc class add dev "$INTERFACE" parent 1: classid 1:$ID htb rate "$RATE"
+# tc qdisc add dev "$INTERFACE" root netem rate "$RATE" delay "$DELAY" "$JITTER"
+tc qdisc add dev "$INTERFACE" parent 1:$ID handle $MARK netem delay $DELAY $JITTER distribution normal
+tc filter add dev "$INTERFACE" parent 1: prio 1 protocol ip handle $MARK fw flowid 1:$ID
 
 # Create firewall rules to mark the packets:
 mark_port() {
     PORT=$1
     echo "Adding latency on tcp port $PORT"
-    iptables -A OUTPUT -p tcp --dport $PORT -t mangle -j MARK --set-mark $MARK
+    iptables -A "${CHAIN}" -p tcp --dport $PORT -t mangle -j MARK --set-mark $MARK
 }
 
-while [ ! -z $1 ]; do
+while [ ! -z ${1+1} ]; do
     PORT=$1
     shift
     if [ $PORT = epmd ]; then

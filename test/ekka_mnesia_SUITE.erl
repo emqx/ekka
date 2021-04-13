@@ -24,6 +24,8 @@
 
 -record(kv_tab, {key, val}).
 
+-define(replica, ?snk_meta := #{domain := [ekka, rlog, replica|_]}).
+
 all() -> ekka_ct:all(?MODULE).
 
 init_per_suite(Config) ->
@@ -124,7 +126,7 @@ t_rlog_smoke_test(_) ->
            %% 4. Make sure some transactions are produced while in normal mode
            ?force_ordering(#{?snk_kind := state_change, to := normal}, #{?snk_kind := trans_gen_counter_update, value := 25}),
 
-           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka_async, Cluster),
            wait_shards([N1, N2], [test_shard]),
            %% Generate some transactions:
            {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
