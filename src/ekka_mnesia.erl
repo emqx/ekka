@@ -351,7 +351,7 @@ ro_transaction(Fun) ->
     %% TODO:
     %% case ekka_rlog:role() of
     %%     core      -> ok;
-    %%     replicant -> _ = ekka_rlog_replica:upstream() % assert that replica is fully up
+    %%     replicant -> _ = ekka_rlog_status:upstream() % assert that replica is fully up
     %% end,
     mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]).
 
@@ -363,7 +363,7 @@ transaction(Fun, Args) ->
         replicant ->
             %% TODO: This is rather dumb:
             [Shard|_] = ekka_rlog:shards(),
-            Core = ekka_rlog_replica:upstream(Shard),
+            Core = ekka_rlog_status:upstream(Shard),
             ekka_rlog_lib:rpc_call(Core, ?MODULE, transaction, [Fun, Args])
     end.
 
