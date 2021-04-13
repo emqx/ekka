@@ -75,7 +75,11 @@ start_cluster(node, Specs) ->
     Nodes;
 start_cluster(ekka, Specs) ->
     start_cluster(node, Specs),
-    [start_ekka(I) || I <- Specs].
+    [start_ekka(I) || I <- Specs];
+start_cluster(ekka_async, Specs) ->
+    Ret = start_cluster(node, Specs),
+    spawn(fun() -> [start_ekka(I) || I <- Specs] end),
+    Ret.
 
 teardown_cluster(Specs) ->
     Nodes = [I || #{node := I} <- Specs],
