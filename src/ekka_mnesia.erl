@@ -306,8 +306,13 @@ wait_for(stop) ->
 
 wait_for(tables) ->
     Tables = mnesia:system_info(local_tables),
-    case mnesia:wait_for_tables(Tables, 150000) of
+    do_wait_for_tables(Tables).
+
+do_wait_for_tables(Tables) ->
+    case mnesia:wait_for_tables(Tables, 30000) of
         ok                   -> ok;
         {error, Reason}      -> {error, Reason};
-        {timeout, BadTables} -> {error, {timeout, BadTables}}
+        {timeout, BadTables} ->
+            logger:warning("~p: still waiting for table(s): ~p", [?MODULE, BadTables]),
+            do_wait_for_tables(BadTables)
     end.
