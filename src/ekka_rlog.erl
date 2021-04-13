@@ -109,7 +109,7 @@ wait_for_shards(Shards, Timeout) ->
         core ->
             ok;
         replicant ->
-            ekka_rlog_event_mgr:wait_for_shards(Shards, Timeout)
+            ekka_rlog_status:wait_for_shards(Shards, Timeout)
     end.
 
 dig_ops_for_shard(Key, TxStore, Shard) ->

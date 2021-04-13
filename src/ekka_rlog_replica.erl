@@ -21,7 +21,6 @@
 %% API:
 -export([ start_link/1
         , push_tlog_entry/2
-        , upstream/1
         ]).
 
 %% gen_statem callbacks:
@@ -82,13 +81,6 @@ push_tlog_entry({Node, Pid}, Batch) ->
 start_link(Shard) ->
     Config = #{}, % TODO
     gen_statem:start_link(?MODULE, {Shard, Config}, []).
-
--spec upstream(ekka_rlog:shard()) -> node().
-upstream(Shard) ->
-    case ets:lookup(?replica_tab, {?upstream_node, Shard}) of
-        [{_, Node}] -> Node;
-        []          -> error(disconnected)
-    end.
 
 %%================================================================================
 %% gen_statem callbacks
@@ -269,7 +261,7 @@ replay_local(D0 = #d{replayq = Q0}) ->
 
 -spec initiate_reconnect(data()) -> fsm_result().
 initiate_reconnect(#d{shard = Shard}) ->
-    ets:delete(?replica_tab, {?upstream_node, Shard}),
+    ekka_rlog_status:notify_shard_down(Shard),
     {keep_state_and_data, [{timeout, 0, ?reconnect}]}.
 
 %% @private Try connecting to a core node
@@ -329,9 +321,8 @@ buffer_tlog_ops(Transaction, D = #d{replayq = Q0}) ->
     D#d{replayq = Q}.
 
 -spec handle_normal(data()) -> ok.
-handle_normal(D = #d{shard = Shard}) ->
-    ets:insert(?replica_tab, {{?upstream_node, Shard}, D#d.remote_core_node}),
-    ekka_rlog_event_mgr:notify_shard_up(Shard),
+handle_normal(D = #d{shard = Shard, remote_core_node = Upstream}) ->
+    ekka_rlog_status:notify_shard_up(Shard, Upstream),
     ?tp(notice, "Shard fully up",
         #{ node => node()
          , shard => D#d.shard
