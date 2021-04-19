@@ -32,23 +32,26 @@
 
 -spec transaction(fun(() -> A)) -> A.
 transaction(Fun) ->
-    {atomic, Ret} = mnesia:transaction(Fun),
-    Ret.
+    unwrap_mnesia_ret(mnesia:transaction(Fun)).
 
 -spec transaction(fun((...) -> A), list()) -> A.
 transaction(Fun, Args) ->
-    {atomic, Ret} = mnesia:transaction(Fun, Args),
-    Ret.
+    unwrap_mnesia_ret(mnesia:transaction(Fun, Args)).
 
 -spec ro_transaction(fun(() -> A)) -> A.
 ro_transaction(Fun) ->
-    {atomic, Ret} = mnesia:transaction(Fun),
+    Ret = unwrap_mnesia_ret(mnesia:transaction(Fun)),
     assert_ro(),
     Ret.
 
 %%================================================================================
 %% Internal functions
 %%================================================================================
+
+unwrap_mnesia_ret({atomic, Ret}) ->
+    Ret;
+unwrap_mnesia_ret({aborted, Ret}) ->
+    mnesia:abort(Ret).
 
 assert_ro() ->
     %% Only run this check in TEST mode
