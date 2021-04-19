@@ -171,6 +171,30 @@ t_transaction_on_replicant(_) ->
                ?assert(ekka_rlog_props:all_batches_received(Trace))
        end).
 
+%% Check that behavior on error and exception is the same for both backends
+t_abort(_) ->
+    Cluster = ekka_ct:cluster([core, replicant], []),
+    Cluster = ekka_ct:cluster([core, replicant], []),
+    ?check_trace(
+       try
+           Nodes = ekka_ct:start_cluster(ekka, Cluster),
+           [begin
+                RetMnesia = rpc:call(Node, ekka_transaction_gen, abort, [mnesia, AbortKind]),
+                RetEkka = rpc:call(Node, ekka_transaction_gen, abort, [ekka_mnesia, AbortKind]),
+                case {RetMnesia, RetEkka} of
+                    {{aborted, {A, _Stack1}}, {aborted, {A, _Stack2}}} -> ok;
+                    {A, A} -> ok
+                end
+            end
+            || Node <- Nodes, AbortKind <- [abort, error, exit, throw]],
+           stabilize(1000), compare_table_contents(test_tab, Nodes)
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(_, Trace) ->
+               ?assertMatch([], ?of_kind(rlog_import_trans, Trace))
+       end).
+
 t_rand_error_injection(_) ->
     snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, core, replicant], []),

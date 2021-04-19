@@ -23,6 +23,7 @@
 
 -export([ init/0
         , delete/1
+        , abort/2
         , mnesia/1
         , benchmark/3
         , counter/2
@@ -84,6 +85,22 @@ counter(Key, NIter, Delay) ->
          }),
     timer:sleep(Delay),
     counter(Key, NIter - 1).
+
+abort(Backend, AbortKind) ->
+    Backend:transaction(
+      fun() ->
+              mnesia:write(#test_tab{key = canary_key, val = canary_dead}),
+              do_abort(AbortKind)
+      end).
+
+do_abort(abort) ->
+    mnesia:abort(deliberate);
+do_abort(error) ->
+    error(deliberate);
+do_abort(exit) ->
+    exit(deliberate);
+do_abort(throw) ->
+    throw(deliberate).
 
 benchmark(ResultFile,
           #{ delays := Delays
