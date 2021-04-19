@@ -144,12 +144,12 @@ do_wait_shards(ERef, RemainingShards) ->
     receive
         {'DOWN', ERef, _, _, _} ->
             error(rlog_restarted);
-        {ERef, timeout} ->
-            {timeout, RemainingShards};
         {ERef, Event} ->
             case Event of
                 {shard_up, Shard} ->
                     do_wait_shards(ERef, RemainingShards -- [Shard]);
+                timeout ->
+                    {timeout, RemainingShards};
                 _ ->
                     do_wait_shards(ERef, RemainingShards)
             end
