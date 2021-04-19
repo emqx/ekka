@@ -36,6 +36,7 @@
 -include("ekka_rlog.hrl").
 -include_lib("mnesia/src/mnesia.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 
 -type shard() :: atom().
 

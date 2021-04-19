@@ -129,11 +129,11 @@ t_rlog_smoke_test(_) ->
            Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka_async, Cluster),
            wait_shards([N1, N2], [test_shard]),
            %% Generate some transactions:
-           {atomic, _} = rpc:call(N1, ekka_transaction_gen, init, []),
+           {atomic, _} = rpc:call(N2, ekka_transaction_gen, init, []),
            ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 30]),
            stabilize(1000), compare_table_contents(test_tab, Nodes),
            %% Create a delete transaction, to see if deletes are propagated too:
-           {atomic, _} = rpc:call(N1, ekka_transaction_gen, delete, [1]),
+           {atomic, _} = rpc:call(N2, ekka_transaction_gen, delete, [1]),
            stabilize(1000), compare_table_contents(test_tab, Nodes),
            ekka_ct:stop_slave(N3),
            Nodes
@@ -193,6 +193,33 @@ t_rand_error_injection(_) ->
                ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
                %ekka_rlog_props:counter_import_check(CounterKey, N3, Trace),
                ?assert(length(?of_kind(snabbkaffe_crash, Trace)) > 1)
+       end).
+
+%% Start processes competing for the key on two core nodes and test
+%% that updates are received in order
+t_core_node_competing_writes(_) ->
+    Cluster = ekka_ct:cluster([core, core, replicant], []),
+    CounterKey = counter,
+    NOper = 10000,
+    ?check_trace(
+       try
+           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           spawn(fun() ->
+                         rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, NOper])
+                 end),
+           ok = rpc:call(N2, ekka_transaction_gen, counter, [CounterKey, NOper]),
+           stabilize(1000),
+           N3
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(N3, Trace) ->
+               Events = lists:flatten(?projection(ops, ?of_kind(rlog_import_trans,
+                                                                ?of_node(N3, Trace)))),
+               %% Check that the number of imported transaction equals to the expected number:
+               ?assertEqual(NOper * 2, length(Events)),
+               %% Check that the ops have been imported in order:
+               snabbkaffe:strictly_increasing(Events)
        end).
 
 cluster_benchmark(_) ->
