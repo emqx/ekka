@@ -109,7 +109,9 @@ t_remove_from_cluster(_) ->
 %% be used to check if anything is _obviously_ broken.
 t_rlog_smoke_test(_) ->
     snabbkaffe:fix_ct_logging(),
-    Env = [{ekka, bootstrapper_chunk_config, #{count_limit => 3}}],
+    Env = [ {ekka, bootstrapper_chunk_config, #{count_limit => 3}}
+          | common_env()
+          ],
     Cluster = ekka_ct:cluster([core, core, replicant], Env),
     CounterKey = counter,
     ?check_trace(
@@ -153,7 +155,7 @@ t_rlog_smoke_test(_) ->
        end).
 
 t_transaction_on_replicant(_) ->
-    Cluster = ekka_ct:cluster([core, replicant], []),
+    Cluster = ekka_ct:cluster([core, replicant], common_env()),
     ?check_trace(
        try
            Nodes = [N1, N2] = ekka_ct:start_cluster(ekka, Cluster),
@@ -173,8 +175,7 @@ t_transaction_on_replicant(_) ->
 
 %% Check that behavior on error and exception is the same for both backends
 t_abort(_) ->
-    Cluster = ekka_ct:cluster([core, replicant], []),
-    Cluster = ekka_ct:cluster([core, replicant], []),
+    Cluster = ekka_ct:cluster([core, replicant], common_env()),
     ?check_trace(
        try
            Nodes = ekka_ct:start_cluster(ekka, Cluster),
@@ -197,7 +198,7 @@ t_abort(_) ->
 
 t_rand_error_injection(_) ->
     snabbkaffe:fix_ct_logging(),
-    Cluster = ekka_ct:cluster([core, core, replicant], []),
+    Cluster = ekka_ct:cluster([core, core, replicant], common_env()),
     CounterKey = counter,
     ?check_trace(
        try
@@ -222,7 +223,7 @@ t_rand_error_injection(_) ->
 %% Start processes competing for the key on two core nodes and test
 %% that updates are received in order
 t_core_node_competing_writes(_) ->
-    Cluster = ekka_ct:cluster([core, core, replicant], []),
+    Cluster = ekka_ct:cluster([core, core, replicant], common_env()),
     CounterKey = counter,
     NOper = 10000,
     ?check_trace(
@@ -273,6 +274,7 @@ do_cluster_benchmark(#{ backend    := Backend
                       , cluster    := ClusterSpec
                       } = Config) ->
     Env = [ {ekka, rlog_rpc_module, rpc}
+          | common_env()
           ],
     Cluster = ekka_ct:cluster(ClusterSpec, Env),
     ResultFile = "/tmp/" ++ atom_to_list(Backend) ++ "_stats.csv",
@@ -322,3 +324,6 @@ compare_table_contents(Table, Nodes) ->
               ?assertEqual({Node, Reference}, {Node, Contents})
       end,
       Rest).
+
+common_env() ->
+    [{ekka, db_backend, rlog}].

@@ -362,10 +362,14 @@ ro_transaction(Fun) ->
 
 -spec transaction(fun((...) -> A), list()) -> t_result(A).
 transaction(Fun, Args) ->
-    case ekka_rlog:role() of
-        core ->
+    Role = ekka_rlog:role(),
+    Backend = persistent_term:get({ekka, db_backend}, mnesia),
+    case {Backend, Role}  of
+        {mnesia, core} ->
+            mnesia:transaction(Fun, Args);
+        {rlog, core} ->
             ekka_rlog:transaction(fun ekka_rlog_activity:transaction/2, [Fun, Args]);
-        replicant ->
+        {rlog, replicant} ->
             %% TODO: This is rather dumb:
             [Shard|_] = ekka_rlog:shards(),
             Core = ekka_rlog_status:upstream(Shard),
