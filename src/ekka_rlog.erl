@@ -50,7 +50,8 @@
                          }.
 
 init() ->
-    setup_persistent_terms().
+    setup_persistent_terms(),
+    ok.
 
 %% @doc Perform a transaction and log changes.
 %% the logged changes are to be replicated to other nodes.
@@ -135,6 +136,7 @@ dig_ops_for_shard(Key, TxStore, Shard) ->
 -spec setup_persistent_terms() -> ok.
 setup_persistent_terms() ->
     copy_from_env(rlog_rpc_module),
+    copy_from_env(db_backend),
     ekka_rlog_lib:load_shard_config().
 
 -spec copy_from_env(atom()) -> ok.
