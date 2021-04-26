@@ -74,7 +74,7 @@ role() ->
 
 -spec role(node()) -> role().
 role(Node) ->
-    rpc:call(node(), ?MODULE, role, []).
+    rpc:call(Node, ?MODULE, role, []).
 
 -spec core_nodes() -> [node()].
 core_nodes() ->
