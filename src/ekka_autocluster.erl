@@ -124,7 +124,7 @@ strategy_module(Strategy) ->
 discover_and_join(Mod, Options) ->
     case Mod:discover(Options) of
         {ok, Nodes} ->
-            maybe_join([N || N <- Nodes, ekka_node:is_aliving(N)]),
+            maybe_join([N || N <- Nodes, ekka_node:is_aliving(N), ekka_rlog:role(N) =:= core]),
             log_error("Register", Mod:register(Options));
         {error, Reason} ->
             ?LOG(error, "Discovery error: ~p", [Reason])
