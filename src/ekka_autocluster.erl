@@ -29,7 +29,7 @@
 enabled() ->
     case ekka:env(cluster_discovery) of
         {ok, {manual, _}} -> false;
-        {ok, _Strategy}   -> true;
+        {ok, _Strategy}   -> ekka_rlog:role() =:= core;
         undefined         -> false
     end.
 
@@ -124,7 +124,8 @@ strategy_module(Strategy) ->
 discover_and_join(Mod, Options) ->
     case Mod:discover(Options) of
         {ok, Nodes} ->
-            maybe_join([N || N <- Nodes, ekka_node:is_aliving(N)]),
+            maybe_join([N || N <- Nodes, ekka_node:is_aliving(N) andalso
+                                         ekka_rlog:role(N) =:= core]),
             log_error("Register", Mod:register(Options));
         {error, Reason} ->
             ?LOG(error, "Discovery error: ~p", [Reason])
@@ -163,4 +164,3 @@ find_oldest_node(Nodes) ->
 log_error(Format, {error, Reason}) ->
     ?LOG(error, Format ++ " error: ~p", [Reason]);
 log_error(_Format, _Ok) -> ok.
-

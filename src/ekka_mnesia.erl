@@ -184,16 +184,21 @@ del_schema_copy(Node) ->
 %% @doc Join the mnesia cluster
 -spec(join_cluster(node()) -> ok).
 join_cluster(Node) when Node =/= node() ->
-    %% Stop mnesia and delete schema first
-    ensure_ok(ensure_stopped()),
-    ensure_ok(delete_schema()),
-    %% Start mnesia and cluster to node
-    ensure_ok(ensure_started()),
-    ensure_ok(connect(Node)),
-    ensure_ok(copy_schema(node())),
-    %% Copy tables
-    copy_tables(),
-    ensure_ok(wait_for(tables)).
+    case {ekka_rlog:role(), ekka_rlog:role(Node)} of
+        {core, core} ->
+            %% Stop mnesia and delete schema first
+            ensure_ok(ensure_stopped()),
+            ensure_ok(delete_schema()),
+            %% Start mnesia and cluster to node
+            ensure_ok(ensure_started()),
+            ensure_ok(connect(Node)),
+            ensure_ok(copy_schema(node())),
+            %% Copy tables
+            copy_tables(),
+            ensure_ok(wait_for(tables));
+        _ ->
+            ok
+    end.
 
 %% @doc Cluster Info
 -spec(cluster_info() -> map()).
@@ -363,10 +368,12 @@ ro_transaction(Fun) ->
 -spec transaction(fun((...) -> A), list()) -> t_result(A).
 transaction(Fun, Args) ->
     Role = ekka_rlog:role(),
-    Backend = persistent_term:get({ekka, db_backend}, mnesia),
+    Backend = persistent_term:get({ekka, db_backend}, rlog),
     case {Backend, Role}  of
         {mnesia, core} ->
             mnesia:transaction(Fun, Args);
+        {mnesia, replicant} ->
+            exit(plain_mnesia_transaction_on_replicant);
         {rlog, core} ->
             ekka_rlog:transaction(fun ekka_rlog_activity:transaction/2, [Fun, Args]);
         {rlog, replicant} ->

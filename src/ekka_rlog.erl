@@ -23,6 +23,7 @@
         , shard_config/1
         , core_nodes/0
         , role/0
+        , role/1
         , subscribe/4
         , wait_for_shards/2
         ]).
@@ -70,6 +71,10 @@ shard_config(Shard) ->
 -spec role() -> role().
 role() ->
     application:get_env(ekka, node_role, core).
+
+-spec role(node()) -> role().
+role(Node) ->
+    rpc:call(Node, ?MODULE, role, []).
 
 -spec core_nodes() -> [node()].
 core_nodes() ->

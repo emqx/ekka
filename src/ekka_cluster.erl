@@ -58,7 +58,14 @@ join(Node) when is_atom(Node) ->
         {replicant, _, _} ->
             ok;
         {core, false, true} ->
-            prepare(join), ok = ekka_mnesia:join_cluster(Node), reboot();
+            case ekka_rlog:role(Node) of
+                core ->
+                    prepare(join),
+                    ok = ekka_mnesia:join_cluster(Node),
+                    reboot();
+                replicant ->
+                    ignore
+            end;
         {core, false, false} ->
             {error, {node_down, Node}};
         {core, true, _} ->
