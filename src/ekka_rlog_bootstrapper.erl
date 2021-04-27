@@ -80,7 +80,10 @@ init({server, Shard, Subscriber}) ->
                                  , shard  => Shard
                                  }),
     #{tables := Tables} = ekka_rlog:shard_config(Shard),
-    ?tp(info, rlog_bootstrapper_start, #{shard => Shard}),
+    ?tp(info, rlog_bootstrapper_start,
+        #{ shard     => Shard
+         , subscribe => Subscriber
+         }),
     Queue = replayq:open(#{ mem_only => true
                           , sizer    => fun(_) -> 1 end
                           }),

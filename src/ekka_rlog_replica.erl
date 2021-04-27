@@ -207,7 +207,7 @@ handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transaction}, Data) ->
 initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
     %% Discard all data of the shard:
     #{tables := Tables} = ekka_rlog:shard_config(Shard),
-    [{atomic, ok} = mnesia:clear_table(Tab) || Tab <- Tables],
+    [ok = clear_table(Tab) || Tab <- Tables],
     %% Do bootstrap:
     {ok, Pid} = ekka_rlog_bootstrapper:start_link_client(Shard, Remote, self()),
     Q = replayq:open(#{ mem_only => true
@@ -221,6 +221,7 @@ initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
 handle_bootstrap_complete(Checkpoint, D) ->
     ?tp(notice, "Bootstrap of the shard is complete",
         #{ checkpoint => Checkpoint
+         , shard      => D#d.shard
          }),
     forget_tmp_worker(D),
     {next_state, ?local_replay, D#d{ tmp_worker = undefined
@@ -368,3 +369,10 @@ do_push_tlog_entry(Pid, Batch) ->
         #{ entry => Batch
          }),
     gen_statem:cast(Pid, {tlog_entry, Batch}).
+
+-spec clear_table(atom()) -> ok.
+clear_table(Table) ->
+    case mnesia:clear_table(Table) of
+        {atomic, ok}              -> ok;
+        {aborted, {no_exists, _}} -> ok
+    end.
