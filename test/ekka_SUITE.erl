@@ -77,6 +77,7 @@ t_cluster_manually(_Config) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+
 t_join_leave_cluster(_Config) ->
     N0 = node(),
     N1 = ekka_ct:start_slave(ekka, n1),

@@ -372,12 +372,23 @@ transaction(Fun, Args) ->
         {rlog, core} ->
             ekka_rlog:transaction(fun ekka_rlog_activity:transaction/2, [Fun, Args]);
         {rlog, replicant} ->
-            %% TODO: This is rather dumb:
-            [Shard|_] = ekka_rlog:shards(),
-            Core = ekka_rlog_status:upstream(Shard),
+            Core = find_upstream_node(ekka_rlog:shards()),
             ekka_rlog_lib:rpc_call(Core, ?MODULE, transaction, [Fun, Args])
     end.
 
 -spec transaction(fun(() -> A)) -> t_result(A).
 transaction(Fun) ->
     transaction(fun erlang:apply/2, [Fun, []]).
+
+%% Currently the strategy for selecting the upstream node is rather
+%% dumb: we just find the upstream of the first connected shard.
+-spec find_upstream_node([ekka_rlog:shard()]) -> node().
+find_upstream_node([]) ->
+    error(disconnected);
+find_upstream_node([Shard|Rest]) ->
+    case ekka_rlog_status:upstream(Shard) of
+        {ok, Node} ->
+            Node;
+        disconnected ->
+            find_upstream_node(Rest)
+    end.

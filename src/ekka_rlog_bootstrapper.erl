@@ -80,7 +80,10 @@ init({server, Shard, Subscriber}) ->
                                  , shard  => Shard
                                  }),
     #{tables := Tables} = ekka_rlog:shard_config(Shard),
-    ?tp(info, rlog_bootstrapper_start, #{shard => Shard}),
+    ?tp(info, rlog_bootstrapper_start,
+        #{ shard     => Shard
+         , subscribe => Subscriber
+         }),
     Queue = replayq:open(#{ mem_only => true
                           , sizer    => fun(_) -> 1 end
                           }),
@@ -152,6 +155,7 @@ start_table_traverse(St0 = #server{ shard = Shard
                                   , tables = [Table|Rest]
                                   , key_queue = Q0
                                   }) ->
+    mnesia:wait_for_tables([Table], 100000),
     ?tp(info, start_shard_table_bootstrap,
         #{ shard => Shard
          , table => Table

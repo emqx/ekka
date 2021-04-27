@@ -59,7 +59,7 @@ t_join_leave_cluster(_) ->
     Cluster = ekka_ct:cluster([core, core], []),
     try
         %% Implicitly causes N1 to join N0:
-        [N0, N1] = ekka_ct:start_cluster(ekka, Cluster),
+        [N0, N1] = Nodes = ekka_ct:start_cluster(ekka, Cluster),
         ekka_ct:run_on(N0,
           fun() ->
                   #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
@@ -179,6 +179,7 @@ t_abort(_) ->
     ?check_trace(
        try
            Nodes = ekka_ct:start_cluster(ekka, Cluster),
+           wait_shards(Nodes),
            [begin
                 RetMnesia = rpc:call(Node, ekka_transaction_gen, abort, [mnesia, AbortKind]),
                 RetEkka = rpc:call(Node, ekka_transaction_gen, abort, [ekka_mnesia, AbortKind]),
@@ -203,6 +204,7 @@ t_rand_error_injection(_) ->
     ?check_trace(
        try
            Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           wait_shards(Nodes),
            stabilize(1000),
            %% Everything in ekka replicant will crash
            ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog, replica|_]}}
@@ -229,6 +231,7 @@ t_core_node_competing_writes(_) ->
     ?check_trace(
        try
            Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           wait_shards(Nodes),
            spawn(fun() ->
                          rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, NOper])
                  end),
@@ -283,10 +286,12 @@ do_cluster_benchmark(#{ backend    := Backend
                    ),
     [#{node := First}|_] = Cluster,
     try
-        ekka_ct:start_cluster(node, Cluster),
+        Nodes = ekka_ct:start_cluster(node, Cluster),
+        wait_shards(Nodes),
         lists:foldl(
           fun(Node, Cnt) ->
                   ekka_ct:start_ekka(Node),
+                  wait_shards([Node]),
                   stabilize(100),
                   ok = rpc:call(First, ekka_transaction_gen, benchmark,
                                 [ResultFile, Config, Cnt]),
@@ -297,6 +302,9 @@ do_cluster_benchmark(#{ backend    := Backend
     after
         ekka_ct:teardown_cluster(Cluster)
     end.
+
+wait_shards(Nodes) ->
+    wait_shards(Nodes, [test_shard]).
 
 wait_shards(Nodes, Shards) ->
     [{ok, _} = ?block_until(#{ ?snk_kind := "Shard fully up"

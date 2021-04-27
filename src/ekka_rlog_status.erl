@@ -45,12 +45,12 @@
 %% API funcions
 %%================================================================================
 
-%% @doc Return core node used as the upstream for the replica, or crash
--spec upstream(ekka_rlog:shard()) -> node().
+%% @doc Return core node used as the upstream for the replica
+-spec upstream(ekka_rlog:shard()) -> {ok, node()} | disconnected.
 upstream(Shard) ->
     case ets:lookup(?replica_tab, {?upstream_node, Shard}) of
-        [{_, Node}] -> Node;
-        []          -> error(disconnected)
+        [{_, Node}] -> {ok, Node};
+        []          -> disconnected
     end.
 
 -spec start_link() -> {ok, pid()}.
