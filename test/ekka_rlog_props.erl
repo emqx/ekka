@@ -19,8 +19,6 @@
 -export([ replicant_bootstrap_stages/2
         , all_batches_received/1
         , counter_import_check/3
-
-        , check_sequence/1
         ]).
 
 -include_lib("snabbkaffe/include/test_macros.hrl").
@@ -50,35 +48,49 @@ all_batches_received(Trace0) ->
                                                          K =:= rlog_replica_store_trans
       , Trace).
 
-counter_import_check(CounterKey, Node, Trace) ->
+-spec counter_import_check(term(), node(), snabbkaffe:trace()) -> integer().
+counter_import_check(CounterKey, Node, Trace0) ->
+    Trace1 = ?of_node(Node, Trace0),
+    %% Shard bootstrap resets the import sequence, so we should
+    %% consider them individually (assuming that the boostrap
+    %% procedure is correct):
+    Sequences = ?splitr_trace(#{?snk_kind := shard_bootstrap_complete}, Trace1),
+    %% Now check each sequence and return the number of import operations:
+    lists:foldl(
+      fun(Trace, N) ->
+              N + do_counter_import_check(CounterKey, Trace)
+      end,
+      0,
+      Sequences).
+
+do_counter_import_check(CounterKey, Trace) ->
     Writes = [element(3, Rec) || #{ ?snk_kind := rlog_import_trans
-                                  , ?snk_meta := #{node := N}
                                   , ops := [{{test_tab, K}, Rec, write}]
-                                  } <- Trace, K =:= CounterKey, N =:= Node],
-    ?assert(length(Writes) > 0),
-    ?assert(check_sequence(Writes)).
+                                  } <- Trace, K =:= CounterKey],
+    ?assert(check_transaction_replay_sequence(Writes)),
+    length(Writes).
 
 %% Check sequence of numbers. It should be increasing by no more than
 %% 1, with possible restarts from an earler point. If restart
 %% happened, then the last element of the sequence must be greater
 %% than any other element seen before.
-check_sequence([]) ->
+check_transaction_replay_sequence([]) ->
     true;
-check_sequence([First|Rest]) ->
-    check_sequence(First, First, Rest).
+check_transaction_replay_sequence([First|Rest]) ->
+    check_transaction_replay_sequence(First, First, Rest).
 
-check_sequence(Max, LastElem, []) ->
+check_transaction_replay_sequence(Max, LastElem, []) ->
     LastElem >= Max orelse
         ?panic("invalid sequence restart",
                #{ maximum   => Max
                 , last_elem => LastElem
                 }),
     true;
-check_sequence(Max, Prev, [Next|Rest]) when Next =:= Prev + 1 ->
-    check_sequence(max(Max, Prev), Next, Rest);
-check_sequence(Max, Prev, [Next|Rest]) when Next =< Prev ->
-    check_sequence(max(Max, Prev), Next, Rest);
-check_sequence(Max, Prev, [Next|_]) ->
+check_transaction_replay_sequence(Max, Prev, [Next|Rest]) when Next =:= Prev + 1 ->
+    check_transaction_replay_sequence(max(Max, Prev), Next, Rest);
+check_transaction_replay_sequence(Max, Prev, [Next|Rest]) when Next =< Prev ->
+    check_transaction_replay_sequence(max(Max, Prev), Next, Rest);
+check_transaction_replay_sequence(Max, Prev, [Next|_]) ->
     ?panic("gap in the sequence",
            #{ maximum => Max
             , elem => Prev
@@ -89,18 +101,18 @@ check_sequence(Max, Prev, [Next|_]) ->
 %% Unit tests
 %%================================================================================
 
-check_sequence_test() ->
-    ?assert(check_sequence([])),
-    ?assert(check_sequence([1, 2])),
-    ?assert(check_sequence([2, 3, 4])),
+check_transaction_replay_sequence_test() ->
+    ?assert(check_transaction_replay_sequence([])),
+    ?assert(check_transaction_replay_sequence([1, 2])),
+    ?assert(check_transaction_replay_sequence([2, 3, 4])),
     %% Gap:
-    ?assertError(_, check_sequence([0, 1, 3])),
-    ?assertError(_, check_sequence([0, 1, 13, 14])),
+    ?assertError(_, check_transaction_replay_sequence([0, 1, 3])),
+    ?assertError(_, check_transaction_replay_sequence([0, 1, 13, 14])),
     %% Replays:
-    ?assert(check_sequence([1, 1, 2, 3, 3])),
-    ?assert(check_sequence([1, 2, 3,   1, 2, 3, 4])),
-    ?assert(check_sequence([1, 2, 3,   1, 2, 3, 4,   3, 4])),
+    ?assert(check_transaction_replay_sequence([1, 1, 2, 3, 3])),
+    ?assert(check_transaction_replay_sequence([1, 2, 3,   1, 2, 3, 4])),
+    ?assert(check_transaction_replay_sequence([1, 2, 3,   1, 2, 3, 4,   3, 4])),
     %% Invalid replays:
-    ?assertError(_, check_sequence([1, 2, 3,   2])),
-    ?assertError(_, check_sequence([1, 2, 3,   2, 4])),
-    ?assertError(_, check_sequence([1, 2, 3,   2, 3, 4, 5,   3, 4])).
+    ?assertError(_, check_transaction_replay_sequence([1, 2, 3,   2])),
+    ?assertError(_, check_transaction_replay_sequence([1, 2, 3,   2, 4])),
+    ?assertError(_, check_transaction_replay_sequence([1, 2, 3,   2, 3, 4, 5,   3, 4])).

@@ -110,7 +110,7 @@ t_remove_from_cluster(_) ->
 t_rlog_smoke_test(_) ->
     snabbkaffe:fix_ct_logging(),
     Env = [ {ekka, bootstrapper_chunk_config, #{count_limit => 3}}
-          | common_env()
+          | ekka_mnesia_test_util:common_env()
           ],
     Cluster = ekka_ct:cluster([core, core, replicant], Env),
     CounterKey = counter,
@@ -129,14 +129,16 @@ t_rlog_smoke_test(_) ->
            ?force_ordering(#{?snk_kind := state_change, to := normal}, #{?snk_kind := trans_gen_counter_update, value := 25}),
 
            Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka_async, Cluster),
-           wait_shards([N1, N2]),
+           ekka_mnesia_test_util:wait_shards([N1, N2]),
            %% Generate some transactions:
            {atomic, _} = rpc:call(N2, ekka_transaction_gen, init, []),
            ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 30]),
-           stabilize(1000), compare_table_contents(test_tab, Nodes),
+           ekka_mnesia_test_util:stabilize(1000),
+           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
            %% Create a delete transaction, to see if deletes are propagated too:
            {atomic, _} = rpc:call(N2, ekka_transaction_gen, delete, [1]),
-           stabilize(1000), compare_table_contents(test_tab, Nodes),
+           ekka_mnesia_test_util:stabilize(1000),
+           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
            ekka_ct:stop_slave(N3),
            Nodes
        after
@@ -151,17 +153,17 @@ t_rlog_smoke_test(_) ->
                %% Other tests
                ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
                ?assert(ekka_rlog_props:all_batches_received(Trace)),
-               ekka_rlog_props:counter_import_check(CounterKey, N3, Trace)
+               ?assert(ekka_rlog_props:counter_import_check(CounterKey, N3, Trace) > 0)
        end).
 
 t_transaction_on_replicant(_) ->
-    Cluster = ekka_ct:cluster([core, replicant], common_env()),
+    Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
     ?check_trace(
        try
            Nodes = [N1, N2] = ekka_ct:start_cluster(ekka, Cluster),
-           stabilize(1000),
+           ekka_mnesia_test_util:stabilize(1000),
            {atomic, _} = rpc:call(N2, ekka_transaction_gen, init, []),
-           stabilize(1000), compare_table_contents(test_tab, Nodes),
+           ekka_mnesia_test_util:stabilize(1000), ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
            {atomic, KeyVals} = rpc:call(N2, ekka_transaction_gen, ro_read_all_keys, []),
            {atomic, KeyVals} = rpc:call(N1, ekka_transaction_gen, ro_read_all_keys, []),
            Nodes
@@ -175,11 +177,11 @@ t_transaction_on_replicant(_) ->
 
 %% Check that behavior on error and exception is the same for both backends
 t_abort(_) ->
-    Cluster = ekka_ct:cluster([core, replicant], common_env()),
+    Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
     ?check_trace(
        try
            Nodes = ekka_ct:start_cluster(ekka, Cluster),
-           wait_shards(Nodes),
+           ekka_mnesia_test_util:wait_shards(Nodes),
            [begin
                 RetMnesia = rpc:call(Node, ekka_transaction_gen, abort, [mnesia, AbortKind]),
                 RetEkka = rpc:call(Node, ekka_transaction_gen, abort, [ekka_mnesia, AbortKind]),
@@ -189,7 +191,8 @@ t_abort(_) ->
                 end
             end
             || Node <- Nodes, AbortKind <- [abort, error, exit, throw]],
-           stabilize(1000), compare_table_contents(test_tab, Nodes)
+           ekka_mnesia_test_util:stabilize(1000),
+           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes)
        after
            ekka_ct:teardown_cluster(Cluster)
        end,
@@ -197,46 +200,21 @@ t_abort(_) ->
                ?assertMatch([], ?of_kind(rlog_import_trans, Trace))
        end).
 
-t_rand_error_injection(_) ->
-    snabbkaffe:fix_ct_logging(),
-    Cluster = ekka_ct:cluster([core, core, replicant], common_env()),
-    CounterKey = counter,
-    ?check_trace(
-       try
-           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
-           wait_shards(Nodes),
-           stabilize(1000),
-           %% Everything in ekka replicant will crash
-           ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog, replica|_]}}
-                        , snabbkaffe_nemesis:random_crash(0.1)
-                        ),
-           ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 100, 100]),
-           stabilize(5000), compare_table_contents(test_tab, Nodes),
-           N3
-       after
-           ekka_ct:teardown_cluster(Cluster)
-       end,
-       fun(N3, Trace) ->
-               ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
-               %ekka_rlog_props:counter_import_check(CounterKey, N3, Trace),
-               ?assert(length(?of_kind(snabbkaffe_crash, Trace)) > 1)
-       end).
-
 %% Start processes competing for the key on two core nodes and test
 %% that updates are received in order
 t_core_node_competing_writes(_) ->
-    Cluster = ekka_ct:cluster([core, core, replicant], common_env()),
+    Cluster = ekka_ct:cluster([core, core, replicant], ekka_mnesia_test_util:common_env()),
     CounterKey = counter,
     NOper = 10000,
     ?check_trace(
        try
            Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
-           wait_shards(Nodes),
+           ekka_mnesia_test_util:wait_shards(Nodes),
            spawn(fun() ->
                          rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, NOper])
                  end),
            ok = rpc:call(N2, ekka_transaction_gen, counter, [CounterKey, NOper]),
-           stabilize(1000),
+           ekka_mnesia_test_util:stabilize(1000),
            N3
        after
            ekka_ct:teardown_cluster(Cluster)
@@ -277,7 +255,7 @@ do_cluster_benchmark(#{ backend    := Backend
                       , cluster    := ClusterSpec
                       } = Config) ->
     Env = [ {ekka, rlog_rpc_module, rpc}
-          | common_env()
+          | ekka_mnesia_test_util:common_env()
           ],
     Cluster = ekka_ct:cluster(ClusterSpec, Env),
     ResultFile = "/tmp/" ++ atom_to_list(Backend) ++ "_stats.csv",
@@ -287,12 +265,12 @@ do_cluster_benchmark(#{ backend    := Backend
     [#{node := First}|_] = Cluster,
     try
         Nodes = ekka_ct:start_cluster(node, Cluster),
-        wait_shards(Nodes),
+        ekka_mnesia_test_util:wait_shards(Nodes),
         lists:foldl(
           fun(Node, Cnt) ->
                   ekka_ct:start_ekka(Node),
-                  wait_shards([Node]),
-                  stabilize(100),
+                  ekka_mnesia_test_util:wait_shards([Node]),
+                  ekka_mnesia_test_util:stabilize(100),
                   ok = rpc:call(First, ekka_transaction_gen, benchmark,
                                 [ResultFile, Config, Cnt]),
                   Cnt + 1
@@ -302,41 +280,3 @@ do_cluster_benchmark(#{ backend    := Backend
     after
         ekka_ct:teardown_cluster(Cluster)
     end.
-
-wait_shards(Nodes) ->
-    wait_shards(Nodes, [test_shard]).
-
-wait_shards(Nodes, Shards) ->
-    [begin
-         rpc:async_call(Node, ekka_rlog, wait_for_shards, [Shards, infinity]),
-         {ok, _} = ?block_until(#{ ?snk_kind := "Shard fully up"
-                                 , shard     := Shard
-                                 , node      := Node
-                                 })
-     end
-     || Shard <- Shards, Node <- Nodes],
-    ok.
-
-stabilize(Timeout) ->
-    case ?block_until(#{?snk_meta := #{domain := [ekka, rlog|_]}}, Timeout, 0) of
-        timeout -> ok;
-        {ok, Evt} ->
-            %%ct:pal("Restart waiting for cluster stabilize sue to ~p", [Evt]),
-            stabilize(Timeout)
-    end.
-
-compare_table_contents(_, []) ->
-    ok;
-compare_table_contents(Table, Nodes) ->
-    [{_, Reference}|Rest] = [{Node, lists:sort(rpc:call(Node, ets, tab2list, [Table]))}
-                             || Node <- Nodes],
-    lists:foreach(
-      fun({Node, Contents}) ->
-              ?assertEqual({Node, Reference}, {Node, Contents})
-      end,
-      Rest).
-
-common_env() ->
-    [ {ekka, db_backend, rlog}
-    , {ekka, rlog_startup_shards, [test_shard]}
-    ].
