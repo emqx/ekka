@@ -121,12 +121,17 @@ do(Type, F, Args) ->
 
 -spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.
 wait_for_shards(Shards, Timeout) ->
-    [ok = ensure_shard(I) || I <- Shards],
-    case role() of
-        core ->
-            ok;
-        replicant ->
-            ekka_rlog_status:wait_for_shards(Shards, Timeout)
+    case ekka_mnesia:backend() of
+        rlog ->
+            [ok = ensure_shard(I) || I <- Shards],
+            case role() of
+                core ->
+                    ok;
+                replicant ->
+                    ekka_rlog_status:wait_for_shards(Shards, Timeout)
+            end;
+        mnesia ->
+            ok
     end.
 
 dig_ops_for_shard(Key, TxStore, Shard) ->

@@ -57,14 +57,18 @@
 -export([ ro_transaction/1
         , transaction/2
         , transaction/1
+        , backend/0
         ]).
 
 -export_type([ t_result/1
+             , backend/0
              ]).
 
 -deprecated({copy_table, 1, next_major_release}).
 
 -type t_result(Res) :: {'atomic', Res} | {'aborted', Reason::term()}.
+
+-type backend() :: rlog | mnesia.
 
 %%--------------------------------------------------------------------
 %% Start and init mnesia
@@ -176,6 +180,11 @@ del_schema_copy(Node) ->
         {atomic, ok} -> ok;
         {aborted, Reason} -> {error, Reason}
     end.
+
+%% @doc Get database backend
+-spec backend() -> backend().
+backend() ->
+    persistent_term:get({ekka, db_backend}, rlog).
 
 %%--------------------------------------------------------------------
 %% Cluster mnesia
@@ -362,9 +371,7 @@ ro_transaction(Fun) ->
 
 -spec transaction(fun((...) -> A), list()) -> t_result(A).
 transaction(Fun, Args) ->
-    Role = ekka_rlog:role(),
-    Backend = persistent_term:get({ekka, db_backend}, rlog),
-    case {Backend, Role}  of
+    case {backend(), ekka_rlog:role()}  of
         {mnesia, core} ->
             mnesia:transaction(Fun, Args);
         {mnesia, replicant} ->
