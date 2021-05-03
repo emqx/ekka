@@ -163,6 +163,7 @@ rpc_cast(Node, Module, Function, Args) ->
 -spec load_shard_config() -> ok.
 load_shard_config() ->
     Raw = read_shard_config(),
+    ok = verify_shard_config(Raw),
     Shards = proplists:get_keys(Raw),
     ok = persistent_term:put({ekka, shards}, Shards),
     lists:foreach(fun({Shard, Tables}) ->
@@ -187,6 +188,7 @@ read_shard_config() ->
     Shards = proplists:get_keys(L),
     [{Shard, lists:usort(proplists:get_all_values(Shard, L))}
      || Shard <- Shards].
+
 
 -spec make_shard_match_spec([ekka_rlog_lib:table()]) -> ets:match_spec().
 make_shard_match_spec(Tables) ->
@@ -216,3 +218,46 @@ cancel_timer(undefined) ->
     ok;
 cancel_timer(TRef) ->
     erlang:cancel_timer(TRef).
+
+%%================================================================================
+%% Internal
+%%================================================================================
+
+-spec verify_shard_config([{ekka_rlog:shard(), [table()]}]) -> ok.
+verify_shard_config(ShardConfig) ->
+    verify_shard_config(ShardConfig, #{}).
+
+-spec verify_shard_config([{ekka_rlog:shard(), [table()]}], #{table() => ekka_rlog:shard()}) -> ok.
+verify_shard_config([], _) ->
+    ok;
+verify_shard_config([{_Shard, []} | Rest], Acc) ->
+    verify_shard_config(Rest, Acc);
+verify_shard_config([{Shard, [Table|Tables]} | Rest], Acc0) ->
+    Acc = case Acc0 of
+              #{Table := Shard1} when Shard1 =/= Shard ->
+                  ?tp(critical, "Duplicate RLOG shard",
+                      #{ table       => Table
+                       , shard       => Shard
+                       , other_shard => Shard1
+                       }),
+                  error(badarg);
+              _ ->
+                  Acc0#{Table => Shard}
+          end,
+    verify_shard_config([{Shard, Tables} | Rest], Acc).
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+-dialyzer({nowarn_function, verify_shard_config_test/0}).
+verify_shard_config_test() ->
+    ?assertMatch(ok, verify_shard_config([])),
+    ?assertMatch(ok, verify_shard_config([ {foo, [foo_tab, bar_tab]}
+                                         , {baz, [baz_tab, foo_bar_tab]}
+                                         ])),
+    ?assertError(_, verify_shard_config([ {foo, [foo_tab, bar_tab]}
+                                        , {baz, [baz_tab, foo_tab]}
+                                        ])).
+
+-endif. %% TEST
