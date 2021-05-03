@@ -20,6 +20,7 @@
 -export([ init/0
         , transaction/2
         , shards/0
+        , ensure_shard/1
         , shard_config/1
         , core_nodes/0
         , role/0
@@ -65,7 +66,7 @@ shards() ->
 
 -spec shard_config(shard()) -> shard_config().
 shard_config(Shard) ->
-    persistent_term:get({ekka_shard, Shard}, []).
+    persistent_term:get({ekka_shard, Shard}).
 
 %% TODO: persistent term
 -spec role() -> role().
@@ -79,6 +80,14 @@ role(Node) ->
 -spec core_nodes() -> [node()].
 core_nodes() ->
     application:get_env(ekka, core_nodes, []).
+
+-spec ensure_shard(shard()) -> ok.
+ensure_shard(Shard) ->
+    case ekka_rlog_sup:start_shard(Shard) of
+        {ok, _}                       -> ok;
+        {error, already_present}      -> ok;
+        {error, {already_started, _}} -> ok
+    end.
 
 -spec subscribe(ekka_rlog:shard(), node(), pid(), ekka_rlog_server:checkpoint()) ->
           {ok, _NeedBootstrap :: boolean(), _Agent :: pid()}
@@ -112,6 +121,7 @@ do(Type, F, Args) ->
 
 -spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.
 wait_for_shards(Shards, Timeout) ->
+    [ok = ensure_shard(I) || I <- Shards],
     case role() of
         core ->
             ok;

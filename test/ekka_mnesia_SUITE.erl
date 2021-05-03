@@ -129,7 +129,7 @@ t_rlog_smoke_test(_) ->
            ?force_ordering(#{?snk_kind := state_change, to := normal}, #{?snk_kind := trans_gen_counter_update, value := 25}),
 
            Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka_async, Cluster),
-           wait_shards([N1, N2], [test_shard]),
+           wait_shards([N1, N2]),
            %% Generate some transactions:
            {atomic, _} = rpc:call(N2, ekka_transaction_gen, init, []),
            ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 30]),
@@ -307,10 +307,13 @@ wait_shards(Nodes) ->
     wait_shards(Nodes, [test_shard]).
 
 wait_shards(Nodes, Shards) ->
-    [{ok, _} = ?block_until(#{ ?snk_kind := "Shard fully up"
-                             , shard     := Shard
-                             , node      := Node
-                             })
+    [begin
+         rpc:async_call(Node, ekka_rlog, wait_for_shards, [Shards, infinity]),
+         {ok, _} = ?block_until(#{ ?snk_kind := "Shard fully up"
+                                 , shard     := Shard
+                                 , node      := Node
+                                 })
+     end
      || Shard <- Shards, Node <- Nodes],
     ok.
 
@@ -334,4 +337,6 @@ compare_table_contents(Table, Nodes) ->
       Rest).
 
 common_env() ->
-    [{ekka, db_backend, rlog}].
+    [ {ekka, db_backend, rlog}
+    , {ekka, rlog_startup_shards, [test_shard]}
+    ].

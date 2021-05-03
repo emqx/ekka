@@ -19,18 +19,19 @@
 
 -behaviour(supervisor).
 
--export([init/1, start_link/0, find_shard/1]).
+-export([init/1, start_link/0, find_shard/1, start_shard/1]).
 
 -define(SUPERVISOR, ?MODULE).
 
 -include("ekka_rlog.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 %%================================================================================
 %% API funcions
 %%================================================================================
 
 start_link() ->
-    Shards = ekka_rlog:shards(),
+    Shards = application:get_env(ekka, rlog_startup_shards, []),
     Role = ekka_rlog:role(),
     supervisor:start_link({local, ?SUPERVISOR}, ?MODULE, [Role, Shards]).
 
@@ -43,6 +44,20 @@ find_shard(Shard) ->
         _ ->
             undefined
     end.
+
+%% @doc Add shard dynamically
+-spec start_shard(ekka_rlog:shard()) -> {ok, pid()}
+                                      | {error, _}.
+start_shard(Shard) ->
+    _ = ekka_rlog:shard_config(Shard),
+    ?tp(info, "Starting RLOG shard",
+        #{ shard => Shard
+         }),
+    Child = case ekka_rlog:role() of
+                core -> shard_sup(Shard);
+                replicant -> replicant_worker(Shard)
+            end,
+    supervisor:start_child(?SUPERVISOR, Child).
 
 %%================================================================================
 %% supervisor callbacks

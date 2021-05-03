@@ -102,8 +102,9 @@ init({Shard, Config}) ->
            , bootstrap_threshold = BootstrapThreshold
            }}.
 
-handle_info(post_init, St) ->
-    mnesia:wait_for_tables([St#s.shard], 100000),
+handle_info(post_init, St = #s{shard = Shard}) ->
+    #{tables := Tables} = ekka_rlog:shard_config(Shard),
+    mnesia:wait_for_tables([Shard|Tables], 100000),
     ?tp(notice, "Shard fully up",
         #{ node => node()
          , shard => St#s.shard

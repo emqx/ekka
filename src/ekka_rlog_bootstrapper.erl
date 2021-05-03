@@ -155,7 +155,6 @@ start_table_traverse(St0 = #server{ shard = Shard
                                   , tables = [Table|Rest]
                                   , key_queue = Q0
                                   }) ->
-    mnesia:wait_for_tables([Table], 100000),
     ?tp(info, start_shard_table_bootstrap,
         #{ shard => Shard
          , table => Table
