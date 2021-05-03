@@ -197,6 +197,31 @@ t_abort(_) ->
                ?assertMatch([], ?of_kind(rlog_import_trans, Trace))
        end).
 
+t_agent_restart(_) ->
+    snabbkaffe:fix_ct_logging(),
+    Cluster = ekka_ct:cluster([core, core, replicant], common_env()),
+    CounterKey = counter,
+    ?check_trace(
+       try
+           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           wait_shards(Nodes),
+           stabilize(1000),
+           %% Everything in ekka agent will crash
+           ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog, agent|_]}}
+                        , snabbkaffe_nemesis:random_crash(0.4)
+                        ),
+           ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 100, 100]),
+           stabilize(5100), compare_table_contents(test_tab, Nodes),
+           N3
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(N3, Trace) ->
+               ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
+               %ekka_rlog_props:counter_import_check(CounterKey, N3, Trace),
+               ?assert(length(?of_kind(snabbkaffe_crash, Trace)) > 1)
+       end).
+
 t_rand_error_injection(_) ->
     snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, core, replicant], common_env()),
@@ -206,11 +231,11 @@ t_rand_error_injection(_) ->
            Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
            wait_shards(Nodes),
            stabilize(1000),
-           %% Everything in ekka replicant will crash
-           ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog, replica|_]}}
+           %% Everything in ekka RLOG will crash
+           ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog|_]}}
                         , snabbkaffe_nemesis:random_crash(0.1)
                         ),
-           ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 100, 100]),
+           ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 300, 100]),
            stabilize(5000), compare_table_contents(test_tab, Nodes),
            N3
        after

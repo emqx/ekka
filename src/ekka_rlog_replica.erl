@@ -307,6 +307,7 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
          }),
     case ekka_rlog:subscribe(Shard, Node, self(), Checkpoint) of
         {ok, NeedBootstrap, Agent} ->
+            link(Agent),
             {ok, NeedBootstrap, Node, Agent};
         Err ->
             ?tp(connection_failed,
