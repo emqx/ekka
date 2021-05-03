@@ -184,7 +184,7 @@ del_schema_copy(Node) ->
 %% @doc Get database backend
 -spec backend() -> backend().
 backend() ->
-    persistent_term:get({ekka, db_backend}, rlog).
+    persistent_term:get({ekka, db_backend}, mnesia).
 
 %%--------------------------------------------------------------------
 %% Cluster mnesia
