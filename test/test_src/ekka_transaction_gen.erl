@@ -79,7 +79,7 @@ counter(Key, NIter, Delay) ->
                   ok = ekka_ct:write(#test_tab{key = Key, val = V + 1}),
                   V
           end),
-    ?tp(notice, trans_gen_counter_update,
+    ?tp(info, trans_gen_counter_update,
         #{ key => Key
          , value => Val
          }),
