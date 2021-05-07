@@ -79,6 +79,6 @@ t_rand_error_injection(_) ->
        end,
        fun(N3, Trace) ->
                ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
-               %ekka_rlog_props:counter_import_check(CounterKey, N3, Trace),
+               ?assert(ekka_rlog_props:counter_import_check(CounterKey, N3, Trace) > 0),
                ?assert(length(?of_kind(snabbkaffe_crash, Trace)) > 1)
        end).
