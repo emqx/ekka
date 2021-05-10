@@ -54,7 +54,7 @@
 
 -type table():: atom().
 
--type change_type() :: write | delete | delete_object.
+-type change_type() :: write | delete | delete_object | clear_table.
 
 -type op() :: {{table(), term()}, term(), change_type()}
             | {ekka_rlog:func(_Ret), _Args :: list(), apply}.
@@ -133,7 +133,9 @@ import_op(Op) ->
         {{Tab, K}, _Record, delete} ->
             mnesia:delete({Tab, K});
         {{Tab, _K}, Record, delete_object} ->
-            mnesia:delete_object(Tab, Record, write)
+            mnesia:delete_object(Tab, Record, write);
+        {{Tab, _K}, '_', clear_table} ->
+            mnesia:clear_table(Tab)
     end.
 
 -spec import_op_dirty(op()) -> ok.
