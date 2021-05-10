@@ -53,10 +53,12 @@
         , copy_table/2
         ]).
 
-%% Transaction API
+%% Database API
 -export([ ro_transaction/1
         , transaction/2
         , transaction/1
+        , clear_table/1
+
         , backend/0
         ]).
 
@@ -371,21 +373,15 @@ ro_transaction(Fun) ->
 
 -spec transaction(fun((...) -> A), list()) -> t_result(A).
 transaction(Fun, Args) ->
-    case {backend(), ekka_rlog:role()}  of
-        {mnesia, core} ->
-            mnesia:transaction(Fun, Args);
-        {mnesia, replicant} ->
-            exit(plain_mnesia_transaction_on_replicant);
-        {rlog, core} ->
-            ekka_rlog:transaction(fun ekka_rlog_activity:transaction/2, [Fun, Args]);
-        {rlog, replicant} ->
-            Core = find_upstream_node(ekka_rlog:shards()),
-            ekka_rlog_lib:rpc_call(Core, ?MODULE, transaction, [Fun, Args])
-    end.
+    call_backend(transaction, [Fun, Args]).
 
 -spec transaction(fun(() -> A)) -> t_result(A).
 transaction(Fun) ->
     transaction(fun erlang:apply/2, [Fun, []]).
+
+-spec clear_table(ekka_rlog:table()) -> t_result(ok).
+clear_table(Table) ->
+    call_backend(clear_table, [Table]).
 
 %% Currently the strategy for selecting the upstream node is rather
 %% dumb: we just find the upstream of the first connected shard.
@@ -398,4 +394,18 @@ find_upstream_node([Shard|Rest]) ->
             Node;
         disconnected ->
             find_upstream_node(Rest)
+    end.
+
+-spec call_backend(atom(), list()) -> term().
+call_backend(Function, Args) ->
+    case {backend(), ekka_rlog:role()} of
+        {mnesia, core} ->
+            apply(mnesia, Function, Args);
+        {mnesia, replicant} ->
+            exit(plain_mnesia_transaction_on_replicant);
+        {rlog, core} ->
+            ekka_rlog:transaction(Function, Args);
+        {rlog, replicant} ->
+            Core = find_upstream_node(ekka_rlog:shards()),
+            ekka_rlog_lib:rpc_call(Core, ?MODULE, Function, Args)
     end.

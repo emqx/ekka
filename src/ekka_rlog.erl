@@ -27,6 +27,8 @@
         , role/1
         , subscribe/4
         , wait_for_shards/2
+
+        , get_internals/0
         ]).
 
 -export_type([ shard/0
@@ -108,7 +110,7 @@ do(Type, F, Args) ->
     Shards = ekka_rlog:shards(),
     TxFun =
         fun() ->
-                Result = apply(F, Args),
+                Result = apply(ekka_rlog_activity, F, Args),
                 {TID, TxStore} = get_internals(),
                 Key = ekka_rlog_lib:make_key(TID),
                 [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
