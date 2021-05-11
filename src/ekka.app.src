@@ -12,7 +12,8 @@
    [kernel,
     stdlib,
     mnesia,
-    inets
+    inets,
+    eetcd
    ]},
   {modules, []},
   {licenses, ["Apache 2.0"]},

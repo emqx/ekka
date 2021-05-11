@@ -114,6 +114,12 @@ cluster.proto_dist = inet_tcp
 ## Value: String
 ## cluster.etcd.server = http://127.0.0.1:2379
 
+## Etcd server version, v2 or v3
+##
+## Value: String
+## cluster.etcd.version = v3
+
+## v2 config
 ## The prefix helps build nodes path in etcd. Each node in the cluster
 ## will create a path in etcd: v2/keys/<prefix>/<cluster.name>/<node.name>
 ##
@@ -145,6 +151,13 @@ cluster.proto_dist = inet_tcp
 ## Value: File
 ##
 ## cluster.etcd.cacertfile = {{platform_etc_dir}}/certs/ca.pem
+
+## v3 config
+## grpc transport protocol, tcp or tls or ssl,
+##
+## Value: String
+##
+## cluster.etcd.transport = tcp
 
 ##--------------------------------------------------------------------
 ## Cluster using Kubernates

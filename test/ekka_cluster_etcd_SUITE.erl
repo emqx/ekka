@@ -23,6 +23,7 @@
 
 -define(OPTIONS, [{server, "http://127.0.0.1:2379"},
                   {prefix, "emqxcl"},
+                  {version, v2},
                   {node_ttl, 60}
                  ]).
 
