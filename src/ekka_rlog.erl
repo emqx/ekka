@@ -59,7 +59,7 @@ init() ->
 
 %% @doc Perform a transaction and log changes.
 %% the logged changes are to be replicated to other nodes.
--spec transaction(func(A), [term()]) -> ekka_mnesia:t_result(A).
+-spec transaction(atom(), [term()]) -> ekka_mnesia:t_result(term()).
 transaction(F, Args) -> do(transaction, F, Args).
 
 -spec shards() -> [shard()].
