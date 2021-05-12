@@ -379,7 +379,7 @@ transaction(Fun, Args) ->
 transaction(Fun) ->
     transaction(fun erlang:apply/2, [Fun, []]).
 
--spec clear_table(ekka_rlog:table()) -> t_result(ok).
+-spec clear_table(ekka_rlog_lib:table()) -> t_result(ok).
 clear_table(Table) ->
     call_backend(clear_table, [Table]).
 
