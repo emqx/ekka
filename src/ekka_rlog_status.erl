@@ -117,7 +117,7 @@ wait_for_shards(Shards, Timeout) ->
 %%================================================================================
 
 init([Ref, Subscriber]) ->
-    logger:set_process_metadata(#{domain => [ekka, rlog, evnet_mgr]}),
+    logger:set_process_metadata(#{domain => [ekka, rlog, event_mgr]}),
     ?tp(start_event_monitor,
         #{ reference => Ref
          , subscriber => Subscriber

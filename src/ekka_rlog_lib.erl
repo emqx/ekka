@@ -82,7 +82,7 @@ approx_snapshot() ->
 %% Log key should be globally unique.
 %%
 %% it is a tuple of a timestamp (ts) and the node id (node_id), where
-%% ts is at millisecond precesion to ensure it is locally monotoic and
+%% ts is at millisecond precision to ensure it is locally monotonic and
 %% unique, and transaction pid, should ensure global uniqueness.
 -spec make_key(ekka_rlog_lib:mnesia_tid()) -> ekka_rlog_lib:txid().
 make_key(#tid{pid = Pid}) ->

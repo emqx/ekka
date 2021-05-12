@@ -86,12 +86,13 @@ init({Shard, Subscriber, ReplaySince}) ->
           , subscriber     = Subscriber
           },
     %% TMP workaround until replaying from the old logs is figured out:
-    subscribe_realitime(D),
+    subscribe_realtime(D),
     {ok, ?normal, D}.
 
 -spec handle_event(gen_statem:event_type(), _EventContent, state(), data()) ->
           gen_statem:event_handler_result(state()).
 %% Events specific to `?normal' state:
+%% TODO: Shouldn't we handle the other mnesia events here (i.e., delete and delete_object)?
 handle_event(info, {mnesia_table_event, {write, Record, ActivityId}}, ?normal, D) ->
     handle_mnesia_event(Record, ActivityId, D);
 %% Common actions:
@@ -149,7 +150,7 @@ handle_mnesia_event({Shard, TXID, Ops}, ActivityId, D = #d{shard = Shard}) ->
     ok = ekka_rlog_replica:push_tlog_entry(D#d.subscriber, Tx),
     {keep_state, D#d{seqno = SeqNo + 1}}.
 
-subscribe_realitime(D) ->
+subscribe_realtime(D) ->
     Table = D#d.shard,
     {ok, Node} = mnesia:subscribe({table, Table, simple}),
     ?tp(info, subscribe_realtime_stream,
