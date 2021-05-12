@@ -80,7 +80,7 @@ push_tlog_entry({Node, Pid}, Batch) ->
 
 start_link(Shard) ->
     Config = #{}, % TODO
-    gen_statem:start_link(?MODULE, {Shard, Config}, []).
+    gen_statem:start_link({local, Shard}, ?MODULE, {Shard, Config}, []).
 
 %%================================================================================
 %% gen_statem callbacks
