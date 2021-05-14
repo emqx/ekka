@@ -235,7 +235,13 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                   fun(#lock{resource = Resource, owner = Owner}, MonAcc) ->
                       case maps:find(Owner, MonAcc) of
                           {ok, Resources} ->
-                              maps:put(Owner, [Resource|Resources], MonAcc);
+                              case lists:member(Resource, Resources) of
+                                  true ->
+                                      %% force kill it as it might have hung
+                                      exit(Owner, kill);
+                                  false ->
+                                      maps:put(Owner, [Resource|Resources], MonAcc)
+                              end;
                           error ->
                               _MRef = erlang:monitor(process, Owner),
                               maps:put(Owner, [Resource], MonAcc)
