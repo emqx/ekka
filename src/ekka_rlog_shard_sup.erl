@@ -48,9 +48,7 @@ init([shard, Shard]) ->
                 , intensity => 0
                 , period => 1
                 },
-    Children = [ server(ekka_rlog_server, Shard)
-               , server(ekka_rlog_cleaner, Shard)
-               ],
+    Children = [server(ekka_rlog_server, Shard)],
     {ok, {SupFlags, Children}};
 init([agent, Shard]) ->
     simple_sup(ekka_rlog_agent, Shard);
