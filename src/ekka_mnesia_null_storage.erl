@@ -187,9 +187,6 @@ validate_record(_Alias, _Tab, RecName, Arity, Type, _Obj) ->
 sender_init(_Alias, _Tab, _LoadReason, _Pid) ->
     {standard, fun() -> '$end_of_table' end, fun eot/1}.
 
-sender_handle_info(_Msg, _Alias, _Tab, _ReceiverPid, Cont) ->
-    {eot/1, Cont}.
-
 receiver_first_message(_Pid, {first, Size} = _Msg, _Alias, _Tab) ->
     {Size, _State = []}.
 

@@ -123,7 +123,7 @@ do(Type, F, Args) ->
                 %%  async_dirty -> mnesia:async_dirty(TxFun)
             end;
         _ ->
-            {aborted, nested_transaction}
+            error(nested_transaction)
     end.
 
 -spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.

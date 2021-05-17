@@ -51,7 +51,9 @@ clear_table(Tab) ->
         {mnesia, Tid, Ts}  ->
             mnesia:clear_table(Tid, Ts, Tab, '_');
         {Mod, Tid, Ts} ->
-            Mod:clear_table(Tid, Ts, Tab, '_')
+            Mod:clear_table(Tid, Ts, Tab, '_');
+        _ ->
+            error(no_transaction)
     end.
 
 %%================================================================================

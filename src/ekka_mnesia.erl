@@ -81,6 +81,7 @@
 start() ->
     ensure_ok(ensure_data_dir()),
     ensure_ok(init_schema()),
+    ensure_ok(ekka_mnesia_null_storage:register()),
     ok = mnesia:start(),
     ok = ekka_rlog:init(),
     init_tables(),
@@ -155,7 +156,7 @@ create_table(Name, TabDef) ->
 copy_table(Name) ->
     copy_table(Name, ram_copies).
 
--spec(copy_table(Name:: atom(), ram_copies | disc_copies) -> ok).
+-spec(copy_table(Name:: atom(), ram_copies | disc_copies | null_copies) -> ok).
 copy_table(Name, RamOrDisc) ->
     case ekka_rlog:role() of
         core ->
@@ -409,7 +410,7 @@ call_backend(Function, Args) ->
         {mnesia, core} ->
             apply(mnesia, Function, Args);
         {mnesia, replicant} ->
-            exit(plain_mnesia_transaction_on_replicant);
+            error(plain_mnesia_transaction_on_replicant);
         {rlog, core} ->
             ekka_rlog:transaction(Function, Args);
         {rlog, replicant} ->
