@@ -100,7 +100,9 @@ data_dir() -> mnesia:system_info(directory).
 %% @doc Ensure mnesia started
 -spec(ensure_started() -> ok | {error, any()}).
 ensure_started() ->
-    ok = mnesia:start(), wait_for(start).
+    ok = mnesia:start(),
+    {ok, _} = ekka_mnesia_null_storage:register(),
+    wait_for(start).
 
 %% @doc Ensure mnesia stopped
 -spec(ensure_stopped() -> ok | {error, any()}).

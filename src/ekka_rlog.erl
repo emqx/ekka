@@ -107,18 +107,23 @@ get_internals() ->
     end.
 
 do(Type, F, Args) ->
-    Shards = ekka_rlog:shards(),
-    TxFun =
-        fun() ->
-                Result = apply(ekka_rlog_activity, F, Args),
-                {TID, TxStore} = get_internals(),
-                Key = ekka_rlog_lib:make_key(TID),
-                [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
-                Result
-        end,
-    case Type of
-        transaction -> mnesia:transaction(TxFun)
-%        async_dirty -> mnesia:async_dirty(TxFun)
+    case mnesia:get_activity_id() of
+        undefined ->
+            Shards = ekka_rlog:shards(),
+            TxFun =
+                fun() ->
+                        Result = apply(ekka_rlog_activity, F, Args),
+                        {TID, TxStore} = get_internals(),
+                        Key = ekka_rlog_lib:make_key(TID),
+                        [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
+                        Result
+                end,
+            case Type of
+                transaction -> mnesia:transaction(TxFun)
+                %%  async_dirty -> mnesia:async_dirty(TxFun)
+            end;
+        _ ->
+            {aborted, nested_transaction}
     end.
 
 -spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.
