@@ -21,7 +21,7 @@
 %% Mnesia bootstrap
 -export([mnesia/1]).
 
--export([write/3, first_d/1, last_d/1, next_d/2]).
+-export([write/3]).
 
 -include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/trace.hrl").
@@ -34,6 +34,7 @@
 
 %% @doc Mnesia bootstrap.
 mnesia(BootType) ->
+    {ok, _} = ekka_mnesia_null_storage:register(),
     case ekka_rlog:role() of
         core -> [init(BootType, Shard) || Shard <- ekka_rlog:shards()], ok;
         _    -> ok
@@ -47,35 +48,11 @@ write(Shard, Key, [_ | _] = Ops) ->
                },
     mnesia:write(Shard, Log, write).
 
-%% @doc Search for the first record in the table.
--spec first_d(shard()) -> [key()].
-first_d(Shard) ->
-    case mnesia:dirty_first(Shard) of
-        '$end_of_table' -> [];
-        Key -> [Key]
-    end.
-
-%% @doc Search for the last key in the table.
--spec last_d(shard()) -> [key()].
-last_d(Shard) ->
-    case mnesia:dirty_last(Shard) of
-        '$end_of_table' -> [];
-        Key -> [Key]
-    end.
-
-%% @doc Search for the next key ordered immediately behind the given one.
--spec next_d(shard(), key()) -> [key()].
-next_d(Shard, Key) ->
-    case mnesia:dirty_next(Shard, Key) of
-        '$end_of_table' -> [];
-        Key -> [Key]
-    end.
-
 init(boot, Shard) ->
     Opts = [ {type, ordered_set}
-           , {ram_copies, [node()]}
            , {record_name, rlog}
            , {attributes, record_info(fields, rlog)}
+           , {null_copies, [node()]}
            ],
     ?tp(notice, creating_rlog_tab,
         #{ node => node()
@@ -89,4 +66,4 @@ init(copy, Shard) ->
          , shard => Shard
          , type => copy
          }),
-    ok = ekka_mnesia:copy_table(Shard, ram_copies).
+    ok = ekka_mnesia:copy_table(Shard, null_copies).
