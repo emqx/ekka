@@ -25,7 +25,6 @@
 %%================================================================================
 
 start(_Type, _Args) ->
-    {ok, _} = ekka_mnesia_null_storage:register(),
     ekka_sup:start_link().
 
 stop(_State) ->

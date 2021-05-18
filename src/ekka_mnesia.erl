@@ -81,8 +81,8 @@
 start() ->
     ensure_ok(ensure_data_dir()),
     ensure_ok(init_schema()),
-    ensure_ok(ekka_mnesia_null_storage:register()),
     ok = mnesia:start(),
+    {ok, _} = ekka_mnesia_null_storage:register(),
     ok = ekka_rlog:init(),
     init_tables(),
     wait_for(tables).

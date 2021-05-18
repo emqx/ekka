@@ -34,6 +34,13 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
+init_per_testcase(_TestCase, Config) ->
+    Config.
+
+end_per_testcase(TestCase, Config) ->
+    ekka_ct:cleanup(TestCase),
+    Config.
+
 t_data_dir(_) ->
     ekka_mnesia:data_dir().
 

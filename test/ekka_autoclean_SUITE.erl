@@ -31,8 +31,7 @@ init_per_suite(Config) ->
     Config.
 
 end_per_suite(_Config) ->
-    application:stop(ekka),
-    ekka_mnesia:ensure_stopped().
+    ekka_ct:cleanup(?MODULE).
 
 t_autoclean(_) ->
     N0 = node(),
@@ -43,4 +42,3 @@ t_autoclean(_) ->
     ok = timer:sleep(2000),
     [N0] = ekka_cluster:info(running_nodes),
     ekka:force_leave(N1).
-
