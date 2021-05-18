@@ -60,7 +60,8 @@ init_per_suite(Config) ->
 
 end_per_suite(_Config) ->
     application:stop(ekka),
-    ekka_mnesia:ensure_stopped().
+    ekka_mnesia:ensure_stopped(),
+    mnesia:delete_schema([node()]).
 
 %%--------------------------------------------------------------------
 %% Autocluster via 'static' strategy
@@ -194,4 +195,3 @@ stop_k8sapi_server(Port) ->
 
 stop_http_server(Port) ->
     inets:stop(httpd, {{127,0,0,1}, Port}).
-

@@ -116,6 +116,7 @@ start_slave(node, Name, Env) ->
     %% Load apps before setting the enviroment variables to avoid
     %% overriding the environment during ekka start:
     [rpc:call(Node, application, load, [App]) || App <- [gen_rpc]],
+    ok = mnesia:delete_schema([Node]),
     {ok, _} = cover:start([Node]),
     %% Disable gen_rpc listener by default:
     Env1 = [{gen_rpc, tcp_server_port, false}|Env],
