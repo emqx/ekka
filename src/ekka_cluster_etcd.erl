@@ -33,7 +33,8 @@
         , handle_cast/2
         , handle_info/2
         , terminate/2
-        , code_change/3]).
+        , code_change/3
+        ]).
 
 -define(SERVER, ?MODULE).
 
@@ -53,14 +54,14 @@
         , v2_unlock/1
         , v2_register/1
         , v2_unregister/1
-    ]).
+        ]).
 
 -export([ v3_discover/1
         , v3_lock/1
         , v3_unlock/1
         , v3_register/1
         , v3_unregister/1
-    ]).
+        ]).
 
 -define(LOG(Level, Format, Args), logger:Level("Ekka(etcd): " ++ Format, Args)).
 
@@ -175,7 +176,7 @@ etcd_get_nodes_key(Options) ->
     etcd_get(server(Options), nodes_path(Options), [{recursive, true}], ssl_options(Options)).
 
 etcd_set_node_key(Options) ->
-    Ttl = config(node_ttl, Options) div 1000,
+    Ttl = config(node_ttl, Options),
     etcd_set(server(Options), node_path(Options), [{ttl, Ttl}], ssl_options(Options)).
 
 etcd_del_node_key(Options) ->
@@ -202,13 +203,13 @@ config(Key, Options) ->
     proplists:get_value(Key, Options).
 
 etcd_get(Servers, Key, Params, HttpOpts) ->
-    ekka_httpc:get(rand_addr(Servers), Key, Params, HttpOpts).
+    ekka_httpc:get(scheme(rand_addr(Servers)), Key, Params, HttpOpts).
 
 etcd_set(Servers, Key, Params, HttpOpts) ->
-    ekka_httpc:put(rand_addr(Servers), Key, Params, HttpOpts).
+    ekka_httpc:put(scheme(rand_addr(Servers)), Key, Params, HttpOpts).
 
 etcd_del(Servers, Key, Params, HttpOpts) ->
-    ekka_httpc:delete(rand_addr(Servers), Key, Params, HttpOpts).
+    ekka_httpc:delete(scheme(rand_addr(Servers)), Key, Params, HttpOpts).
 
 nodes_path(Options) ->
     with_prefix(config(prefix, Options), "/nodes").
@@ -234,30 +235,6 @@ rand_addr(AddrList) ->
 etcd_v3(Action) ->
     gen_server:call(?SERVER, Action, 5000).
 
-v3_hosts(Servers) ->
-    Fun = fun(Server) ->
-              ServerList = string:replace(Server, "http://", ""),
-              ServerList2 = string:replace(iolist_to_binary(ServerList), "https://", ""),
-              ServerBinary = iolist_to_binary(ServerList2),
-              binary_to_list(ServerBinary)
-          end,
-    [Fun(Server) || Server <- Servers].
-
-v3_transport_opts(Options) ->
-    case proplists:get_value(transport, Options, tcp) of
-        tcp ->
-            {tcp, []};
-        Transport ->
-            Fun = fun(Key, TransportOpts0) ->
-                      case proplists:get_value(Key, Options, undefined) of
-                          undefined -> TransportOpts0;
-                          Value -> TransportOpts0 ++ {Key, Value}
-                      end
-                  end,
-            TransportOpts = lists:foldl(Fun, [], [keyfile, certfile, cacertfile]),
-            {Transport, TransportOpts}
-    end.
-
 v3_discover(State) ->
     v3_discover(State, 3).
 
@@ -271,7 +248,7 @@ v3_discover(State = #state{prefix = Prefix}, RetryTime) ->
                 [] ->
                     v3_register(State),
                     v3_discover(State, RetryTime - 1);
-                KvsList -> 
+                KvsList ->
                     Nodes = [
                         binary_to_atom(maps:get(value, Kvs), utf8) || Kvs <- KvsList],
                     {ok, Nodes}
@@ -354,19 +331,31 @@ v3_node_key(Prefix, Node) ->
 %% gen_server callback
 %%--------------------------------------------------------------------
 init(Options) ->
-    Hosts = v3_hosts(proplists:get_value(server, Options, [])),
-    {Transport, TransportOpts} = v3_transport_opts(Options),
-    {ok, _Pid} = eetcd:open(?MODULE, Hosts, [], Transport, TransportOpts),
+    Servers = proplists:get_value(server, Options, []),
     TTL = proplists:get_value(node_ttl, Options),
-    {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, TTL div 1000),
-    {ok, _Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
     Prefix = proplists:get_value(prefix, Options),
+    Hosts = [remove_scheme(Server) || Server <- Servers],
+    {Transport, TransportOpts} = case ssl_options(Options) of
+        [] -> {tcp, []};
+        [SSL] -> SSL
+    end,
+    {ok, _Pid} = eetcd:open(?MODULE, Hosts, Transport, TransportOpts),
+    {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, TTL),
+    {ok, _Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
     {ok, #state{prefix = Prefix, lease_id = ID}}.
 
 handle_call(lock, _From, State) ->
     case v3_lock(State) of
         {ok, LockKey} ->
             {reply, ok, State#state{lock_key = LockKey}};
+        Error ->
+            {reply, Error, State}
+    end;
+
+handle_call(unlock, _From, State) ->
+    case v3_unlock(State) of
+        ok ->
+            {reply, ok, State#state{lock_key = undefined}};
         Error ->
             {reply, Error, State}
     end;
@@ -390,3 +379,17 @@ terminate(_Reason, _State = #state{}) ->
 
 code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
+
+remove_scheme("http://" ++ Url) ->
+    Url;
+remove_scheme("https://" ++ Url) ->
+    Url;
+remove_scheme(Url) ->
+    Url.
+
+scheme("http://" ++ _ = Url) ->
+    Url;
+scheme("https://" ++ _ = Url) ->
+    Url;
+scheme(Url) ->
+    "http://" ++ Url.

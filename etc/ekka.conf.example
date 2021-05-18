@@ -112,7 +112,7 @@ cluster.proto_dist = inet_tcp
 ## Etcd server list, seperated by ','.
 ##
 ## Value: String
-## cluster.etcd.server = http://127.0.0.1:2379
+## cluster.etcd.server = 127.0.0.1:2379
 
 ## Etcd server version, v2 or v3
 ##
@@ -151,13 +151,6 @@ cluster.proto_dist = inet_tcp
 ## Value: File
 ##
 ## cluster.etcd.cacertfile = {{platform_etc_dir}}/certs/ca.pem
-
-## v3 config
-## grpc transport protocol, tcp or tls or ssl,
-##
-## Value: String
-##
-## cluster.etcd.transport = tcp
 
 ##--------------------------------------------------------------------
 ## Cluster using Kubernates
