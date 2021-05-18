@@ -109,17 +109,12 @@
   {datatype, {enum, [v2, v3]}}
 ]}.
 
-{mapping, "cluster.etcd.transport", "ekka.cluster_discovery", [
-  {datatype, {enum, [tcp, tls, ssl]}},
-  {default, tcp}
-]}.
-
 {mapping, "cluster.etcd.prefix", "ekka.cluster_discovery", [
   {datatype, string}
 ]}.
 
 {mapping, "cluster.etcd.node_ttl", "ekka.cluster_discovery", [
-  {datatype, {duration, ms}},
+  {datatype, {duration, s}},
   {default, "1m"}
 ]}.
 
