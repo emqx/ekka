@@ -102,7 +102,7 @@ wait_for_shards(Shards, Timeout) ->
     ERef = subscribe_events(),
     TRef = ekka_rlog_lib:send_after(Timeout, self(), {ERef, timeout}),
     %% Exclude shards that are up, since they are not going to send any events:
-    DownShards = Shards -- ets:match(?replica_tab, {{?upstream_node, $1}, $_}),
+    DownShards = Shards -- lists:append(ets:match(?replica_tab, {{?upstream_node, '$1'}, '_'})),
     Ret = do_wait_shards(ERef, DownShards),
     ekka_rlog_lib:cancel_timer(TRef),
     unsubscribe_events(ERef),
@@ -117,7 +117,7 @@ wait_for_shards(Shards, Timeout) ->
 %%================================================================================
 
 init([Ref, Subscriber]) ->
-    logger:set_process_metadata(#{domain => [ekka, rlog, evnet_mgr]}),
+    logger:set_process_metadata(#{domain => [ekka, rlog, event_mgr]}),
     ?tp(start_event_monitor,
         #{ reference => Ref
          , subscriber => Subscriber

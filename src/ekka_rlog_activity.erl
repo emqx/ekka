@@ -24,6 +24,7 @@
 -export([ transaction/1
         , transaction/2
         , ro_transaction/1
+        , clear_table/1
         ]).
 
 %%================================================================================
@@ -43,6 +44,17 @@ ro_transaction(Fun) ->
     Ret = unwrap_mnesia_ret(mnesia:transaction(Fun)),
     assert_ro(),
     Ret.
+
+-spec clear_table(ekka_rlog_lib:table()) -> ok.
+clear_table(Tab) ->
+    case get(mnesia_activity_state) of
+        {mnesia, Tid, Ts}  ->
+            mnesia:clear_table(Tid, Ts, Tab, '_');
+        {Mod, Tid, Ts} ->
+            Mod:clear_table(Tid, Ts, Tab, '_');
+        _ ->
+            error(no_transaction)
+    end.
 
 %%================================================================================
 %% Internal functions

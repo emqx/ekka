@@ -27,6 +27,8 @@
         , role/1
         , subscribe/4
         , wait_for_shards/2
+
+        , get_internals/0
         ]).
 
 -export_type([ shard/0
@@ -57,7 +59,7 @@ init() ->
 
 %% @doc Perform a transaction and log changes.
 %% the logged changes are to be replicated to other nodes.
--spec transaction(func(A), [term()]) -> ekka_mnesia:t_result(A).
+-spec transaction(atom(), [term()]) -> ekka_mnesia:t_result(term()).
 transaction(F, Args) -> do(transaction, F, Args).
 
 -spec shards() -> [shard()].
@@ -105,18 +107,23 @@ get_internals() ->
     end.
 
 do(Type, F, Args) ->
-    Shards = ekka_rlog:shards(),
-    TxFun =
-        fun() ->
-                Result = apply(F, Args),
-                {TID, TxStore} = get_internals(),
-                Key = ekka_rlog_lib:make_key(TID),
-                [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
-                Result
-        end,
-    case Type of
-        transaction -> mnesia:transaction(TxFun)
-%        async_dirty -> mnesia:async_dirty(TxFun)
+    case mnesia:get_activity_id() of
+        undefined ->
+            Shards = ekka_rlog:shards(),
+            TxFun =
+                fun() ->
+                        Result = apply(ekka_rlog_activity, F, Args),
+                        {TID, TxStore} = get_internals(),
+                        Key = ekka_rlog_lib:make_key(TID),
+                        [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
+                        Result
+                end,
+            case Type of
+                transaction -> mnesia:transaction(TxFun)
+                %%  async_dirty -> mnesia:async_dirty(TxFun)
+            end;
+        _ ->
+            error(nested_transaction)
     end.
 
 -spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.

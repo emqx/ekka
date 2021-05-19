@@ -53,10 +53,12 @@
         , copy_table/2
         ]).
 
-%% Transaction API
+%% Database API
 -export([ ro_transaction/1
         , transaction/2
         , transaction/1
+        , clear_table/1
+
         , backend/0
         ]).
 
@@ -80,6 +82,7 @@ start() ->
     ensure_ok(ensure_data_dir()),
     ensure_ok(init_schema()),
     ok = mnesia:start(),
+    {ok, _} = ekka_mnesia_null_storage:register(),
     ok = ekka_rlog:init(),
     init_tables(),
     wait_for(tables).
@@ -98,7 +101,9 @@ data_dir() -> mnesia:system_info(directory).
 %% @doc Ensure mnesia started
 -spec(ensure_started() -> ok | {error, any()}).
 ensure_started() ->
-    ok = mnesia:start(), wait_for(start).
+    ok = mnesia:start(),
+    {ok, _} = ekka_mnesia_null_storage:register(),
+    wait_for(start).
 
 %% @doc Ensure mnesia stopped
 -spec(ensure_stopped() -> ok | {error, any()}).
@@ -151,7 +156,7 @@ create_table(Name, TabDef) ->
 copy_table(Name) ->
     copy_table(Name, ram_copies).
 
--spec(copy_table(Name:: atom(), ram_copies | disc_copies) -> ok).
+-spec(copy_table(Name:: atom(), ram_copies | disc_copies | null_copies) -> ok).
 copy_table(Name, RamOrDisc) ->
     case ekka_rlog:role() of
         core ->
@@ -371,21 +376,15 @@ ro_transaction(Fun) ->
 
 -spec transaction(fun((...) -> A), list()) -> t_result(A).
 transaction(Fun, Args) ->
-    case {backend(), ekka_rlog:role()}  of
-        {mnesia, core} ->
-            mnesia:transaction(Fun, Args);
-        {mnesia, replicant} ->
-            exit(plain_mnesia_transaction_on_replicant);
-        {rlog, core} ->
-            ekka_rlog:transaction(fun ekka_rlog_activity:transaction/2, [Fun, Args]);
-        {rlog, replicant} ->
-            Core = find_upstream_node(ekka_rlog:shards()),
-            ekka_rlog_lib:rpc_call(Core, ?MODULE, transaction, [Fun, Args])
-    end.
+    call_backend(transaction, [Fun, Args]).
 
 -spec transaction(fun(() -> A)) -> t_result(A).
 transaction(Fun) ->
     transaction(fun erlang:apply/2, [Fun, []]).
+
+-spec clear_table(ekka_rlog_lib:table()) -> t_result(ok).
+clear_table(Table) ->
+    call_backend(clear_table, [Table]).
 
 %% Currently the strategy for selecting the upstream node is rather
 %% dumb: we just find the upstream of the first connected shard.
@@ -398,4 +397,18 @@ find_upstream_node([Shard|Rest]) ->
             Node;
         disconnected ->
             find_upstream_node(Rest)
+    end.
+
+-spec call_backend(atom(), list()) -> term().
+call_backend(Function, Args) ->
+    case {backend(), ekka_rlog:role()} of
+        {mnesia, core} ->
+            apply(mnesia, Function, Args);
+        {mnesia, replicant} ->
+            error(plain_mnesia_transaction_on_replicant);
+        {rlog, core} ->
+            ekka_rlog:transaction(Function, Args);
+        {rlog, replicant} ->
+            Core = find_upstream_node(ekka_rlog:shards()),
+            ekka_rlog_lib:rpc_call(Core, ?MODULE, Function, Args)
     end.

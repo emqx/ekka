@@ -34,6 +34,13 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
+init_per_testcase(_TestCase, Config) ->
+    Config.
+
+end_per_testcase(TestCase, Config) ->
+    ekka_ct:cleanup(TestCase),
+    Config.
+
 t_data_dir(_) ->
     ekka_mnesia:data_dir().
 
@@ -227,6 +234,27 @@ t_core_node_competing_writes(_) ->
                %% Check that the ops have been imported in order:
                snabbkaffe:strictly_increasing(Events)
        end).
+
+t_rlog_clear_table(_) ->
+    snabbkaffe:fix_ct_logging(),
+    Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
+    ?check_trace(
+       try
+           Nodes = [N1, N2] = ekka_ct:start_cluster(ekka, Cluster),
+           ekka_mnesia_test_util:wait_shards(Nodes),
+           rpc:call(N1, ekka_transaction_gen, init, []),
+           ekka_mnesia_test_util:stabilize(1000),
+           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
+           ?assertMatch({atomic, ok}, rpc:call(N1, ekka_mnesia, clear_table, [test_tab])),
+           ekka_mnesia_test_util:stabilize(1000),
+           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes)
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(_, _) ->
+               true
+       end).
+
 
 cluster_benchmark(_) ->
     snabbkaffe:fix_ct_logging(),

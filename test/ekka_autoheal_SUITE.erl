@@ -30,8 +30,14 @@ init_per_suite(Config) ->
     Config.
 
 end_per_suite(_Config) ->
-    ok = ekka:stop(),
-    ekka_mnesia:ensure_stopped().
+    ok.
+
+init_per_testcase(_TestCase, Config) ->
+    Config.
+
+end_per_testcase(TestCase, Config) ->
+    ekka_ct:cleanup(TestCase),
+    Config.
 
 t_enabled(_Config) ->
     {true, 2000} = ekka_autoheal:enabled().
