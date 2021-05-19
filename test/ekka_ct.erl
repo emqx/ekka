@@ -27,6 +27,13 @@ all(Suite) ->
                       string:substr(atom_to_list(F), 1, 2) == "t_"
                 ]).
 
+cleanup(Testcase) ->
+    ct:pal("Cleaning up after ~p...", [Testcase]),
+    application:stop(ekka),
+    ekka_mnesia:ensure_stopped(),
+    mnesia:stop(),
+    ok = mnesia:delete_schema([node()]).
+
 -type env() :: [{atom(), atom(), term()}].
 
 -type start_spec() ::
@@ -116,7 +123,6 @@ start_slave(node, Name, Env) ->
     %% Load apps before setting the enviroment variables to avoid
     %% overriding the environment during ekka start:
     [rpc:call(Node, application, load, [App]) || App <- [gen_rpc]],
-    ok = mnesia:delete_schema([Node]),
     {ok, _} = cover:start([Node]),
     %% Disable gen_rpc listener by default:
     Env1 = [{gen_rpc, tcp_server_port, false}|Env],
@@ -142,8 +148,9 @@ wait_running(Node, Timeout) ->
     end.
 
 stop_slave(Node) ->
-    mnesia:delete_schema([Node]),
     ok = cover:stop([Node]),
+    rpc:call(Node, mnesia, stop, []),
+    mnesia:delete_schema([Node]),
     slave:stop(Node).
 
 host() ->

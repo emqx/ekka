@@ -31,9 +31,7 @@ init_per_suite(Config) ->
     Config.
 
 end_per_suite(_Config) ->
-    application:stop(ekka),
-    ekka_mnesia:ensure_stopped(),
-    mnesia:delete_schema([node()]).
+    ekka_ct:cleanup(?MODULE).
 
 t_autoclean(_) ->
     N0 = node(),

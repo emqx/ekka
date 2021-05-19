@@ -52,16 +52,21 @@ all() -> ekka_ct:all(?MODULE).
 %%--------------------------------------------------------------------
 
 init_per_suite(Config) ->
+    Config.
+
+end_per_suite(_Config) ->
+    ok.
+
+init_per_testcase(_TestCase, Config) ->
     _ = inets:start(),
     ok = application:set_env(ekka, cluster_name, ekka),
     ok = application:set_env(ekka, cluster_enable, true),
     ok = ekka:start(),
     Config.
 
-end_per_suite(_Config) ->
-    application:stop(ekka),
-    ekka_mnesia:ensure_stopped(),
-    mnesia:delete_schema([node()]).
+end_per_testcase(TestCase, Config) ->
+    ekka_ct:cleanup(TestCase),
+    Config.
 
 %%--------------------------------------------------------------------
 %% Autocluster via 'static' strategy
