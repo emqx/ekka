@@ -79,7 +79,7 @@ init({server, Shard, Subscriber}) ->
     logger:set_process_metadata(#{ domain => [ekka, rlog, bootstrapper, server]
                                  , shard  => Shard
                                  }),
-    #{tables := Tables} = ekka_rlog:shard_config(Shard),
+    #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
     ?tp(info, rlog_bootstrapper_start,
         #{ shard     => Shard
          , subscribe => Subscriber

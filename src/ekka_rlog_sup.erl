@@ -49,7 +49,7 @@ find_shard(Shard) ->
 -spec start_shard(ekka_rlog:shard()) -> {ok, pid()}
                                       | {error, _}.
 start_shard(Shard) ->
-    _ = ekka_rlog:shard_config(Shard),
+    _ = ekka_rlog_config:shard_config(Shard),
     ?tp(info, "Starting RLOG shard",
         #{ shard => Shard
          }),

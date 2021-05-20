@@ -59,7 +59,13 @@
         , transaction/1
         , clear_table/1
 
-        , backend/0
+        , dirty_write/2
+        , dirty_write/1
+
+        , dirty_delete/2
+        , dirty_delete/1
+
+        , dirty_delete_object/2
         ]).
 
 -export_type([ t_result/1
@@ -185,11 +191,6 @@ del_schema_copy(Node) ->
         {atomic, ok} -> ok;
         {aborted, Reason} -> {error, Reason}
     end.
-
-%% @doc Get database backend
--spec backend() -> backend().
-backend() ->
-    persistent_term:get({ekka, db_backend}, mnesia).
 
 %%--------------------------------------------------------------------
 %% Cluster mnesia
@@ -381,7 +382,7 @@ ro_transaction(Fun) ->
 
 -spec transaction(fun((...) -> A), list()) -> t_result(A).
 transaction(Fun, Args) ->
-    call_backend(transaction, [Fun, Args]).
+    ekka_rlog:call_backend_rw_trans(transaction, [Fun, Args]).
 
 -spec transaction(fun(() -> A)) -> t_result(A).
 transaction(Fun) ->
@@ -389,31 +390,24 @@ transaction(Fun) ->
 
 -spec clear_table(ekka_rlog_lib:table()) -> t_result(ok).
 clear_table(Table) ->
-    call_backend(clear_table, [Table]).
+    ekka_rlog:call_backend_rw_trans(clear_table, [Table]).
 
-%% Currently the strategy for selecting the upstream node is rather
-%% dumb: we just find the upstream of the first connected shard.
--spec find_upstream_node([ekka_rlog:shard()]) -> node().
-find_upstream_node([]) ->
-    error(disconnected);
-find_upstream_node([Shard|Rest]) ->
-    case ekka_rlog_status:upstream(Shard) of
-        {ok, Node} ->
-            Node;
-        disconnected ->
-            find_upstream_node(Rest)
-    end.
+-spec dirty_write(tuple()) -> ok.
+dirty_write(Record) ->
+    dirty_write(element(1, Record), Record).
 
--spec call_backend(atom(), list()) -> term().
-call_backend(Function, Args) ->
-    case {backend(), ekka_rlog:role()} of
-        {mnesia, core} ->
-            apply(mnesia, Function, Args);
-        {mnesia, replicant} ->
-            error(plain_mnesia_transaction_on_replicant);
-        {rlog, core} ->
-            ekka_rlog:transaction(Function, Args);
-        {rlog, replicant} ->
-            Core = find_upstream_node(ekka_rlog:shards()),
-            ekka_rlog_lib:rpc_call(Core, ?MODULE, Function, Args)
-    end.
+-spec dirty_write(ekka_rlog_lib:table(), tuple()) -> ok.
+dirty_write(Tab, Record) ->
+    ekka_rlog:call_backend_rw_dirty(dirty_write, Tab, [Record]).
+
+-spec dirty_delete(ekka_rlog_lib:table(), term()) -> ok.
+dirty_delete(Tab, Key) ->
+    ekka_rlog:call_backend_rw_dirty(dirty_delete, Tab, [Key]).
+
+-spec dirty_delete({ekka_rlog_lib:table(), term()}) -> ok.
+dirty_delete({Tab, Key}) ->
+    dirty_delete(Tab, Key).
+
+-spec dirty_delete_object(ekka_rlog_lib:table(), term()) -> ok.
+dirty_delete_object(Tab, Key) ->
+    ekka_rlog:call_backend_rw_dirty(dirty_delete_object, Tab, [Key]).

@@ -20,11 +20,9 @@
 -export([ approx_snapshot/0
         , make_key/1
         , import_batch/2
+        , import_dirty_op/1
         , rpc_call/4
         , rpc_cast/4
-        , load_shard_config/0
-        , read_shard_config/0
-        , make_shard_match_spec/1
         , shuffle/1
         , send_after/3
         , cancel_timer/1
@@ -56,10 +54,11 @@
 
 -type change_type() :: write | delete | delete_object | clear_table.
 
--type op() :: {{table(), term()}, term(), change_type()}
-            | {ekka_rlog:func(_Ret), _Args :: list(), apply}.
+-type op() :: {{table(), term()}, term(), change_type()}.
 
--type tx() :: [op()].
+-type dirty() :: {dirty, _Fun :: atom(), _Args :: list()}.
+
+-type tx() :: [op()] | dirty().
 
 -type rlog() :: #rlog{}.
 
@@ -84,9 +83,12 @@ approx_snapshot() ->
 %% it is a tuple of a timestamp (ts) and the node id (node_id), where
 %% ts is at millisecond precision to ensure it is locally monotonic and
 %% unique, and transaction pid, should ensure global uniqueness.
--spec make_key(ekka_rlog_lib:mnesia_tid()) -> ekka_rlog_lib:txid().
+-spec make_key(ekka_rlog_lib:mnesia_tid() | undefined) -> ekka_rlog_lib:txid().
 make_key(#tid{pid = Pid}) ->
-    {approx_snapshot(), Pid}.
+    {approx_snapshot(), Pid};
+make_key(undefined) ->
+    %% This is a dirty operation
+    {approx_snapshot(), make_ref()}.
 
 %% -spec make_key_in_past(integer()) -> ekka_rlog_lib:txid().
 %% make_key_in_past(Dt) ->
@@ -102,6 +104,16 @@ make_key(#tid{pid = Pid}) ->
 import_batch(ImportType, Batch) ->
     lists:foreach(fun(Tx) -> import_transaction(ImportType, Tx) end, Batch).
 
+%% @doc Import a dirty operation
+-spec import_dirty_op(dirty()) -> ok.
+import_dirty_op({dirty, Fun, Args}) ->
+    ?tp(import_dirty_op,
+        #{ op    => Fun
+         , table => hd(Args)
+         , args  => tl(Args)
+         }),
+    ok = apply(mnesia, Fun, Args).
+
 %% %% @doc Do a local RPC call, used for testing
 %% -spec local_rpc_call(node(), module(), atom(), list()) -> term().
 %% local_rpc_call(Node, Module, Function, Args) ->
@@ -109,6 +121,8 @@ import_batch(ImportType, Batch) ->
 %%     apply(Module, Function, Args).
 
 -spec import_transaction(transaction | dirty, [tx()]) -> ok.
+import_transaction(_, Dirty = {dirty, _, _}) ->
+    import_dirty_op(Dirty);
 import_transaction(transaction, Ops) ->
     ?tp(rlog_import_trans,
         #{ type => transaction
@@ -149,55 +163,14 @@ import_op_dirty({{Tab, _K}, Record, write}) ->
 %% @doc Do an RPC call
 -spec rpc_call(node(), module(), atom(), list()) -> term().
 rpc_call(Node, Module, Function, Args) ->
-    Mod = persistent_term:get({ekka, rlog_rpc_mod}, gen_rpc),
+    Mod = ekka_rlog_config:rpc_module(),
     apply(Mod, call, [Node, Module, Function, Args]).
 
 %% @doc Do an RPC cast
 -spec rpc_cast(node(), module(), atom(), list()) -> term().
 rpc_cast(Node, Module, Function, Args) ->
-    Mod = persistent_term:get({ekka, rlog_rpc_mod}, gen_rpc),
+    Mod = ekka_rlog_config:rpc_module(),
     apply(Mod, cast, [Node, Module, Function, Args]).
-
-%%================================================================================
-%% Shard configuration
-%%================================================================================
-
--spec load_shard_config() -> ok.
-load_shard_config() ->
-    Raw = read_shard_config(),
-    ok = verify_shard_config(Raw),
-    Shards = proplists:get_keys(Raw),
-    ok = persistent_term:put({ekka, shards}, Shards),
-    lists:foreach(fun({Shard, Tables}) ->
-                          Config = #{ tables => Tables
-                                    , match_spec => make_shard_match_spec(Tables)
-                                    },
-                          ?tp(notice, "Setting RLOG shard config",
-                              #{ shard => Shard
-                               , tables => Tables
-                               }),
-                          ok = persistent_term:put({ekka_shard, Shard}, Config)
-                  end,
-                  Raw).
-
--spec read_shard_config() -> [{ekka_rlog:shard(), [table()]}].
-read_shard_config() ->
-    L = lists:flatmap( fun({_App, _Module, Attrs}) ->
-                               Attrs
-                       end
-                     , ekka_boot:all_module_attributes(rlog_shard)
-                     ),
-    Shards = proplists:get_keys(L),
-    [{Shard, lists:usort(proplists:get_all_values(Shard, L))}
-     || Shard <- Shards].
-
-
--spec make_shard_match_spec([ekka_rlog_lib:table()]) -> ets:match_spec().
-make_shard_match_spec(Tables) ->
-    [{ {{Table, '_'}, '_', '_'}
-     , []
-     , ['$_']
-     } || Table <- Tables].
 
 %%================================================================================
 %% Misc functions
@@ -224,42 +197,3 @@ cancel_timer(TRef) ->
 %%================================================================================
 %% Internal
 %%================================================================================
-
--spec verify_shard_config([{ekka_rlog:shard(), [table()]}]) -> ok.
-verify_shard_config(ShardConfig) ->
-    verify_shard_config(ShardConfig, #{}).
-
--spec verify_shard_config([{ekka_rlog:shard(), [table()]}], #{table() => ekka_rlog:shard()}) -> ok.
-verify_shard_config([], _) ->
-    ok;
-verify_shard_config([{_Shard, []} | Rest], Acc) ->
-    verify_shard_config(Rest, Acc);
-verify_shard_config([{Shard, [Table|Tables]} | Rest], Acc0) ->
-    Acc = case Acc0 of
-              #{Table := Shard1} when Shard1 =/= Shard ->
-                  ?tp(critical, "Duplicate RLOG shard",
-                      #{ table       => Table
-                       , shard       => Shard
-                       , other_shard => Shard1
-                       }),
-                  error(badarg);
-              _ ->
-                  Acc0#{Table => Shard}
-          end,
-    verify_shard_config([{Shard, Tables} | Rest], Acc).
-
--ifdef(TEST).
-
--include_lib("eunit/include/eunit.hrl").
-
--dialyzer({nowarn_function, verify_shard_config_test/0}).
-verify_shard_config_test() ->
-    ?assertMatch(ok, verify_shard_config([])),
-    ?assertMatch(ok, verify_shard_config([ {foo, [foo_tab, bar_tab]}
-                                         , {baz, [baz_tab, foo_bar_tab]}
-                                         ])),
-    ?assertError(_, verify_shard_config([ {foo, [foo_tab, bar_tab]}
-                                        , {baz, [baz_tab, foo_tab]}
-                                        ])).
-
--endif. %% TEST
