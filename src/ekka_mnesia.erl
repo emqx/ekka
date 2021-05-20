@@ -58,8 +58,6 @@
         , transaction/2
         , transaction/1
         , clear_table/1
-
-        , backend/0
         ]).
 
 -export_type([ t_result/1
@@ -185,11 +183,6 @@ del_schema_copy(Node) ->
         {atomic, ok} -> ok;
         {aborted, Reason} -> {error, Reason}
     end.
-
-%% @doc Get database backend
--spec backend() -> backend().
-backend() ->
-    persistent_term:get({ekka, db_backend}, mnesia).
 
 %%--------------------------------------------------------------------
 %% Cluster mnesia
@@ -401,7 +394,7 @@ find_upstream_node([Shard|Rest]) ->
 
 -spec call_backend(atom(), list()) -> term().
 call_backend(Function, Args) ->
-    case {backend(), ekka_rlog:role()} of
+    case {ekka_rlog:backend(), ekka_rlog:role()} of
         {mnesia, core} ->
             apply(mnesia, Function, Args);
         {mnesia, replicant} ->

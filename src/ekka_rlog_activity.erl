@@ -66,7 +66,7 @@ unwrap_mnesia_ret({aborted, Ret}) ->
     mnesia:abort(Ret).
 
 assert_ro() ->
-    %% Only run this check in TEST mode
+    %% TODO: Only run this check in TEST mode
     {_, _, #tidstore{store = Ets}} = mnesia:get_activity_id(),
     case ets:match(Ets, {'_', '_', '_'}) of
         []  -> ok;

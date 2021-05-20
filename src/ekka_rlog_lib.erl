@@ -145,13 +145,13 @@ import_op_dirty({{Tab, _K}, Record, write}) ->
 %% @doc Do an RPC call
 -spec rpc_call(node(), module(), atom(), list()) -> term().
 rpc_call(Node, Module, Function, Args) ->
-    Mod = persistent_term:get({ekka, rlog_rpc_mod}, gen_rpc),
+    Mod = ekka_rlog_config:rpc_module(),
     apply(Mod, call, [Node, Module, Function, Args]).
 
 %% @doc Do an RPC cast
 -spec rpc_cast(node(), module(), atom(), list()) -> term().
 rpc_cast(Node, Module, Function, Args) ->
-    Mod = persistent_term:get({ekka, rlog_rpc_mod}, gen_rpc),
+    Mod = ekka_rlog_config:rpc_module(),
     apply(Mod, cast, [Node, Module, Function, Args]).
 
 %%================================================================================

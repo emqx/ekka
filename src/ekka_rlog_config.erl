@@ -14,9 +14,16 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
+%% @doc Functions for accessing the RLOG configuration
 -module(ekka_rlog_config).
 
--export([ load_shard_config/0
+-export([ init/0
+
+        , role/0
+        , backend/0
+        , rpc_module/0
+
+          %% Shard config:
         , shard_rlookup/1
         , shards/0
         , shard_config/1
@@ -30,17 +37,19 @@
 
 -type raw_config() :: [{ekka_rlog:shard(), [ekka_rlog_lib:table()]}].
 
+%%================================================================================
+%% Persistent term keys
+%%================================================================================
+
 -define(shard_rlookup(TABLE), {ekka_shard_rlookup, TABLE}).
 -define(shard_config(SHARD), {ekka_shard_config, SHARD}).
 -define(shards, ekka_shards).
 
+-define(ekka(Key), {ekka, Key}).
+
 %%================================================================================
 %% API
 %%================================================================================
-
--spec load_shard_config() -> ok.
-load_shard_config() ->
-    load_shard_config(read_shard_config()).
 
 %% @doc Find which shard the table belongs to
 -spec shard_rlookup(ekka_rlog_lib:table()) -> ekka_rlog:shard() | undefined.
@@ -56,9 +65,39 @@ shards() ->
 shard_config(Shard) ->
     persistent_term:get(?shard_config(Shard)).
 
+-spec backend() -> ekka_mnesia:backend().
+backend() ->
+    persistent_term:get(?ekka(db_backend), mnesia).
+
+-spec role() -> ekka_rlog:role().
+role() ->
+    persistent_term:get(?ekka(node_role), core).
+
+-spec rpc_module() -> gen_rpc | rpc.
+rpc_module() ->
+    persistent_term:get(?ekka(rlog_rpc_module), gen_rpc).
+
+-spec init() -> ok.
+init() ->
+    copy_from_env(rlog_rpc_module),
+    copy_from_env(db_backend),
+    copy_from_env(node_role),
+    load_shard_config().
+
 %%================================================================================
 %% Internal
 %%================================================================================
+
+-spec copy_from_env(atom()) -> ok.
+copy_from_env(Key) ->
+    case application:get_env(ekka, Key) of
+        {ok, Val} -> persistent_term:put(?ekka(Key), Val);
+        undefined -> ok
+    end.
+
+-spec load_shard_config() -> ok.
+load_shard_config() ->
+    load_shard_config(read_shard_config()).
 
 -spec load_shard_config(raw_config()) -> ok.
 load_shard_config(Raw) ->

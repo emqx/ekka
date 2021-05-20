@@ -18,11 +18,14 @@
 -module(ekka_rlog).
 
 -export([ init/0
+
+        , role/0
+        , role/1
+        , backend/0
+
         , transaction/2
         , ensure_shard/1
         , core_nodes/0
-        , role/0
-        , role/1
         , subscribe/4
         , wait_for_shards/2
 
@@ -48,22 +51,23 @@
                          }.
 
 init() ->
-    setup_persistent_terms(),
-    ok.
+    ekka_rlog_config:init().
+
+-spec role() -> ekka_rlog:role().
+role() ->
+    ekka_rlog_config:role().
+
+-spec role(node()) -> ekka_rlog:role().
+role(Node) ->
+    ekka_rlog_lib:rpc_call(Node, ?MODULE, role, []).
+
+backend() ->
+    ekka_rlog_config:backend().
 
 %% @doc Perform a transaction and log changes.
 %% the logged changes are to be replicated to other nodes.
 -spec transaction(atom(), [term()]) -> ekka_mnesia:t_result(term()).
 transaction(F, Args) -> do(transaction, F, Args).
-
-%% TODO: persistent term
--spec role() -> role().
-role() ->
-    application:get_env(ekka, node_role, core).
-
--spec role(node()) -> role().
-role(Node) ->
-    rpc:call(Node, ?MODULE, role, []).
 
 -spec core_nodes() -> [node()].
 core_nodes() ->
@@ -114,7 +118,7 @@ do(Type, F, Args) ->
 
 -spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.
 wait_for_shards(Shards, Timeout) ->
-    case ekka_mnesia:backend() of
+    case ekka_rlog_config:backend() of
         rlog ->
             [ok = ensure_shard(I) || I <- Shards],
             case role() of
@@ -145,16 +149,3 @@ dig_ops_for_shard(Key, TxStore, Shard) ->
 %% we can only hope that this is not an anonymous function
 %% add the function is idempotent.
 %% args_as_op(F, Args) -> [{F, Args, apply}].
-
--spec setup_persistent_terms() -> ok.
-setup_persistent_terms() ->
-    copy_from_env(rlog_rpc_module),
-    copy_from_env(db_backend),
-    ekka_rlog_config:load_shard_config().
-
--spec copy_from_env(atom()) -> ok.
-copy_from_env(Key) ->
-    case application:get_env(ekka, Key) of
-        {ok, Val} -> persistent_term:put({ekka, Key}, Val);
-        undefined -> ok
-    end.
