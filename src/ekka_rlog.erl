@@ -25,7 +25,6 @@
 
         , find_upstream_node/1
 
-        , transaction/2
         , ensure_shard/1
         , core_nodes/0
         , subscribe/4
@@ -34,6 +33,9 @@
         , get_internals/0
         , call_backend/2
         ]).
+
+%% Internal exports
+-export([transactional_wrapper/2]).
 
 -export_type([ shard/0
              , role/0
@@ -69,23 +71,19 @@ backend() ->
 
 %% @doc Perform a transaction and log changes.
 %% the logged changes are to be replicated to other nodes.
--spec transaction(atom(), [term()]) -> ekka_mnesia:t_result(term()).
-transaction(F, Args) ->
-    case mnesia:get_activity_id() of
-        undefined ->
-            Shards = ekka_rlog_config:shards(),
-            TxFun =
-                fun() ->
-                        Result = apply(ekka_rlog_activity, F, Args),
-                        {TID, TxStore} = get_internals(),
-                        Key = ekka_rlog_lib:make_key(TID),
-                        [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
-                        Result
-                end,
-            mnesia:transaction(TxFun);
-        _ ->
-            error(nested_transaction)
-    end.
+-spec transactional_wrapper(atom(), [term()]) -> ekka_mnesia:t_result(term()).
+transactional_wrapper(Fun, Args) ->
+    ensure_no_transaction(),
+    Shards = ekka_rlog_config:shards(),
+    TxFun =
+        fun() ->
+                Result = apply(ekka_rlog_activity, Fun, Args),
+                {TID, TxStore} = get_internals(),
+                Key = ekka_rlog_lib:make_key(TID),
+                [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
+                Result
+        end,
+    mnesia:transaction(TxFun).
 
 -spec core_nodes() -> [node()].
 core_nodes() ->
@@ -135,10 +133,10 @@ call_backend(Function, Args) ->
         {mnesia, replicant} ->
             error(plain_mnesia_transaction_on_replicant);
         {rlog, core} ->
-            ekka_rlog:transaction(Function, Args);
+            transactional_wrapper(Function, Args);
         {rlog, replicant} ->
             Core = find_upstream_node(ekka_rlog_config:shards()),
-            ekka_rlog_lib:rpc_call(Core, ?MODULE, Function, Args)
+            ekka_rlog_lib:rpc_call(Core, ?MODULE, transactional_wrapper, [Function, Args])
     end.
 
 -spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.
@@ -161,16 +159,8 @@ dig_ops_for_shard(Key, TxStore, Shard) ->
     Ops = ets:select(TxStore, MS),
     mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write).
 
-%% get_tx_ops(F, Args) ->
-%%     {_, _, Store} = mnesia:get_activity_id(),
-%%     case Store of
-%%         non_transaction ->
-%%             args_as_op(F, Args);
-%%         #tidstore{store = Ets} ->
-%%             %% TODO This is probably wrong. Mnesia stores ops in ets?
-%%             AllOps = ets:tab2list(Ets)
-%%     end.
-
-%% we can only hope that this is not an anonymous function
-%% add the function is idempotent.
-%% args_as_op(F, Args) -> [{F, Args, apply}].
+ensure_no_transaction() ->
+    case mnesia:get_activity_id() of
+        undefined -> ok;
+        _         -> error(nested_transaction)
+    end.
