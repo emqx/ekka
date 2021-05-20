@@ -20,6 +20,7 @@
 -export([ approx_snapshot/0
         , make_key/1
         , import_batch/2
+        , import_dirty_op/1
         , rpc_call/4
         , rpc_cast/4
         , shuffle/1
@@ -55,7 +56,9 @@
 
 -type op() :: {{table(), term()}, term(), change_type()}.
 
--type tx() :: [op()].
+-type dirty() :: {dirty, _Fun :: atom(), _Args :: list()}.
+
+-type tx() :: [op()] | dirty().
 
 -type rlog() :: #rlog{}.
 
@@ -80,9 +83,12 @@ approx_snapshot() ->
 %% it is a tuple of a timestamp (ts) and the node id (node_id), where
 %% ts is at millisecond precision to ensure it is locally monotonic and
 %% unique, and transaction pid, should ensure global uniqueness.
--spec make_key(ekka_rlog_lib:mnesia_tid()) -> ekka_rlog_lib:txid().
+-spec make_key(ekka_rlog_lib:mnesia_tid() | undefined) -> ekka_rlog_lib:txid().
 make_key(#tid{pid = Pid}) ->
-    {approx_snapshot(), Pid}.
+    {approx_snapshot(), Pid};
+make_key(undefined) ->
+    %% This is a dirty operation
+    {approx_snapshot(), make_ref()}.
 
 %% -spec make_key_in_past(integer()) -> ekka_rlog_lib:txid().
 %% make_key_in_past(Dt) ->
@@ -98,6 +104,16 @@ make_key(#tid{pid = Pid}) ->
 import_batch(ImportType, Batch) ->
     lists:foreach(fun(Tx) -> import_transaction(ImportType, Tx) end, Batch).
 
+%% @doc Import a dirty operation
+-spec import_dirty_op(dirty()) -> ok.
+import_dirty_op({dirty, Fun, Args}) ->
+    ?tp(import_dirty_op,
+        #{ op    => Fun
+         , table => hd(Args)
+         , args  => tl(Args)
+         }),
+    ok = apply(mnesia, Fun, Args).
+
 %% %% @doc Do a local RPC call, used for testing
 %% -spec local_rpc_call(node(), module(), atom(), list()) -> term().
 %% local_rpc_call(Node, Module, Function, Args) ->
@@ -105,6 +121,8 @@ import_batch(ImportType, Batch) ->
 %%     apply(Module, Function, Args).
 
 -spec import_transaction(transaction | dirty, [tx()]) -> ok.
+import_transaction(_, Dirty = {dirty, _, _}) ->
+    import_dirty_op(Dirty);
 import_transaction(transaction, Ops) ->
     ?tp(rlog_import_trans,
         #{ type => transaction

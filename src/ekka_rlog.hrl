@@ -3,7 +3,7 @@
 
 -record(rlog,
         { key :: ekka_rlog_lib:txid()
-        , ops :: [ekka_rlog_lib:op()]
+        , ops :: ekka_rlog_lib:tx()
         }).
 
 -endif.

@@ -255,6 +255,29 @@ t_rlog_clear_table(_) ->
                true
        end).
 
+t_rlog_dirty_operations(_) ->
+    snabbkaffe:fix_ct_logging(),
+    Cluster = ekka_ct:cluster([core, core, replicant], ekka_mnesia_test_util:common_env()),
+    ?check_trace(
+       try
+           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           ekka_mnesia_test_util:wait_shards(Nodes),
+           ok = rpc:call(N1, ekka_mnesia, dirty_write, [{test_tab, 1, 1}]),
+           ok = rpc:call(N2, ekka_mnesia, dirty_write, [{test_tab, 2, 2}]),
+           ok = rpc:call(N2, ekka_mnesia, dirty_write, [{test_tab, 3, 3}]),
+           ekka_mnesia_test_util:stabilize(1000),
+           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
+           ok = rpc:call(N1, ekka_mnesia, dirty_delete, [test_tab, 1]),
+           ok = rpc:call(N2, ekka_mnesia, dirty_delete, [test_tab, 2]),
+           ok = rpc:call(N2, ekka_mnesia, dirty_delete, [{test_tab, 3}]),
+           ekka_mnesia_test_util:stabilize(1000),
+           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes)
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(_, _) ->
+               true
+       end).
 
 cluster_benchmark(_) ->
     snabbkaffe:fix_ct_logging(),
