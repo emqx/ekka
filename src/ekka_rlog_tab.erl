@@ -36,7 +36,7 @@
 mnesia(BootType) ->
     {ok, _} = ekka_mnesia_null_storage:register(),
     case ekka_rlog:role() of
-        core -> [init(BootType, Shard) || Shard <- ekka_rlog:shards()], ok;
+        core -> [init(BootType, Shard) || Shard <- ekka_rlog_config:shards()], ok;
         _    -> ok
     end.
 

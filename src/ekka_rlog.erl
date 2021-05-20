@@ -19,9 +19,7 @@
 
 -export([ init/0
         , transaction/2
-        , shards/0
         , ensure_shard/1
-        , shard_config/1
         , core_nodes/0
         , role/0
         , role/1
@@ -32,7 +30,6 @@
         ]).
 
 -export_type([ shard/0
-             , func/1
              , role/0
              , shard_config/0
              ]).
@@ -46,9 +43,6 @@
 
 -type role() :: core | replicant.
 
--type func(A) :: fun((...) -> A).
-
-
 -type shard_config() :: #{ tables := [ekka_rlog_lib:table()]
                          , match_spec := ets:match_spec()
                          }.
@@ -61,14 +55,6 @@ init() ->
 %% the logged changes are to be replicated to other nodes.
 -spec transaction(atom(), [term()]) -> ekka_mnesia:t_result(term()).
 transaction(F, Args) -> do(transaction, F, Args).
-
--spec shards() -> [shard()].
-shards() ->
-    persistent_term:get({ekka, shards}, []).
-
--spec shard_config(shard()) -> shard_config().
-shard_config(Shard) ->
-    persistent_term:get({ekka_shard, Shard}).
 
 %% TODO: persistent term
 -spec role() -> role().
@@ -109,7 +95,7 @@ get_internals() ->
 do(Type, F, Args) ->
     case mnesia:get_activity_id() of
         undefined ->
-            Shards = ekka_rlog:shards(),
+            Shards = ekka_rlog_config:shards(),
             TxFun =
                 fun() ->
                         Result = apply(ekka_rlog_activity, F, Args),
@@ -142,7 +128,7 @@ wait_for_shards(Shards, Timeout) ->
     end.
 
 dig_ops_for_shard(Key, TxStore, Shard) ->
-    #{match_spec := MS} = ekka_rlog:shard_config(Shard),
+    #{match_spec := MS} = ekka_rlog_config:shard_config(Shard),
     Ops = ets:select(TxStore, MS),
     mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write).
 
@@ -164,7 +150,7 @@ dig_ops_for_shard(Key, TxStore, Shard) ->
 setup_persistent_terms() ->
     copy_from_env(rlog_rpc_module),
     copy_from_env(db_backend),
-    ekka_rlog_lib:load_shard_config().
+    ekka_rlog_config:load_shard_config().
 
 -spec copy_from_env(atom()) -> ok.
 copy_from_env(Key) ->

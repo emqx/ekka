@@ -409,6 +409,6 @@ call_backend(Function, Args) ->
         {rlog, core} ->
             ekka_rlog:transaction(Function, Args);
         {rlog, replicant} ->
-            Core = find_upstream_node(ekka_rlog:shards()),
+            Core = find_upstream_node(ekka_rlog_config:shards()),
             ekka_rlog_lib:rpc_call(Core, ?MODULE, Function, Args)
     end.
