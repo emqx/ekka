@@ -103,7 +103,7 @@ init({Shard, Config}) ->
            }}.
 
 handle_info(post_init, St = #s{shard = Shard}) ->
-    #{tables := Tables} = ekka_rlog:shard_config(Shard),
+    #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
     mnesia:wait_for_tables([Shard|Tables], 100000),
     ?tp(notice, "Shard fully up",
         #{ node => node()

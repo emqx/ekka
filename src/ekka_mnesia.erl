@@ -58,8 +58,6 @@
         , transaction/2
         , transaction/1
         , clear_table/1
-
-        , backend/0
         ]).
 
 -export_type([ t_result/1
@@ -185,11 +183,6 @@ del_schema_copy(Node) ->
         {atomic, ok} -> ok;
         {aborted, Reason} -> {error, Reason}
     end.
-
-%% @doc Get database backend
--spec backend() -> backend().
-backend() ->
-    persistent_term:get({ekka, db_backend}, mnesia).
 
 %%--------------------------------------------------------------------
 %% Cluster mnesia
@@ -365,6 +358,25 @@ wait_for(tables) ->
 %% Transaction API
 %%--------------------------------------------------------------------
 
+%% -spec dirty_write(tuple()) -> ok.
+%% dirty_write(Record) when is_tuple(Record), tuple_size(Record) > 2 ->
+%%     Tab = element(1, Record),
+%%     dirty_write(Tab, Record).
+
+%% -spec dirty_write(ekka_rlog_lib:table(), tuple()) -> ok.
+%% dirty_write(Tab, Record) ->
+%%     case {ekka_rlog_config:backend(), ekka_rlog_config:role()} of
+%%         {mnesia, core} ->
+%%             mnesia:dirty_write(Tab, Record);
+%%         {mnesia, replicant} ->
+%%             error(plain_mnesia_transaction_on_replicant);
+%%         {rlog, core} ->
+%%             do_dirty_write(Tab, Record);
+%%         {rlog, replicant} ->
+%%             Core = find_upstream_node(ekka_rlog_config:shards()),
+%%             ekka_rlog_lib:rpc_call(Core, ?MODULE, dirty_write, [Tab, Record])
+%%     end.
+
 -spec ro_transaction(fun(() -> A)) -> t_result(A).
 ro_transaction(Fun) ->
     %% TODO:
@@ -376,7 +388,7 @@ ro_transaction(Fun) ->
 
 -spec transaction(fun((...) -> A), list()) -> t_result(A).
 transaction(Fun, Args) ->
-    call_backend(transaction, [Fun, Args]).
+    ekka_rlog:call_backend(transaction, [Fun, Args]).
 
 -spec transaction(fun(() -> A)) -> t_result(A).
 transaction(Fun) ->
@@ -384,31 +396,21 @@ transaction(Fun) ->
 
 -spec clear_table(ekka_rlog_lib:table()) -> t_result(ok).
 clear_table(Table) ->
-    call_backend(clear_table, [Table]).
+    ekka_rlog:call_backend(clear_table, [Table]).
 
-%% Currently the strategy for selecting the upstream node is rather
-%% dumb: we just find the upstream of the first connected shard.
--spec find_upstream_node([ekka_rlog:shard()]) -> node().
-find_upstream_node([]) ->
-    error(disconnected);
-find_upstream_node([Shard|Rest]) ->
-    case ekka_rlog_status:upstream(Shard) of
-        {ok, Node} ->
-            Node;
-        disconnected ->
-            find_upstream_node(Rest)
-    end.
-
--spec call_backend(atom(), list()) -> term().
-call_backend(Function, Args) ->
-    case {backend(), ekka_rlog:role()} of
-        {mnesia, core} ->
-            apply(mnesia, Function, Args);
-        {mnesia, replicant} ->
-            error(plain_mnesia_transaction_on_replicant);
-        {rlog, core} ->
-            ekka_rlog:transaction(Function, Args);
-        {rlog, replicant} ->
-            Core = find_upstream_node(ekka_rlog:shards()),
-            ekka_rlog_lib:rpc_call(Core, ?MODULE, Function, Args)
-    end.
+%% -spec do_dirty_write(ekka_rlog_lib:table(), tuple()) -> ok.
+%% do_dirty_write(Tab, Record) ->
+%%    case ekka_rlog_config:shard_rlookup(Tab) of
+%%        undefined ->
+%%            %% Table doesn't belong to any shard
+%%            mnesia:dirty_write(Tab, Record);
+%%        Shard ->
+%%            mnesia:transaction(
+%%              fun() ->
+%%                      %% This may look inconsistent, and it is. But it;
+%%                      ok = mnesia:dirty_write(Tab, Record)%% ,
+%%                      %% Key = ekka_rlog_lib:make_key(TID),
+%%                      %% Ops = [{Tab, 0}],
+%%                      %% mnesia:write(Shard, #rlog{key = Key, ops = Ops})
+%%              end)
+%%    end.

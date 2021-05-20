@@ -65,10 +65,14 @@ unwrap_mnesia_ret({atomic, Ret}) ->
 unwrap_mnesia_ret({aborted, Ret}) ->
     mnesia:abort(Ret).
 
+-ifdef(TEST).
 assert_ro() ->
-    %% Only run this check in TEST mode
     {_, _, #tidstore{store = Ets}} = mnesia:get_activity_id(),
     case ets:match(Ets, {'_', '_', '_'}) of
         []  -> ok;
         Ops -> error({transaction_is_not_readonly, Ops})
     end.
+-else.
+assert_ro() ->
+    ok.
+-endif. %% TEST

@@ -22,9 +22,6 @@
         , import_batch/2
         , rpc_call/4
         , rpc_cast/4
-        , load_shard_config/0
-        , read_shard_config/0
-        , make_shard_match_spec/1
         , shuffle/1
         , send_after/3
         , cancel_timer/1
@@ -56,8 +53,7 @@
 
 -type change_type() :: write | delete | delete_object | clear_table.
 
--type op() :: {{table(), term()}, term(), change_type()}
-            | {ekka_rlog:func(_Ret), _Args :: list(), apply}.
+-type op() :: {{table(), term()}, term(), change_type()}.
 
 -type tx() :: [op()].
 
@@ -149,55 +145,14 @@ import_op_dirty({{Tab, _K}, Record, write}) ->
 %% @doc Do an RPC call
 -spec rpc_call(node(), module(), atom(), list()) -> term().
 rpc_call(Node, Module, Function, Args) ->
-    Mod = persistent_term:get({ekka, rlog_rpc_mod}, gen_rpc),
+    Mod = ekka_rlog_config:rpc_module(),
     apply(Mod, call, [Node, Module, Function, Args]).
 
 %% @doc Do an RPC cast
 -spec rpc_cast(node(), module(), atom(), list()) -> term().
 rpc_cast(Node, Module, Function, Args) ->
-    Mod = persistent_term:get({ekka, rlog_rpc_mod}, gen_rpc),
+    Mod = ekka_rlog_config:rpc_module(),
     apply(Mod, cast, [Node, Module, Function, Args]).
-
-%%================================================================================
-%% Shard configuration
-%%================================================================================
-
--spec load_shard_config() -> ok.
-load_shard_config() ->
-    Raw = read_shard_config(),
-    ok = verify_shard_config(Raw),
-    Shards = proplists:get_keys(Raw),
-    ok = persistent_term:put({ekka, shards}, Shards),
-    lists:foreach(fun({Shard, Tables}) ->
-                          Config = #{ tables => Tables
-                                    , match_spec => make_shard_match_spec(Tables)
-                                    },
-                          ?tp(notice, "Setting RLOG shard config",
-                              #{ shard => Shard
-                               , tables => Tables
-                               }),
-                          ok = persistent_term:put({ekka_shard, Shard}, Config)
-                  end,
-                  Raw).
-
--spec read_shard_config() -> [{ekka_rlog:shard(), [table()]}].
-read_shard_config() ->
-    L = lists:flatmap( fun({_App, _Module, Attrs}) ->
-                               Attrs
-                       end
-                     , ekka_boot:all_module_attributes(rlog_shard)
-                     ),
-    Shards = proplists:get_keys(L),
-    [{Shard, lists:usort(proplists:get_all_values(Shard, L))}
-     || Shard <- Shards].
-
-
--spec make_shard_match_spec([ekka_rlog_lib:table()]) -> ets:match_spec().
-make_shard_match_spec(Tables) ->
-    [{ {{Table, '_'}, '_', '_'}
-     , []
-     , ['$_']
-     } || Table <- Tables].
 
 %%================================================================================
 %% Misc functions
@@ -224,42 +179,3 @@ cancel_timer(TRef) ->
 %%================================================================================
 %% Internal
 %%================================================================================
-
--spec verify_shard_config([{ekka_rlog:shard(), [table()]}]) -> ok.
-verify_shard_config(ShardConfig) ->
-    verify_shard_config(ShardConfig, #{}).
-
--spec verify_shard_config([{ekka_rlog:shard(), [table()]}], #{table() => ekka_rlog:shard()}) -> ok.
-verify_shard_config([], _) ->
-    ok;
-verify_shard_config([{_Shard, []} | Rest], Acc) ->
-    verify_shard_config(Rest, Acc);
-verify_shard_config([{Shard, [Table|Tables]} | Rest], Acc0) ->
-    Acc = case Acc0 of
-              #{Table := Shard1} when Shard1 =/= Shard ->
-                  ?tp(critical, "Duplicate RLOG shard",
-                      #{ table       => Table
-                       , shard       => Shard
-                       , other_shard => Shard1
-                       }),
-                  error(badarg);
-              _ ->
-                  Acc0#{Table => Shard}
-          end,
-    verify_shard_config([{Shard, Tables} | Rest], Acc).
-
--ifdef(TEST).
-
--include_lib("eunit/include/eunit.hrl").
-
--dialyzer({nowarn_function, verify_shard_config_test/0}).
-verify_shard_config_test() ->
-    ?assertMatch(ok, verify_shard_config([])),
-    ?assertMatch(ok, verify_shard_config([ {foo, [foo_tab, bar_tab]}
-                                         , {baz, [baz_tab, foo_bar_tab]}
-                                         ])),
-    ?assertError(_, verify_shard_config([ {foo, [foo_tab, bar_tab]}
-                                        , {baz, [baz_tab, foo_tab]}
-                                        ])).
-
--endif. %% TEST
