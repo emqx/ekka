@@ -31,11 +31,15 @@
         , wait_for_shards/2
 
         , get_internals/0
-        , call_backend/2
+
+        , call_backend_rw_trans/2
+        , call_backend_rw_dirty/3
         ]).
 
 %% Internal exports
--export([transactional_wrapper/2]).
+-export([ transactional_wrapper/2
+        , dirty_wrapper/3
+        ]).
 
 -export_type([ shard/0
              , role/0
@@ -69,25 +73,24 @@ role(Node) ->
 backend() ->
     ekka_rlog_config:backend().
 
-%% @doc Perform a transaction and log changes.
-%% the logged changes are to be replicated to other nodes.
--spec transactional_wrapper(atom(), [term()]) -> ekka_mnesia:t_result(term()).
-transactional_wrapper(Fun, Args) ->
-    ensure_no_transaction(),
-    Shards = ekka_rlog_config:shards(),
-    TxFun =
-        fun() ->
-                Result = apply(ekka_rlog_activity, Fun, Args),
-                {TID, TxStore} = get_internals(),
-                Key = ekka_rlog_lib:make_key(TID),
-                [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
-                Result
-        end,
-    mnesia:transaction(TxFun).
-
 -spec core_nodes() -> [node()].
 core_nodes() ->
     application:get_env(ekka, core_nodes, []).
+
+-spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.
+wait_for_shards(Shards, Timeout) ->
+    case ekka_rlog_config:backend() of
+        rlog ->
+            [ok = ensure_shard(I) || I <- Shards],
+            case role() of
+                core ->
+                    ok;
+                replicant ->
+                    ekka_rlog_status:wait_for_shards(Shards, Timeout)
+            end;
+        mnesia ->
+            ok
+    end.
 
 %% Currently the strategy for selecting the upstream node is rather
 %% dumb: we just find the upstream of the first connected shard.
@@ -125,8 +128,8 @@ get_internals() ->
             {TID, TxStore}
     end.
 
--spec call_backend(atom(), list()) -> term().
-call_backend(Function, Args) ->
+-spec call_backend_rw_trans(atom(), list()) -> term().
+call_backend_rw_trans(Function, Args) ->
     case {ekka_rlog:backend(), ekka_rlog:role()} of
         {mnesia, core} ->
             apply(mnesia, Function, Args);
@@ -139,19 +142,50 @@ call_backend(Function, Args) ->
             ekka_rlog_lib:rpc_call(Core, ?MODULE, transactional_wrapper, [Function, Args])
     end.
 
--spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.
-wait_for_shards(Shards, Timeout) ->
-    case ekka_rlog_config:backend() of
-        rlog ->
-            [ok = ensure_shard(I) || I <- Shards],
-            case role() of
-                core ->
-                    ok;
-                replicant ->
-                    ekka_rlog_status:wait_for_shards(Shards, Timeout)
-            end;
-        mnesia ->
-            ok
+-spec call_backend_rw_dirty(atom(), ekka_rlog_lib:table(), list()) -> term().
+call_backend_rw_dirty(Function, Table, Args) ->
+    case {ekka_rlog:backend(), ekka_rlog:role()} of
+        {mnesia, core} ->
+            apply(mnesia, Function, [Table|Args]);
+        {mnesia, replicant} ->
+            error(plain_dirty_operation_on_replicant);
+        {rlog, core} ->
+            dirty_wrapper(Function, Table, Args);
+        {rlog, replicant} ->
+            Core = find_upstream_node(ekka_rlog_config:shards()),
+            ekka_rlog_lib:rpc_call(Core, ?MODULE, dirty_wrapper, [Function, Table, Args])
+    end.
+
+%% @doc Perform a transaction and log changes.
+%% the logged changes are to be replicated to other nodes.
+-spec transactional_wrapper(atom(), list()) -> ekka_mnesia:t_result(term()).
+transactional_wrapper(Fun, Args) ->
+    ensure_no_transaction(),
+    Shards = ekka_rlog_config:shards(),
+    TxFun =
+        fun() ->
+                Result = apply(ekka_rlog_activity, Fun, Args),
+                {TID, TxStore} = get_internals(),
+                Key = ekka_rlog_lib:make_key(TID),
+                [dig_ops_for_shard(Key, TxStore, Shard) || Shard <- Shards],
+                Result
+        end,
+    mnesia:transaction(TxFun).
+
+%% @doc Perform a dirty operation and log changes.
+-spec dirty_wrapper(atom(), ekka_rlog_lib:table(), list()) -> ok.
+dirty_wrapper(Fun, Table, Args) ->
+    Ret = apply(mnesia, Fun, [Table|Args]),
+    case ekka_rlog_config:shard_rlookup(Table) of
+        undefined ->
+            Ret;
+        Shard ->
+            %% This may look extremely inconsistent, and it is. But so
+            %% are dirty operations in mnesia...
+            OP = {dirty, Fun, [Table|Args]},
+            Key = ekka_rlog_lib:make_key(undefined),
+            mnesia:dirty_write(Shard, #rlog{key = Key, ops = OP}),
+            Ret
     end.
 
 dig_ops_for_shard(Key, TxStore, Shard) ->
