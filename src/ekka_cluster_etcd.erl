@@ -40,9 +40,7 @@
 
 -record(state, {
     prefix,
-    lease_id,
-    %% key for lock, not etcd key-value
-    lock_key
+    lease_id
 }).
 
 %% TTL callback
@@ -235,19 +233,13 @@ rand_addr(AddrList) ->
 etcd_v3(Action) ->
     gen_server:call(?SERVER, Action, 5000).
 
-v3_discover(State) ->
-    v3_discover(State, 3).
-
-v3_discover(_State, 0) ->
-    {ok, []};
-v3_discover(State = #state{prefix = Prefix}, RetryTime) ->
+v3_discover(#state{prefix = Prefix}) ->
     Context = v3_nodes_context(Prefix),
     case eetcd_kv:get(Context) of
         {ok, Response} ->
             case maps:get(kvs, Response) of
                 [] ->
-                    v3_register(State),
-                    v3_discover(State, RetryTime - 1);
+                    {ok, []};
                 KvsList ->
                     Nodes = [
                         binary_to_atom(maps:get(value, Kvs), utf8) || Kvs <- KvsList],
@@ -257,35 +249,34 @@ v3_discover(State = #state{prefix = Prefix}, RetryTime) ->
             Error
     end.
 
-v3_lock(State) ->
-    v3_lock(State, 10).
-
-v3_lock(_State, 0) ->
-    {error, failed};
-v3_lock(State = #state{prefix = Prefix, lease_id = ID}, RetryTime) ->
+v3_lock(#state{prefix = Prefix, lease_id = ID}) ->
     case eetcd_lock:lock(?MODULE, list_to_binary(v3_lock_key(Prefix)), ID) of
-        {error, _Reason} ->
-            v3_lock(State, RetryTime - 1);
         {ok, #{key := LockKey}} ->
-            {ok, LockKey}
-    end.
-
-v3_unlock(#state{lock_key = undefined}) ->
-    {error, lock_lose};
-
-v3_unlock(#state{lock_key = LockKey}) ->
-    case eetcd_lock:unlock(?MODULE, LockKey) of
-        {ok, _Response} ->
+            persistent_term:put(ekka_cluster_etcd_lock_key, LockKey),
             ok;
         Error ->
             Error
-     end.
+    end.
+
+v3_unlock(_) ->
+    case persistent_term:get(ekka_cluster_etcd_lock_key, undefined) of
+        undefined ->
+            {error, lock_lose};
+        LockKey ->
+            case eetcd_lock:unlock(?MODULE, LockKey) of
+                {ok, _} ->
+                    persistent_term:erase(ekka_cluster_etcd_lock_key),
+                    ok;
+                Error ->
+                    Error
+            end
+    end.
 
 v3_register(#state{prefix = Prefix ,lease_id = ID}) ->
     Context = v3_node_context(Prefix, ID),
     case eetcd_kv:put(Context) of
-       {ok, _Response} ->
-           ok;
+        {ok, _Response} ->
+            ok;
         Error ->
             Error
     end.
@@ -316,7 +307,7 @@ v3_node_context_only_key(Prefix) ->
     eetcd_kv:with_key(Ctx, v3_node_key(Prefix)).
 
 v3_lock_key(Prefix) ->
-    Prefix ++ "/ekkacl/lock/" ++ atom_to_list(node()).
+    Prefix ++ "/ekkacl/lock/".
 
 v3_nodes_key(Prefix) ->
     Prefix ++ "/ekkacl/nodes/".
@@ -331,8 +322,8 @@ v3_node_key(Prefix, Node) ->
 %% gen_server callback
 %%--------------------------------------------------------------------
 init(Options) ->
+    process_flag(trap_exit, true),
     Servers = proplists:get_value(server, Options, []),
-    TTL = proplists:get_value(node_ttl, Options),
     Prefix = proplists:get_value(prefix, Options),
     Hosts = [remove_scheme(Server) || Server <- Servers],
     {Transport, TransportOpts} = case ssl_options(Options) of
@@ -340,25 +331,9 @@ init(Options) ->
         [SSL] -> SSL
     end,
     {ok, _Pid} = eetcd:open(?MODULE, Hosts, Transport, TransportOpts),
-    {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, TTL),
+    {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, 5),
     {ok, _Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
     {ok, #state{prefix = Prefix, lease_id = ID}}.
-
-handle_call(lock, _From, State) ->
-    case v3_lock(State) of
-        {ok, LockKey} ->
-            {reply, ok, State#state{lock_key = LockKey}};
-        Error ->
-            {reply, Error, State}
-    end;
-
-handle_call(unlock, _From, State) ->
-    case v3_unlock(State) of
-        ok ->
-            {reply, ok, State#state{lock_key = undefined}};
-        Error ->
-            {reply, Error, State}
-    end;
 
 handle_call(Action, _From, State) when is_atom(Action) ->
     Function = list_to_atom("v3_" ++ atom_to_list(Action)),
@@ -371,11 +346,15 @@ handle_call(_Request, _From, State = #state{}) ->
 handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
+handle_info({'EXIT', _From, Reason}, State) ->
+    eetcd:close(?MODULE),
+    {stop, Reason, State};
+
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
 terminate(_Reason, _State = #state{}) ->
-    ok.
+    eetcd:close(?MODULE).
 
 code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
