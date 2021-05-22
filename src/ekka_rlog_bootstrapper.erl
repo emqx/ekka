@@ -149,7 +149,7 @@ handle_batch(Table, Records) ->
     lists:foreach(fun(I) -> mnesia:dirty_write(Table, I) end, Records).
 
 start_table_traverse(St = #server{tables = [], subscriber = Subscriber}) ->
-    ok = complete(Subscriber, self(), ekka_rlog_lib:approx_snapshot()),
+    ok = complete(Subscriber, self(), ekka_rlog_lib:approx_checkpoint()),
     {stop, normal, St};
 start_table_traverse(St0 = #server{ shard = Shard
                                   , tables = [Table|Rest]

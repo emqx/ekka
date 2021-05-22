@@ -22,7 +22,12 @@
 
 %% API:
 -export([start_link/0, subscribe_events/0, unsubscribe_events/1, notify_shard_up/2,
-         notify_shard_down/1, wait_for_shards/2, upstream/1]).
+         notify_shard_down/1, wait_for_shards/2, upstream/1, shards_up/0, shards_down/0,
+         get_shard_stats/1,
+
+         notify_replicant_state/2, notify_replicant_import_trans/2,
+         notify_replicant_replayq_len/2
+        ]).
 
 %% gen_event callbacks:
 -export([init/1, handle_call/2, handle_event/2]).
@@ -40,6 +45,11 @@
 %% Tables and table keys:
 -define(replica_tab, ekka_rlog_replica_tab).
 -define(upstream_node, upstream_node).
+
+-define(stats_tab, ekka_rlog_stats_tab).
+-define(replicant_state, replicant_state).
+-define(replicant_import, replicant_import).
+-define(replicant_replayq_len, replicant_replayq_len).
 
 %%================================================================================
 %% API funcions
@@ -62,6 +72,11 @@ start_link() ->
                           , {write_concurrency, false}
                           , {read_concurrency, true}
                           ]),
+    ets:new(?stats_tab, [ set
+                        , named_table
+                        , public
+                        , {write_concurrency, true}
+                        ]),
     gen_event:start_link({local, ?SERVER}, []).
 
 -spec notify_shard_up(ekka_rlog:shard(), node()) -> ok.
@@ -76,6 +91,9 @@ notify_shard_up(Shard, Upstream) ->
 -spec notify_shard_down(ekka_rlog:shard()) -> ok.
 notify_shard_down(Shard) ->
     ets:delete(?replica_tab, {?upstream_node, Shard}),
+    ets:insert(?stats_tab, {{?replicant_state, Shard}, down}),
+    ets:delete(?stats_tab, {?replicant_import, Shard}),
+    ets:delete(?stats_tab, {?replicant_replayq_len, Shard}),
     ?tp(notify_shard_down,
         #{ shard => Shard
          }).
@@ -102,7 +120,7 @@ wait_for_shards(Shards, Timeout) ->
     ERef = subscribe_events(),
     TRef = ekka_rlog_lib:send_after(Timeout, self(), {ERef, timeout}),
     %% Exclude shards that are up, since they are not going to send any events:
-    DownShards = Shards -- lists:append(ets:match(?replica_tab, {{?upstream_node, '$1'}, '_'})),
+    DownShards = Shards -- shards_up(),
     Ret = do_wait_shards(ERef, DownShards),
     ekka_rlog_lib:cancel_timer(TRef),
     unsubscribe_events(ERef),
@@ -111,6 +129,46 @@ wait_for_shards(Shards, Timeout) ->
          , result =>  Ret
          }),
     Ret.
+
+-spec shards_up() -> [ekka_rlog:shard()].
+shards_up() ->
+    lists:append(ets:match(?replica_tab, {{?upstream_node, '$1'}, '_'})).
+
+-spec shards_down() -> [ekka_rlog:shard()].
+shards_down() ->
+    ekka_rlog_config:shards() -- shards_up().
+
+-spec get_shard_stats(ekka_rlog:shard()) -> map().
+get_shard_stats(Shard) ->
+    case ekka_rlog:role() of
+        core ->
+            #{}; %% TODO
+        replicant ->
+            case upstream(Shard) of
+                {ok, Upstream} -> ok;
+                _ -> Upstream = undefined
+            end,
+            #{ state               => get_stat(Shard, ?replicant_state)
+             , last_imported_trans => get_stat(Shard, ?replicant_import)
+             , replayq_len         => get_stat(Shard, ?replicant_replayq_len)
+             , upstream            => Upstream
+             }
+    end.
+
+%% Note on the implementation: `rlog_replicant' and `rlog_agent'
+%% processes may have long message queues, esp. during bootstrap.
+
+-spec notify_replicant_state(ekka_rlog:shard(), atom()) -> ok.
+notify_replicant_state(Shard, State) ->
+    set_stat(Shard, ?replicant_state, State).
+
+-spec notify_replicant_import_trans(ekka_rlog:shard(), ekka_rlog_server:checkpoint()) -> ok.
+notify_replicant_import_trans(Shard, Checkpoint) ->
+    set_stat(Shard, ?replicant_import, Checkpoint).
+
+-spec notify_replicant_replayq_len(ekka_rlog:shard(), integer()) -> ok.
+notify_replicant_replayq_len(Shard, N) ->
+    set_stat(Shard, ?replicant_replayq_len, N).
 
 %%================================================================================
 %% gen_event callbacks
@@ -163,4 +221,16 @@ flush_events(ERef) ->
             flush_events(ERef)
     after 0 ->
             ok
+    end.
+
+-spec set_stat(ekka_rlog:shard(), atom(), term()) -> ok.
+set_stat(Shard, Stat, Val) ->
+    ets:insert(?stats_tab, {{Stat, Shard}, Val}),
+    ok.
+
+-spec get_stat(ekka_rlog:shard(), atom()) -> term() | undefined.
+get_stat(Shard, Stat) ->
+    case ets:lookup(?stats_tab, {Stat, Shard}) of
+        [{_, Val}] -> Val;
+        []         -> undefined
     end.

@@ -271,7 +271,18 @@ t_rlog_dirty_operations(_) ->
            ok = rpc:call(N2, ekka_mnesia, dirty_delete, [test_tab, 2]),
            ok = rpc:call(N2, ekka_mnesia, dirty_delete, [{test_tab, 3}]),
            ekka_mnesia_test_util:stabilize(1000),
-           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes)
+           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
+           ?assertMatch(#{ backend        := rlog
+                         , role           := replicant
+                         , shards_in_sync := [test_shard]
+                         , shards_down    := []
+                         , shard_stats    := [{test_shard,
+                                               #{ state               := normal
+                                                , last_imported_trans := _
+                                                , replayq_len         := _
+                                                , upstream            := _
+                                                }}]
+                         }, rpc:call(N3, ekka_rlog, status, []))
        after
            ekka_ct:teardown_cluster(Cluster)
        end,

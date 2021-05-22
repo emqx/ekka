@@ -19,6 +19,8 @@
 
 -export([ init/0
 
+        , status/0
+
         , role/0
         , role/1
         , backend/0
@@ -61,6 +63,26 @@
 
 init() ->
     ekka_rlog_config:init().
+
+status() ->
+    Backend = backend(),
+    Role    = role(),
+    Info0 = #{ backend => Backend
+             , role    => Role
+             },
+    case {Backend, Role} of
+        {mnesia, _} ->
+            Info0;
+        {rlog, replicant} ->
+            Stats = [{I, ekka_rlog_status:get_shard_stats(I)}
+                     || I <- ekka_rlog_config:shards()],
+            Info0#{ shards_in_sync => ekka_rlog_status:shards_up()
+                  , shards_down    => ekka_rlog_status:shards_down()
+                  , shard_stats    => Stats
+                  };
+        {rlog, core} ->
+            Info0 %% TODO
+    end.
 
 -spec role() -> ekka_rlog:role().
 role() ->

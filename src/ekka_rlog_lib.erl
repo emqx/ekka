@@ -17,10 +17,10 @@
 %% Internal functions
 -module(ekka_rlog_lib).
 
--export([ approx_snapshot/0
+-export([ approx_checkpoint/0
+        , txid_to_checkpoint/1
         , make_key/1
         , import_batch/2
-        , import_dirty_op/1
         , rpc_call/4
         , rpc_cast/4
         , shuffle/1
@@ -74,9 +74,13 @@
 %% RLOG key creation
 %%================================================================================
 
--spec approx_snapshot() -> ekka_rlog_server:checkpoint().
-approx_snapshot() ->
+-spec approx_checkpoint() -> ekka_rlog_server:checkpoint().
+approx_checkpoint() ->
     erlang:system_time(millisecond).
+
+-spec txid_to_checkpoint(ekka_rlog:txid()) -> ekka_rlog_server:checkpoint().
+txid_to_checkpoint({Checkpoint, _}) ->
+    Checkpoint.
 
 %% Log key should be globally unique.
 %%
@@ -85,10 +89,10 @@ approx_snapshot() ->
 %% unique, and transaction pid, should ensure global uniqueness.
 -spec make_key(ekka_rlog_lib:mnesia_tid() | undefined) -> ekka_rlog_lib:txid().
 make_key(#tid{pid = Pid}) ->
-    {approx_snapshot(), Pid};
+    {approx_checkpoint(), Pid};
 make_key(undefined) ->
     %% This is a dirty operation
-    {approx_snapshot(), make_ref()}.
+    {approx_checkpoint(), make_ref()}.
 
 %% -spec make_key_in_past(integer()) -> ekka_rlog_lib:txid().
 %% make_key_in_past(Dt) ->
@@ -104,25 +108,14 @@ make_key(undefined) ->
 import_batch(ImportType, Batch) ->
     lists:foreach(fun(Tx) -> import_transaction(ImportType, Tx) end, Batch).
 
-%% @doc Import a dirty operation
--spec import_dirty_op(dirty()) -> ok.
-import_dirty_op({dirty, Fun, Args}) ->
+-spec import_transaction(transaction | dirty, tx()) -> ok.
+import_transaction(_, {dirty, Fun, Args}) ->
     ?tp(import_dirty_op,
         #{ op    => Fun
          , table => hd(Args)
          , args  => tl(Args)
          }),
-    ok = apply(mnesia, Fun, Args).
-
-%% %% @doc Do a local RPC call, used for testing
-%% -spec local_rpc_call(node(), module(), atom(), list()) -> term().
-%% local_rpc_call(Node, Module, Function, Args) ->
-%%     Node = node(), % assert
-%%     apply(Module, Function, Args).
-
--spec import_transaction(transaction | dirty, [tx()]) -> ok.
-import_transaction(_, Dirty = {dirty, _, _}) ->
-    import_dirty_op(Dirty);
+    ok = apply(mnesia, Fun, Args);
 import_transaction(transaction, Ops) ->
     ?tp(rlog_import_trans,
         #{ type => transaction
