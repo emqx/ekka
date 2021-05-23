@@ -281,6 +281,8 @@ t_rlog_dirty_operations(_) ->
                                                 , last_imported_trans := _
                                                 , replayq_len         := _
                                                 , upstream            := _
+                                                , bootstrap_time      := _
+                                                , bootstrap_num_keys  := _
                                                 }}]
                          }, rpc:call(N3, ekka_rlog, status, []))
        after

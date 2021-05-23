@@ -26,7 +26,9 @@
          get_shard_stats/1,
 
          notify_replicant_state/2, notify_replicant_import_trans/2,
-         notify_replicant_replayq_len/2
+         notify_replicant_replayq_len/2,
+         notify_replicant_bootstrap_start/1, notify_replicant_bootstrap_complete/1,
+         notify_replicant_bootstrap_import/1
         ]).
 
 %% gen_event callbacks:
@@ -50,6 +52,9 @@
 -define(replicant_state, replicant_state).
 -define(replicant_import, replicant_import).
 -define(replicant_replayq_len, replicant_replayq_len).
+-define(replicant_bootstrap_start, replicant_bootstrap_start).
+-define(replicant_bootstrap_complete, replicant_bootstrap_complete).
+-define(replicant_bootstrap_import, replicant_bootstrap_import).
 
 %%================================================================================
 %% API funcions
@@ -91,9 +96,15 @@ notify_shard_up(Shard, Upstream) ->
 -spec notify_shard_down(ekka_rlog:shard()) -> ok.
 notify_shard_down(Shard) ->
     ets:delete(?replica_tab, {?upstream_node, Shard}),
+    %% Delete metrics
     ets:insert(?stats_tab, {{?replicant_state, Shard}, down}),
-    ets:delete(?stats_tab, {?replicant_import, Shard}),
-    ets:delete(?stats_tab, {?replicant_replayq_len, Shard}),
+    lists:foreach(fun(Key) -> ets:delete(?stats_tab, {Key, Shard}) end,
+                  [?replicant_import,
+                   ?replicant_replayq_len,
+                   ?replicant_bootstrap_start,
+                   ?replicant_bootstrap_complete,
+                   ?replicant_bootstrap_import
+                  ]),
     ?tp(notify_shard_down,
         #{ shard => Shard
          }).
@@ -151,6 +162,8 @@ get_shard_stats(Shard) ->
             #{ state               => get_stat(Shard, ?replicant_state)
              , last_imported_trans => get_stat(Shard, ?replicant_import)
              , replayq_len         => get_stat(Shard, ?replicant_replayq_len)
+             , bootstrap_time      => get_bootstrap_time(Shard)
+             , bootstrap_num_keys  => get_stat(Shard, ?replicant_bootstrap_import)
              , upstream            => Upstream
              }
     end.
@@ -169,6 +182,21 @@ notify_replicant_import_trans(Shard, Checkpoint) ->
 -spec notify_replicant_replayq_len(ekka_rlog:shard(), integer()) -> ok.
 notify_replicant_replayq_len(Shard, N) ->
     set_stat(Shard, ?replicant_replayq_len, N).
+
+-spec notify_replicant_bootstrap_start(ekka_rlog:shard()) -> ok.
+notify_replicant_bootstrap_start(Shard) ->
+    set_stat(Shard, ?replicant_bootstrap_start, os:system_time(millisecond)).
+
+-spec notify_replicant_bootstrap_complete(ekka_rlog:shard()) -> ok.
+notify_replicant_bootstrap_complete(Shard) ->
+    set_stat(Shard, ?replicant_bootstrap_complete, os:system_time(millisecond)).
+
+-spec notify_replicant_bootstrap_import(ekka_rlog:shard()) -> ok.
+notify_replicant_bootstrap_import(Shard) ->
+    Key = {?replicant_bootstrap_import, Shard},
+    Op = {2, 1},
+    ets:update_counter(?stats_tab, Key, Op, {Key, 0}),
+    ok.
 
 %%================================================================================
 %% gen_event callbacks
@@ -233,4 +261,15 @@ get_stat(Shard, Stat) ->
     case ets:lookup(?stats_tab, {Stat, Shard}) of
         [{_, Val}] -> Val;
         []         -> undefined
+    end.
+
+-spec get_bootstrap_time(ekka_rlog:shard()) -> integer() | undefined.
+get_bootstrap_time(Shard) ->
+    case {get_stat(Shard, ?replicant_bootstrap_start), get_stat(Shard, ?replicant_bootstrap_complete)} of
+        {undefined, undefined} ->
+            undefined;
+        {Start, undefined} ->
+            os:system_time(millisecond) - Start;
+        {Start, Complete} ->
+            Complete - Start
     end.

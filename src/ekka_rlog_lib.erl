@@ -78,7 +78,7 @@
 approx_checkpoint() ->
     erlang:system_time(millisecond).
 
--spec txid_to_checkpoint(ekka_rlog:txid()) -> ekka_rlog_server:checkpoint().
+-spec txid_to_checkpoint(ekka_rlog_lib:txid()) -> ekka_rlog_server:checkpoint().
 txid_to_checkpoint({Checkpoint, _}) ->
     Checkpoint.
 

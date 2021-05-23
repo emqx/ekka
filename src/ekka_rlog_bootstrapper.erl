@@ -97,6 +97,7 @@ init({client, Shard, RemoteNode, Parent}) ->
     logger:set_process_metadata(#{ domain => [ekka, rlog, bootstrapper, client]
                                  , shard  => Shard
                                  }),
+    ekka_rlog_status:notify_replicant_bootstrap_start(Shard),
     {ok, Pid} = ekka_rlog_server:bootstrap_me(RemoteNode, Shard),
     {ok, #client{ parent     = Parent
                 , shard      = Shard
@@ -113,13 +114,15 @@ handle_info(_Info, St) ->
 handle_cast(_Cast, St) ->
     {noreply, St}.
 
-handle_call({complete, Server, Checkpoint}, From, St = #client{server = Server, parent = Parent}) ->
+handle_call({complete, Server, Checkpoint}, From, St = #client{server = Server, parent = Parent, shard = Shard}) ->
     ?tp(info, shard_bootstrap_complete, #{}),
     Parent ! {bootstrap_complete, self(), Checkpoint},
     gen_server:reply(From, ok),
+    ekka_rlog_status:notify_replicant_bootstrap_complete(Shard),
     {stop, normal, St};
-handle_call({batch, {Server, Table, Records}}, _From, St = #client{server = Server}) ->
+handle_call({batch, {Server, Table, Records}}, _From, St = #client{server = Server, shard = Shard}) ->
     handle_batch(Table, Records),
+    ekka_rlog_status:notify_replicant_bootstrap_import(Shard),
     {reply, ok, St};
 handle_call(Call, _From, St) ->
     {reply, {error, {unknown_call, Call}}, St}.

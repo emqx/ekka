@@ -252,8 +252,9 @@ initiate_local_replay(_D) ->
     {keep_state_and_data, [{timeout, 0, ?local_replay_loop}]}.
 
 -spec replay_local(data()) -> fsm_result().
-replay_local(D0 = #d{replayq = Q0}) ->
+replay_local(D0 = #d{replayq = Q0, shard = Shard}) ->
     {Q, AckRef, Items} = replayq:pop(Q0, #{}),
+    ekka_rlog_status:notify_replicant_replayq_len(Shard, replayq:count(Q)),
     ekka_rlog_lib:import_batch(dirty, Items),
     case replayq:is_empty(Q) of
         true ->
@@ -323,8 +324,9 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
     end.
 
 -spec buffer_tlog_ops(ekka_rlog_lib:tx(), data()) -> data().
-buffer_tlog_ops(Transaction, D = #d{replayq = Q0}) ->
+buffer_tlog_ops(Transaction, D = #d{replayq = Q0, shard = Shard}) ->
     Q = replayq:append(Q0, Transaction),
+    ekka_rlog_status:notify_replicant_replayq_len(Shard, replayq:count(Q)),
     D#d{replayq = Q}.
 
 -spec handle_normal(data()) -> ok.
