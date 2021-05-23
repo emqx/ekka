@@ -354,7 +354,7 @@ handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
 terminate(_Reason, _State = #state{}) ->
-    eetcd:close(?MODULE).
+    ok.
 
 code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
