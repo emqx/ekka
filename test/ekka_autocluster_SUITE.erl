@@ -26,6 +26,7 @@
                      ]).
 
 -define(ETCD_OPTIONS, [{server, ["http://127.0.0.1:2379"]},
+                       {version, v2},
                        {prefix, "cl"},
                        {node_ttl, 60}
                       ]).

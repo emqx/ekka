@@ -27,6 +27,7 @@
 %% Clustering via etcd
 %% {cluster_discovery, {etcd, [
 %%                       {server, ["http://127.0.0.1:2379"]},
+%%                       {version, v3},
 %%                       {prefix, "ekkacluster"},
 %%                       {ssl_options, [{keyfile, "path/to/client-key.pem"},
 %%                                      {certfile, "path/to/client.pem"},

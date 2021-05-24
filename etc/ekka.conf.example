@@ -112,8 +112,14 @@ cluster.proto_dist = inet_tcp
 ## Etcd server list, seperated by ','.
 ##
 ## Value: String
-## cluster.etcd.server = http://127.0.0.1:2379
+## cluster.etcd.server = 127.0.0.1:2379
 
+## Etcd server version, v2 or v3
+##
+## Value: String
+## cluster.etcd.version = v3
+
+## v2 config
 ## The prefix helps build nodes path in etcd. Each node in the cluster
 ## will create a path in etcd: v2/keys/<prefix>/<cluster.name>/<node.name>
 ##
