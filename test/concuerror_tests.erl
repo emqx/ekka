@@ -98,4 +98,5 @@ cleanup(Pid) ->
     receive
         {'DOWN', MRef, _, _, _} -> ok
     end,
-    ets:delete(ekka_rlog_replica_tab).
+    ets:delete(ekka_rlog_replica_tab),
+    ets:delete(ekka_rlog_stats_tab).
