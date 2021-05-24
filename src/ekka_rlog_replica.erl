@@ -143,8 +143,7 @@ push_tlog_entry({Node, Pid}, Batch) ->
     %% TODO: this should be a cast, but gen_rpc doesn't guarantee the
     %% ordering of cast messages. In the production code this will be
     %% horrible!
-    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_push_tlog_entry, [Pid, Batch]),
-    ok.
+    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_push_tlog_entry, [Pid, Batch]).
 
 %%================================================================================
 %% Internal functions
@@ -199,12 +198,17 @@ handle_tlog_entry(_State, {Agent, SeqNo, TXID, _},
     %% TODO: sometimes it should be possible to restart gracefully to
     %% salvage the bootstrapped data.
     error({gap_in_the_tlog, TXID, SeqNo, MySeqNo});
-handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transaction}, Data) ->
+handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transaction},
+                  #d{ next_batch_seqno = ExpectedSeqno
+                    , agent            = ExpectedAgent
+                    }) ->
     ?tp(warning, rlog_replica_unexpected_trans,
-        #{ state => State
-         , from  => Agent
-         , txid  => TXID
-         , seqno => SeqNo
+        #{ state          => State
+         , from           => Agent
+         , from_expected  => ExpectedAgent
+         , txid           => TXID
+         , seqno          => SeqNo
+         , seqno_expected => ExpectedSeqno
          }),
     keep_state_and_data.
 
@@ -308,7 +312,7 @@ try_connect(Shard, Checkpoint) ->
 try_connect([], _, _) ->
     {error, no_core_available};
 try_connect([Node|Rest], Shard, Checkpoint) ->
-    ?tp(info, try_connect,
+    ?tp(notice, "Trying to connect to the core node",
         #{ node => Node
          }),
     case ekka_rlog:subscribe(Shard, Node, self(), Checkpoint) of
@@ -316,7 +320,7 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
             link(Agent),
             {ok, NeedBootstrap, Node, Agent};
         Err ->
-            ?tp(connection_failed,
+            ?tp(warning, "Failed to connect to the core node",
                 #{ node => Node
                  , reason => Err
                  }),

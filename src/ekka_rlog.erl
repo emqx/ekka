@@ -78,7 +78,7 @@ status() ->
                      || I <- ekka_rlog_config:shards()],
             Info0#{ shards_in_sync => ekka_rlog_status:shards_up()
                   , shards_down    => ekka_rlog_status:shards_down()
-                  , shard_stats    => Stats
+                  , shard_stats    => maps:from_list(Stats)
                   };
         {rlog, core} ->
             Info0 %% TODO
@@ -139,9 +139,14 @@ ensure_shard(Shard) ->
           {ok, _NeedBootstrap :: boolean(), _Agent :: pid()}
         | {badrpc | badtcp, term()}.
 subscribe(Shard, RemoteNode, Subscriber, Checkpoint) ->
-    MyNode = node(),
-    Args = [Shard, {MyNode, Subscriber}, Checkpoint],
-    ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe, Args).
+    case ekka_rlog_server:probe(RemoteNode, Shard) of
+        true ->
+            MyNode = node(),
+            Args = [Shard, {MyNode, Subscriber}, Checkpoint],
+            ekka_rlog_lib:rpc_call(RemoteNode, ekka_rlog_server, subscribe, Args);
+        false ->
+            {badrpc, probe_failed}
+    end.
 
 -spec get_internals() -> {ekka_rlog_lib:mnesia_tid(), ets:tab()}.
 get_internals() ->

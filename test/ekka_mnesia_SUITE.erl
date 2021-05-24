@@ -276,14 +276,14 @@ t_rlog_dirty_operations(_) ->
                          , role           := replicant
                          , shards_in_sync := [test_shard]
                          , shards_down    := []
-                         , shard_stats    := [{test_shard,
-                                               #{ state               := normal
-                                                , last_imported_trans := _
-                                                , replayq_len         := _
-                                                , upstream            := _
-                                                , bootstrap_time      := _
-                                                , bootstrap_num_keys  := _
-                                                }}]
+                         , shard_stats    := #{test_shard :=
+                                                   #{ state               := normal
+                                                    , last_imported_trans := _
+                                                    , replayq_len         := _
+                                                    , upstream            := _
+                                                    , bootstrap_time      := _
+                                                    , bootstrap_num_keys  := _
+                                                    }}
                          }, rpc:call(N3, ekka_rlog, status, []))
        after
            ekka_ct:teardown_cluster(Cluster)

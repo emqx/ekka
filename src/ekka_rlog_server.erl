@@ -25,6 +25,7 @@
 -export([ start_link/1
         , subscribe/3
         , bootstrap_me/2
+        , probe/2
         ]).
 
 %% gen_server callbacks
@@ -37,7 +38,7 @@
         ]).
 
 %% Internal exports
--export([do_bootstrap/2]).
+-export([do_bootstrap/2, do_probe/1]).
 
 -export_type([checkpoint/0]).
 
@@ -64,6 +65,15 @@
 start_link(Shard) ->
     Config = #{}, % TODO
     gen_server:start_link({local, Shard}, ?MODULE, {Shard, Config}, []).
+
+%% @doc Make a call to the server that does nothing.
+%%
+%% This API function is called by the replicant before `subscribe/3'
+%% to reduce the risk of double subscription when the reply from the
+%% server is lost or delayed due to network congestion.
+-spec probe(node(), ekka_rlog:shard()) -> boolean().
+probe(Node, Shard) ->
+    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_probe, [Shard]) =:= true.
 
 -spec subscribe(ekka_rlog:shard(), ekka_rlog_lib:subscriber(), checkpoint()) ->
           {_NeedBootstrap :: boolean(), _Agent :: pid()}.
@@ -126,6 +136,8 @@ handle_call({subscribe, Subscriber, Checkpoint}, _From, State) ->
 handle_call({bootstrap, Subscriber}, _From, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),
     {reply, {ok, Pid}, State};
+handle_call(probe, _From, State) ->
+    {reply, true, State};
 handle_call(_From, Call, St) ->
     {reply, {error, {unknown_call, Call}}, St}.
 
@@ -170,3 +182,7 @@ maybe_start_child(Supervisor, Args) ->
 -spec do_bootstrap(ekka_rlog:shard(), ekka_rlog_lib:subscriber()) -> {ok, pid()}.
 do_bootstrap(Shard, Subscriber) ->
     gen_server:call(Shard, {bootstrap, Subscriber}, infinity).
+
+-spec do_probe(ekka_rlog:shard()) -> true.
+do_probe(Shard) ->
+    gen_server:call(Shard, probe, 1000).
