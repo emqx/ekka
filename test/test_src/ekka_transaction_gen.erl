@@ -52,6 +52,7 @@ init() ->
 
 ro_read_all_keys() ->
     ekka_mnesia:ro_transaction(
+      test_shard,
       fun() ->
               Keys = mnesia:all_keys(test_tab),
               [ekka_ct:read(test_tab, K) || K <- Keys]

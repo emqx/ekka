@@ -334,8 +334,8 @@ buffer_tlog_ops(Transaction, D = #d{replayq = Q0, shard = Shard}) ->
     D#d{replayq = Q}.
 
 -spec handle_normal(data()) -> ok.
-handle_normal(D = #d{shard = Shard, remote_core_node = Upstream}) ->
-    ekka_rlog_status:notify_shard_up(Shard, Upstream),
+handle_normal(D = #d{shard = Shard, agent = Agent}) ->
+    ekka_rlog_status:notify_shard_up(Shard, Agent),
     ?tp(notice, "Shard fully up",
         #{ node => node()
          , shard => D#d.shard

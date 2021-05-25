@@ -22,8 +22,8 @@
 
 %% API:
 -export([start_link/0, subscribe_events/0, unsubscribe_events/1, notify_shard_up/2,
-         notify_shard_down/1, wait_for_shards/2, upstream/1, shards_up/0, shards_down/0,
-         get_shard_stats/1,
+         notify_shard_down/1, wait_for_shards/2, upstream/1, upstream_node/1,
+         shards_up/0, shards_down/0, get_shard_stats/1,
 
          notify_replicant_state/2, notify_replicant_import_trans/2,
          notify_replicant_replayq_len/2,
@@ -46,7 +46,7 @@
 
 %% Tables and table keys:
 -define(replica_tab, ekka_rlog_replica_tab).
--define(upstream_node, upstream_node).
+-define(upstream_pid, upstream_pid).
 
 -define(stats_tab, ekka_rlog_stats_tab).
 -define(replicant_state, replicant_state).
@@ -61,9 +61,17 @@
 %%================================================================================
 
 %% @doc Return core node used as the upstream for the replica
--spec upstream(ekka_rlog:shard()) -> {ok, node()} | disconnected.
+-spec upstream_node(ekka_rlog:shard()) -> {ok, node()} | disconnected.
+upstream_node(Shard) ->
+    case upstream(Shard) of
+        {ok, Pid}    -> {ok, node(Pid)};
+        disconnected -> disconnected
+    end.
+
+%% @doc Return pid of the core node agent that serves us.
+-spec upstream(ekka_rlog:shard()) -> {ok, pid()} | disconnected.
 upstream(Shard) ->
-    case ets:lookup(?replica_tab, {?upstream_node, Shard}) of
+    case ets:lookup(?replica_tab, {?upstream_pid, Shard}) of
         [{_, Node}] -> {ok, Node};
         []          -> disconnected
     end.
@@ -84,18 +92,18 @@ start_link() ->
                         ]),
     gen_event:start_link({local, ?SERVER}, []).
 
--spec notify_shard_up(ekka_rlog:shard(), node()) -> ok.
+-spec notify_shard_up(ekka_rlog:shard(), _AgentPid :: pid()) -> ok.
 notify_shard_up(Shard, Upstream) ->
     ?tp(notify_shard_up,
         #{ shard => Shard
          , node  => node()
          }),
-    ets:insert(?replica_tab, {{?upstream_node, Shard}, Upstream}),
+    ets:insert(?replica_tab, {{?upstream_pid, Shard}, Upstream}),
     gen_event:notify(?SERVER, {shard_up, Shard}).
 
 -spec notify_shard_down(ekka_rlog:shard()) -> ok.
 notify_shard_down(Shard) ->
-    ets:delete(?replica_tab, {?upstream_node, Shard}),
+    ets:delete(?replica_tab, {?upstream_pid, Shard}),
     %% Delete metrics
     ets:insert(?stats_tab, {{?replicant_state, Shard}, down}),
     lists:foreach(fun(Key) -> ets:delete(?stats_tab, {Key, Shard}) end,
@@ -143,7 +151,7 @@ wait_for_shards(Shards, Timeout) ->
 
 -spec shards_up() -> [ekka_rlog:shard()].
 shards_up() ->
-    lists:append(ets:match(?replica_tab, {{?upstream_node, '$1'}, '_'})).
+    lists:append(ets:match(?replica_tab, {{?upstream_pid, '$1'}, '_'})).
 
 -spec shards_down() -> [ekka_rlog:shard()].
 shards_down() ->
@@ -155,7 +163,7 @@ get_shard_stats(Shard) ->
         core ->
             #{}; %% TODO
         replicant ->
-            case upstream(Shard) of
+            case upstream_node(Shard) of
                 {ok, Upstream} -> ok;
                 _ -> Upstream = undefined
             end,

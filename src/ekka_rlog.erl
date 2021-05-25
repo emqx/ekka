@@ -120,7 +120,7 @@ wait_for_shards(Shards, Timeout) ->
 find_upstream_node([]) ->
     error(disconnected);
 find_upstream_node([Shard|Rest]) ->
-    case ekka_rlog_status:upstream(Shard) of
+    case ekka_rlog_status:upstream_node(Shard) of
         {ok, Node} ->
             Node;
         disconnected ->
