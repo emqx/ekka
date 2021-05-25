@@ -347,14 +347,13 @@ handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
 handle_info({'EXIT', _From, Reason}, State) ->
-    eetcd:close(?MODULE),
     {stop, Reason, State};
 
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
 terminate(_Reason, _State = #state{}) ->
-    ok.
+    eetcd:close(?MODULE).
 
 code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
