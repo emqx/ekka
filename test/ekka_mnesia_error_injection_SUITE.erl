@@ -33,6 +33,14 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
+init_per_testcase(TestCase, Config) ->
+    Config.
+
+end_per_testcase(TestCase, Config) ->
+    ekka_ct:cleanup(TestCase),
+    snabbkaffe:stop(),
+    Config.
+
 t_agent_restart(_) ->
     Cluster = ekka_ct:cluster([core, core, replicant], ekka_mnesia_test_util:common_env()),
     CounterKey = counter,
@@ -54,7 +62,7 @@ t_agent_restart(_) ->
        end,
        fun(N3, Trace) ->
                ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
-               %ekka_rlog_props:counter_import_check(CounterKey, N3, Trace),
+               ekka_rlog_props:counter_import_check(CounterKey, N3, Trace),
                ?assert(length(?of_kind(snabbkaffe_crash, Trace)) > 1)
        end).
 
@@ -81,4 +89,29 @@ t_rand_error_injection(_) ->
                ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
                ?assert(ekka_rlog_props:counter_import_check(CounterKey, N3, Trace) > 0),
                ?assert(length(?of_kind(snabbkaffe_crash, Trace)) > 1)
+       end).
+
+%% This testcase verifies verifies various modes of ekka_mnesia:ro_transaction
+t_sum_verify(_) ->
+    Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
+    NTrans = 100,
+    ?check_trace(
+       try
+           Nodes = ekka_ct:start_cluster(ekka, Cluster),
+           ekka_mnesia_test_util:wait_shards(Nodes),
+           %% Everything in ekka RLOG will crash
+           ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog|_]}}
+                        , snabbkaffe_nemesis:random_crash(0.1)
+                        ),
+           [rpc:async_call(N, ekka_transaction_gen, verify_trans_sum, [NTrans, 100])
+            || N <- lists:reverse(Nodes)],
+           [?block_until(#{?snk_kind := verify_trans_sum, node := N})
+            || N <- Nodes]
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(_, Trace) ->
+               ?assertMatch( [ok, ok]
+                           , ?projection(result, ?of_kind(verify_trans_sum, Trace))
+                           )
        end).

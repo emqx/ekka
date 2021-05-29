@@ -55,8 +55,8 @@
 
 %% Database API
 -export([ ro_transaction/2
+        , transaction/3
         , transaction/2
-        , transaction/1
         , clear_table/1
 
         , dirty_write/2
@@ -397,7 +397,7 @@ ro_transaction(Shard, Fun) ->
 
 -spec transaction(ekka_rlog:shard(), fun((...) -> A), list()) -> t_result(A).
 transaction(Shard, Fun, Args) ->
-    ekka_rlog:call_backend_rw_trans(transaction, [Shard, Fun, Args]).
+    ekka_rlog:call_backend_rw_trans(Shard, transaction, [Fun, Args]).
 
 -spec transaction(ekka_rlog:shard(), fun(() -> A)) -> t_result(A).
 transaction(Shard, Fun) ->
@@ -405,7 +405,8 @@ transaction(Shard, Fun) ->
 
 -spec clear_table(ekka_rlog_lib:table()) -> t_result(ok).
 clear_table(Table) ->
-    ekka_rlog:call_backend_rw_trans(clear_table, [Table]).
+    Shard = ekka_rlog_config:shard_rlookup(Table),
+    ekka_rlog:call_backend_rw_trans(Shard, clear_table, [Table]).
 
 -spec dirty_write(tuple()) -> ok.
 dirty_write(Record) ->

@@ -34,6 +34,7 @@
         , handle_call/3
         , handle_cast/2
         , handle_info/2
+        , handle_continue/2
         , code_change/3
         ]).
 
@@ -104,23 +105,24 @@ init({Shard, Config}) ->
         erlang:convert_time_unit(maps:get(tlog_replay, Config, 10), second, nanosecond),
     BootstrapThreshold =
         erlang:convert_time_unit(maps:get(tlog_replay, Config, 300), second, nanosecond),
-    self() ! post_init,
     {ok, #s{ shard               = Shard
            , agent_sup           = AgentSup
            , bootstrapper_sup    = BootstrapperSup
            , tlog_replay         = TlogReplay
            , bootstrap_threshold = BootstrapThreshold
-           }}.
+           },
+           {continue, post_init}}.
 
-handle_info(post_init, St = #s{shard = Shard}) ->
+handle_info(_Info, St) ->
+    {noreply, St}.
+
+handle_continue(post_init, St = #s{shard = Shard}) ->
     #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
     mnesia:wait_for_tables([Shard|Tables], 100000),
     ?tp(notice, "Shard fully up",
         #{ node => node()
          , shard => St#s.shard
          }),
-    {noreply, St};
-handle_info(_Info, St) ->
     {noreply, St}.
 
 handle_cast(_Cast, St) ->

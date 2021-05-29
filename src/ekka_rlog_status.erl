@@ -305,20 +305,23 @@ get_bootstrap_time(Shard) ->
 
 -spec do_notify_up(atom(), term(), term()) -> ok.
 do_notify_up(Tag, Object, Value) ->
-    ?tp(ekka_rlog_status_change,
-        #{ status => up
-         , tag    => Tag
-         , key    => Object
-         , value  => Value
-         , node   => node()
-         }),
     Key = {Tag, Object},
     New = case ets:lookup(?replica_tab, Key) of
               [] -> true;
               _  -> false
           end,
     ets:insert(?replica_tab, {Key, Value}),
-    New andalso gen_event:notify(?SERVER, {Key, Value}),
+    New andalso
+        begin
+            ?tp(ekka_rlog_status_change,
+                #{ status => up
+                 , tag    => Tag
+                 , key    => Object
+                 , value  => Value
+                 , node   => node()
+                 }),
+            gen_event:notify(?SERVER, {Key, Value})
+        end,
     ok.
 
 -spec do_notify_down(atom(), term()) -> ok.

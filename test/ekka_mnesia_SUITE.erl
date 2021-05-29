@@ -34,11 +34,12 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
-init_per_testcase(_TestCase, Config) ->
+init_per_testcase(TestCase, Config) ->
     Config.
 
 end_per_testcase(TestCase, Config) ->
     ekka_ct:cleanup(TestCase),
+    snabbkaffe:stop(),
     Config.
 
 t_data_dir(_) ->
