@@ -29,6 +29,8 @@
         , counter/2
         , counter/3
         , ro_read_all_keys/0
+
+        , verify_trans_sum/2
         ]).
 
 -record(test_tab, {key, val}).
@@ -41,6 +43,11 @@ mnesia(boot) ->
                                             ]);
 mnesia(copy) ->
     ok = ekka_mnesia:copy_table(test_tab, ram_copies).
+
+verify_trans_sum(N, Delay) ->
+    mnesia:wait_for_tables([test_tab], 10000),
+    do_trans_gen(),
+    verify_trans_sum_loop(N, Delay).
 
 init() ->
     ekka_mnesia:transaction(
@@ -149,3 +156,50 @@ loop(Cnt, Backend, NKeys) ->
                             end),
             loop(Cnt + 1, Backend, NKeys)
     end.
+
+verify_trans_sum_loop(0, _Delay) ->
+    ?tp(verify_trans_sum,
+        #{ result => ok
+         , node   => node()
+         });
+verify_trans_sum_loop(N, Delay) ->
+    ?tp(verify_trans_step, #{n => N}),
+    %% Perform write transaction:
+    N rem 2 =:= 0 andalso
+        do_trans_gen(),
+    %% Perform r/o transaction:
+    case do_trans_verify() of
+        {atomic, true} ->
+            timer:sleep(Delay),
+            verify_trans_sum_loop(N - 1, Delay);
+        Result ->
+            ?tp(verify_trans_sum,
+                #{ result => nok
+                 , reason => Result
+                 , node   => node()
+                 })
+    end.
+
+do_trans_gen() ->
+    ekka_mnesia:transaction(
+      fun() ->
+              [mnesia:write(#test_tab{key = I, val = rand:uniform()})
+               || I <- lists:seq(1, 10)],
+              mnesia:write(#test_tab{key = sum, val = sum_keys()}),
+              true
+      end).
+
+do_trans_verify() ->
+    ekka_mnesia:ro_transaction(
+      test_shard,
+      fun() ->
+              Sum = sum_keys(),
+              [#test_tab{val = Expected}] = mnesia:read(test_tab, sum),
+              Sum == Expected
+      end).
+
+sum_keys() ->
+    L = lists:map( fun(K) -> [#test_tab{val = V}] = mnesia:read(test_tab, K), V end
+                 , lists:seq(1, 10)
+                 ),
+    lists:sum(L).

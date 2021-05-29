@@ -25,6 +25,8 @@
          notify_shard_down/1, wait_for_shards/2, upstream/1, upstream_node/1,
          shards_up/0, shards_down/0, get_shard_stats/1,
 
+         notify_core_node_up/2, notify_core_node_down/1, get_core_node/2,
+
          notify_replicant_state/2, notify_replicant_import_trans/2,
          notify_replicant_replayq_len/2,
          notify_replicant_bootstrap_start/1, notify_replicant_bootstrap_complete/1,
@@ -47,6 +49,7 @@
 %% Tables and table keys:
 -define(replica_tab, ekka_rlog_replica_tab).
 -define(upstream_pid, upstream_pid).
+-define(core_node, core_node).
 
 -define(stats_tab, ekka_rlog_stats_tab).
 -define(replicant_state, replicant_state).
@@ -94,16 +97,11 @@ start_link() ->
 
 -spec notify_shard_up(ekka_rlog:shard(), _AgentPid :: pid()) -> ok.
 notify_shard_up(Shard, Upstream) ->
-    ?tp(notify_shard_up,
-        #{ shard => Shard
-         , node  => node()
-         }),
-    ets:insert(?replica_tab, {{?upstream_pid, Shard}, Upstream}),
-    gen_event:notify(?SERVER, {shard_up, Shard}).
+    do_notify_up(?upstream_pid, Shard, Upstream).
 
 -spec notify_shard_down(ekka_rlog:shard()) -> ok.
 notify_shard_down(Shard) ->
-    ets:delete(?replica_tab, {?upstream_pid, Shard}),
+    do_notify_down(?upstream_pid, Shard),
     %% Delete metrics
     ets:insert(?stats_tab, {{?replicant_state, Shard}, down}),
     lists:foreach(fun(Key) -> ets:delete(?stats_tab, {Key, Shard}) end,
@@ -112,10 +110,29 @@ notify_shard_down(Shard) ->
                    ?replicant_bootstrap_start,
                    ?replicant_bootstrap_complete,
                    ?replicant_bootstrap_import
-                  ]),
-    ?tp(notify_shard_down,
-        #{ shard => Shard
-         }).
+                  ]).
+
+-spec notify_core_node_up(ekka_rlog:shard(), node()) -> ok.
+notify_core_node_up(Shard, Node) ->
+    do_notify_up(?core_node, Shard, Node).
+
+-spec notify_core_node_down(ekka_rlog:shard()) -> ok.
+notify_core_node_down(Shard) ->
+    do_notify_down(?core_node, Shard).
+
+%% Get a healthy core node that has the specified shard, and can
+%% accept or RPC calls.
+-spec get_core_node(ekka_rlog:shard(), timeout()) -> {ok, node()} | timeout.
+get_core_node(Shard, Timeout) ->
+    case ets:lookup(?replica_tab, {?core_node, Shard}) of
+        [{_, Node}] ->
+            {ok, Node};
+        [] ->
+            case wait_objects(?core_node, [Shard], Timeout) of
+                ok           -> get_core_node(Shard, 0);
+                {timeout, _} -> timeout
+            end
+    end.
 
 -spec subscribe_events() -> reference().
 subscribe_events() ->
@@ -136,13 +153,7 @@ wait_for_shards(Shards, Timeout) ->
         #{ shards => Shards
          , timeout => Timeout
          }),
-    ERef = subscribe_events(),
-    TRef = ekka_rlog_lib:send_after(Timeout, self(), {ERef, timeout}),
-    %% Exclude shards that are up, since they are not going to send any events:
-    DownShards = Shards -- shards_up(),
-    Ret = do_wait_shards(ERef, DownShards),
-    ekka_rlog_lib:cancel_timer(TRef),
-    unsubscribe_events(ERef),
+    Ret = wait_objects(?upstream_pid, Shards, Timeout),
     ?tp(notice, "Done waiting for shards",
         #{ shards => Shards
          , result =>  Ret
@@ -151,7 +162,11 @@ wait_for_shards(Shards, Timeout) ->
 
 -spec shards_up() -> [ekka_rlog:shard()].
 shards_up() ->
-    lists:append(ets:match(?replica_tab, {{?upstream_pid, '$1'}, '_'})).
+    objects_up(?upstream_pid).
+
+-spec objects_up(atom()) -> [term()].
+objects_up(Tag) ->
+    lists:append(ets:match(?replica_tab, {{Tag, '$1'}, '_'})).
 
 -spec shards_down() -> [ekka_rlog:shard()].
 shards_down() ->
@@ -213,10 +228,10 @@ notify_replicant_bootstrap_import(Shard) ->
 init([Ref, Subscriber]) ->
     logger:set_process_metadata(#{domain => [ekka, rlog, event_mgr]}),
     ?tp(start_event_monitor,
-        #{ reference => Ref
+        #{ reference  => Ref
          , subscriber => Subscriber
          }),
-    State = #s{ ref = Ref
+    State = #s{ ref        = Ref
               , subscriber = Subscriber
               },
     {ok, State, hibernate}.
@@ -232,21 +247,27 @@ handle_event(Event, State = #s{ref = Ref, subscriber = Sub}) ->
 %% Internal functions
 %%================================================================================
 
-do_wait_shards(_, []) ->
+-spec wait_objects(atom(), [A], timeout()) -> ok | {timeout, [A]}.
+wait_objects(Tag, Objects, Timeout) ->
+    ERef = subscribe_events(),
+    TRef = ekka_rlog_lib:send_after(Timeout, self(), {ERef, timeout}),
+    %% Exclude shards that are up, since they are not going to send any events:
+    DownObjects = Objects -- objects_up(Tag),
+    Ret = do_wait_objects(Tag, ERef, DownObjects),
+    ekka_rlog_lib:cancel_timer(TRef),
+    unsubscribe_events(ERef),
+    Ret.
+
+do_wait_objects(_, _, []) ->
     ok;
-do_wait_shards(ERef, RemainingShards) ->
+do_wait_objects(Tag, ERef, RemainingObjects) ->
     receive
         {'DOWN', ERef, _, _, _} ->
             error(rlog_restarted);
-        {ERef, Event} ->
-            case Event of
-                {shard_up, Shard} ->
-                    do_wait_shards(ERef, RemainingShards -- [Shard]);
-                timeout ->
-                    {timeout, RemainingShards};
-                _ ->
-                    do_wait_shards(ERef, RemainingShards)
-            end
+        {ERef, timeout} ->
+            {timeout, RemainingObjects};
+        {ERef, {{Tag, Object}, _Value}} ->
+            do_wait_objects(Tag, ERef, RemainingObjects -- [Object])
     end.
 
 flush_events(ERef) ->
@@ -281,3 +302,31 @@ get_bootstrap_time(Shard) ->
         {Start, Complete} ->
             Complete - Start
     end.
+
+-spec do_notify_up(atom(), term(), term()) -> ok.
+do_notify_up(Tag, Object, Value) ->
+    ?tp(ekka_rlog_status_change,
+        #{ status => up
+         , tag    => Tag
+         , key    => Object
+         , value  => Value
+         , node   => node()
+         }),
+    Key = {Tag, Object},
+    New = case ets:lookup(?replica_tab, Key) of
+              [] -> true;
+              _  -> false
+          end,
+    ets:insert(?replica_tab, {Key, Value}),
+    New andalso gen_event:notify(?SERVER, {Key, Value}),
+    ok.
+
+-spec do_notify_down(atom(), term()) -> ok.
+do_notify_down(Tag, Object) ->
+    Key = {Tag, Object},
+    ets:delete(?replica_tab, Key),
+    ?tp(ekka_rlog_status_change,
+        #{ status => down
+         , key    => Object
+         , tag    => Tag
+         }).

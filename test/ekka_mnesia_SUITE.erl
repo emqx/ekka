@@ -292,6 +292,29 @@ t_rlog_dirty_operations(_) ->
                true
        end).
 
+%% This testcase verifies verifies various modes of ekka_mnesia:ro_transaction
+t_sum_verify(_) ->
+    Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
+    NTrans = 100,
+    ?check_trace(
+       try
+           ?force_ordering( #{?snk_kind := verify_trans_step, n := N} when N =:= NTrans div 3
+                          , #{?snk_kind := state_change, to := normal}
+                          ),
+           Nodes = ekka_ct:start_cluster(ekka, Cluster),
+           [ok = rpc:call(N, ekka_transaction_gen, verify_trans_sum, [NTrans, 10])
+            || N <- lists:reverse(Nodes)],
+           [?block_until(#{?snk_kind := verify_trans_sum, node := N}, 5000)
+            || N <- Nodes]
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(_, Trace) ->
+               ?assertMatch( [ok, ok]
+                           , ?projection(result, ?of_kind(verify_trans_sum, Trace))
+                           )
+       end).
+
 cluster_benchmark(_) ->
     snabbkaffe:fix_ct_logging(),
     NReplicas = 6,
