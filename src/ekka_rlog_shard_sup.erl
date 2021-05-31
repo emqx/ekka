@@ -51,9 +51,9 @@ init([shard, Shard]) ->
     Children = [server(ekka_rlog_server, Shard)],
     {ok, {SupFlags, Children}};
 init([agent, Shard]) ->
-    simple_sup(ekka_rlog_agent, Shard);
+    init_simple_sup(ekka_rlog_agent, Shard);
 init([bootstrapper, Shard]) ->
-    simple_sup(ekka_rlog_bootstrapper, Shard).
+    init_simple_sup(ekka_rlog_bootstrapper, Shard).
 
 %%================================================================================
 %% Internal functions
@@ -61,13 +61,13 @@ init([bootstrapper, Shard]) ->
 
 server(Module, Shard) ->
     #{ id => Module
-     , start => {Module, start_link, [Shard]}
+     , start => {Module, start_link, [self(), Shard]}
      , restart => permanent
      , shutdown => 1000
      , type => worker
      }.
 
-simple_sup(Module, Shard) ->
+init_simple_sup(Module, Shard) ->
     SupFlags = #{ strategy => simple_one_for_one
                 , intensity => 0
                 , period => 1
