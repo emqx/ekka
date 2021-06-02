@@ -146,6 +146,12 @@ import_op(Op) ->
     end.
 
 -spec import_op_dirty(op()) -> ok.
+import_op_dirty({{Tab, '_'}, '_', clear_table}) ->
+    mnesia:clear_table(Tab);
+import_op_dirty({{Tab, _K}, Record, delete_object}) ->
+    mnesia:dirty_delete_object(Tab, Record);
+import_op_dirty({{Tab, K}, _Record, delete}) ->
+    mnesia:dirty_delete({Tab, K});
 import_op_dirty({{Tab, _K}, Record, write}) ->
     mnesia:dirty_write(Tab, Record).
 

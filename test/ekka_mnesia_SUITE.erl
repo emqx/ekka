@@ -289,8 +289,8 @@ t_rlog_dirty_operations(_) ->
        after
            ekka_ct:teardown_cluster(Cluster)
        end,
-       fun(_, _) ->
-               true
+       fun(_, Trace) ->
+               ?assert(ekka_rlog_props:replicant_no_restarts(Trace))
        end).
 
 %% This testcase verifies verifies various modes of ekka_mnesia:ro_transaction
@@ -311,6 +311,7 @@ t_sum_verify(_) ->
            ekka_ct:teardown_cluster(Cluster)
        end,
        fun(_, Trace) ->
+               ?assert(ekka_rlog_props:replicant_no_restarts(Trace)),
                ?assertMatch( [ok, ok]
                            , ?projection(result, ?of_kind(verify_trans_sum, Trace))
                            )

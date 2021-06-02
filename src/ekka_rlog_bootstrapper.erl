@@ -140,7 +140,7 @@ terminate(_Reason, St = #client{}) ->
 %% Internal functions
 %%================================================================================
 
--spec push_batch(ekka_rlog_lib:subscriber(), batch()) -> ok.
+-spec push_batch(ekka_rlog_lib:subscriber(), batch()) -> ok | {badrpc, _}.
 push_batch({Node, Pid}, Batch = {_, _, _}) ->
     ekka_rlog_lib:rpc_call(Node, ?MODULE, do_push_batch, [Pid, Batch]).
 
@@ -152,7 +152,7 @@ handle_batch(Table, Records) ->
     lists:foreach(fun(I) -> mnesia:dirty_write(Table, I) end, Records).
 
 start_table_traverse(St = #server{tables = [], subscriber = Subscriber}) ->
-    ok = complete(Subscriber, self(), ekka_rlog_lib:approx_checkpoint()),
+    complete(Subscriber, self(), ekka_rlog_lib:approx_checkpoint()),
     {stop, normal, St};
 start_table_traverse(St0 = #server{ shard = Shard
                                   , tables = [Table|Rest]
@@ -172,16 +172,24 @@ traverse_queue(St0 = #server{key_queue = Q0, subscriber = Subscriber, tables = [
     {Q, AckRef, Items} = replayq:pop(Q0, ChunkConfig),
     Records = prepare_batch(Table, Items),
     Batch = {self(), Table, Records},
-    ok = push_batch(Subscriber, Batch),
-    ok = replayq:ack(Q, AckRef),
-    case replayq:is_empty(Q) of
-        true ->
-            self() ! table_loop,
-            St = St0#server{tables = Rest},
-            {noreply, St};
-        false ->
-            self() ! chunk_loop,
-            {noreply, St0#server{key_queue = Q}}
+    case push_batch(Subscriber, Batch) of
+        ok ->
+            ok = replayq:ack(Q, AckRef),
+            case replayq:is_empty(Q) of
+                true ->
+                    self() ! table_loop,
+                    St = St0#server{tables = Rest},
+                    {noreply, St};
+                false ->
+                    self() ! chunk_loop,
+                    {noreply, St0#server{key_queue = Q}}
+            end;
+        {badrpc, Err} ->
+            ?tp(warning, "Failed to push batch",
+                #{ subscriber => Subscriber
+                 , reason     => Err
+                 }),
+            {stop, normal, St0}
     end.
 
 -spec prepare_batch(ekka_rlog_lib:table(), list()) -> [tuple()].

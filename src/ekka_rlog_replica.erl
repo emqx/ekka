@@ -87,7 +87,10 @@ init({Shard, _Opts}) ->
     logger:update_process_metadata(#{ domain => [ekka, rlog, replica]
                                     , shard  => Shard
                                     }),
-    ?tp(notice, rlog_replica_start, #{node => node()}),
+    ?tp(notice, rlog_replica_start,
+        #{ node => node()
+         , shard => Shard
+         }),
     D = #d{ shard = Shard
           },
     {ok, ?disconnected, D}.
