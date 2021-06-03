@@ -73,6 +73,7 @@ cluster(Specs0, CommonEnv) ->
                         , {gen_rpc, client_config_per_node, {internal, GenRpcPorts}}
                         | Env]
             , number => Number
+            , role   => Role
             }
      || {{Role, Name, Env}, Number} <- Specs].
 

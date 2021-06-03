@@ -47,11 +47,12 @@ prop() ->
     Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
     ?forall_trace(
        Cmds, commands(?MODULE),
+       #{timetrap => 10000},
        try
            Nodes = ekka_ct:start_cluster(ekka, Cluster),
            ok = ekka_mnesia_test_util:wait_shards(Nodes),
            {History, State, Result} = run_commands(?MODULE, Cmds),
-           ekka_mnesia_test_util:stabilize(100),
+           ekka_mnesia_test_util:wait_full_replication(Cluster),
            [check_state(Cmds, State, Node) || Node <- Nodes],
            {History, State, Result}
        after
@@ -121,7 +122,7 @@ initial_state() ->
 
 command(State) ->
     frequency([ {90, {call, ?MODULE, execute, [participant(), transaction(State)]}}
-              , {10, {call, ?MODULE, restart_replicant, []}}
+              , {10, {call, ?MODULE, restart_ekka, [participant()]}}
               ]).
 
 %% Picks whether a command should be valid under the current state.
@@ -194,9 +195,9 @@ execute(Node, {transaction, Ops}) ->
           end,
     {atomic, ok} = rpc:call(Node, ekka_mnesia, transaction, [test_shard, Fun]).
 
-restart_replicant() ->
-    ok = rpc:call(replicant_node(), application, stop, [ekka]),
-    ok = rpc:call(replicant_node(), application, start, [ekka]).
+restart_ekka(Node) ->
+    rpc:call(node(), application, stop, [ekka]),
+    {ok, _} = rpc:call(replicant_node(), application, ensure_all_started, [ekka]).
 
 core_node() ->
     ekka_ct:node_id(n1).

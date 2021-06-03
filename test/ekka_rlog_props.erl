@@ -99,7 +99,6 @@ do_counter_import_check(CounterKey, Trace) ->
     ?assert(check_transaction_replay_sequence(Writes)),
     length(Writes).
 
-
 check_transaction_replay_sequence(Max, LastElem, []) ->
     LastElem >= Max orelse
         ?panic("invalid sequence restart",

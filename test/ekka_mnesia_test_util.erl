@@ -17,10 +17,17 @@
 -module(ekka_mnesia_test_util).
 
 -export([stabilize/1, wait_shards/1, wait_shards/2, common_env/0,
-         compare_table_contents/2]).
+         compare_table_contents/2, wait_full_replication/1,
+         wait_full_replication/2]).
 
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 -include_lib("stdlib/include/assert.hrl").
+
+wait_full_replication(Cluster) ->
+    ekka_helper_tab:wait_full_replication(Cluster).
+
+wait_full_replication(Cluster, Timeout) ->
+    ekka_helper_tab:wait_full_replication(Cluster, Timeout).
 
 stabilize(Timeout) ->
     case ?block_until(#{?snk_meta := #{domain := [ekka, rlog|_]}}, Timeout, 0) of
