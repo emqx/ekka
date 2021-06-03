@@ -19,15 +19,13 @@
 -module(ekka_rlog_replica).
 
 %% API:
--export([ start_link/1
-        , push_tlog_entry/2
-        ]).
+-export([start_link/1]).
 
 %% gen_statem callbacks:
 -export([init/1, terminate/3, code_change/4, callback_mode/0, handle_event/4]).
 
 %% Internal exports:
--export([do_push_tlog_entry/2]).
+-export([do_push_tlog_entry/2, push_tlog_entry/2]).
 
 -include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/trace.hrl").
@@ -68,15 +66,6 @@
 %%================================================================================
 %% API funcions
 %%================================================================================
-
-%% This function is called by the remote core node.
--spec push_tlog_entry(ekka_rlog_lib:subscriber(), ekka_rlog_lib:tlog_entry()) -> ok.
-push_tlog_entry({Node, Pid}, Batch) ->
-    %% TODO: this should be a cast, but gen_rpc doesn't guarantee the
-    %% ordering of cast messages. In the production code this will be
-    %% horrible!
-    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_push_tlog_entry, [Pid, Batch]),
-    ok.
 
 start_link(Shard) ->
     Config = #{}, % TODO
@@ -145,6 +134,18 @@ terminate(_Reason, _State, #d{}) ->
     ok.
 
 %%================================================================================
+%% Internal exports
+%%================================================================================
+
+%% This function is called by the remote core node.
+-spec push_tlog_entry(ekka_rlog_lib:subscriber(), ekka_rlog_lib:tlog_entry()) -> ok.
+push_tlog_entry({Node, Pid}, Batch) ->
+    %% TODO: this should be a cast, but gen_rpc doesn't guarantee the
+    %% ordering of cast messages. In the production code this will be
+    %% horrible!
+    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_push_tlog_entry, [Pid, Batch]).
+
+%%================================================================================
 %% Internal functions
 %%================================================================================
 
@@ -153,6 +154,7 @@ terminate(_Reason, _State, #d{}) ->
 handle_tlog_entry(?normal, {Agent, SeqNo, TXID, Transaction},
                   D = #d{ agent            = Agent
                         , next_batch_seqno = SeqNo
+                        , shard            = Shard
                         }) ->
     %% Normal flow, transactions are applied directly to the replica:
     ?tp(rlog_replica_import_trans,
@@ -161,9 +163,11 @@ handle_tlog_entry(?normal, {Agent, SeqNo, TXID, Transaction},
          , txid        => TXID
          , transaction => Transaction
          }),
+    Checkpoint = ekka_rlog_lib:txid_to_checkpoint(TXID),
     ekka_rlog_lib:import_batch(transaction, Transaction),
+    ekka_rlog_status:notify_replicant_import_trans(Shard, Checkpoint),
     {keep_state, D#d{ next_batch_seqno = SeqNo + 1
-                    , checkpoint       = TXID
+                    , checkpoint       = Checkpoint
                     }};
 handle_tlog_entry(St, {Agent, SeqNo, TXID, Transaction},
                   D0 = #d{ agent = Agent
@@ -194,12 +198,17 @@ handle_tlog_entry(_State, {Agent, SeqNo, TXID, _},
     %% TODO: sometimes it should be possible to restart gracefully to
     %% salvage the bootstrapped data.
     error({gap_in_the_tlog, TXID, SeqNo, MySeqNo});
-handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transaction}, Data) ->
+handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transaction},
+                  #d{ next_batch_seqno = ExpectedSeqno
+                    , agent            = ExpectedAgent
+                    }) ->
     ?tp(warning, rlog_replica_unexpected_trans,
-        #{ state => State
-         , from  => Agent
-         , txid  => TXID
-         , seqno => SeqNo
+        #{ state          => State
+         , from           => Agent
+         , from_expected  => ExpectedAgent
+         , txid           => TXID
+         , seqno          => SeqNo
+         , seqno_expected => ExpectedSeqno
          }),
     keep_state_and_data.
 
@@ -247,8 +256,9 @@ initiate_local_replay(_D) ->
     {keep_state_and_data, [{timeout, 0, ?local_replay_loop}]}.
 
 -spec replay_local(data()) -> fsm_result().
-replay_local(D0 = #d{replayq = Q0}) ->
+replay_local(D0 = #d{replayq = Q0, shard = Shard}) ->
     {Q, AckRef, Items} = replayq:pop(Q0, #{}),
+    ekka_rlog_status:notify_replicant_replayq_len(Shard, replayq:count(Q)),
     ekka_rlog_lib:import_batch(dirty, Items),
     case replayq:is_empty(Q) of
         true ->
@@ -302,7 +312,7 @@ try_connect(Shard, Checkpoint) ->
 try_connect([], _, _) ->
     {error, no_core_available};
 try_connect([Node|Rest], Shard, Checkpoint) ->
-    ?tp(info, try_connect,
+    ?tp(notice, "Trying to connect to the core node",
         #{ node => Node
          }),
     case ekka_rlog:subscribe(Shard, Node, self(), Checkpoint) of
@@ -310,7 +320,7 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
             link(Agent),
             {ok, NeedBootstrap, Node, Agent};
         Err ->
-            ?tp(connection_failed,
+            ?tp(warning, "Failed to connect to the core node",
                 #{ node => Node
                  , reason => Err
                  }),
@@ -318,13 +328,14 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
     end.
 
 -spec buffer_tlog_ops(ekka_rlog_lib:tx(), data()) -> data().
-buffer_tlog_ops(Transaction, D = #d{replayq = Q0}) ->
+buffer_tlog_ops(Transaction, D = #d{replayq = Q0, shard = Shard}) ->
     Q = replayq:append(Q0, Transaction),
+    ekka_rlog_status:notify_replicant_replayq_len(Shard, replayq:count(Q)),
     D#d{replayq = Q}.
 
 -spec handle_normal(data()) -> ok.
-handle_normal(D = #d{shard = Shard, remote_core_node = Upstream}) ->
-    ekka_rlog_status:notify_shard_up(Shard, Upstream),
+handle_normal(D = #d{shard = Shard, agent = Agent}) ->
+    ekka_rlog_status:notify_shard_up(Shard, Agent),
     ?tp(notice, "Shard fully up",
         #{ node => node()
          , shard => D#d.shard
@@ -349,11 +360,12 @@ handle_unknown(EventType, Event, State, Data) ->
          }),
     keep_state_and_data.
 
-handle_state_trans(OldState, State, _Data) ->
+handle_state_trans(OldState, State, Data) ->
     ?tp(info, state_change,
         #{ from => OldState
          , to => State
          }),
+    ekka_rlog_status:notify_replicant_state(Data#d.shard, State),
     keep_state_and_data.
 
 -spec forget_tmp_worker(data()) -> ok.

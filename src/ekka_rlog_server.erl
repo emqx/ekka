@@ -22,9 +22,10 @@
 -behaviour(gen_server).
 
 %% API
--export([ start_link/1
+-export([ start_link/2
         , subscribe/3
         , bootstrap_me/2
+        , probe/2
         ]).
 
 %% gen_server callbacks
@@ -33,11 +34,12 @@
         , handle_call/3
         , handle_cast/2
         , handle_info/2
+        , handle_continue/2
         , code_change/3
         ]).
 
 %% Internal exports
--export([do_bootstrap/2]).
+-export([do_bootstrap/2, do_probe/1]).
 
 -export_type([checkpoint/0]).
 
@@ -61,9 +63,18 @@
 %% API funcions
 %%================================================================================
 
-start_link(Shard) ->
-    Config = #{}, % TODO
-    gen_server:start_link({local, Shard}, ?MODULE, {Shard, Config}, []).
+-spec start_link(pid(), ekka_rlog:shard()) -> {ok, pid()}.
+start_link(Parent, Shard) ->
+    gen_server:start_link({local, Shard}, ?MODULE, {Parent, Shard}, []).
+
+%% @doc Make a call to the server that does nothing.
+%%
+%% This API function is called by the replicant before `subscribe/3'
+%% to reduce the risk of double subscription when the reply from the
+%% server is lost or delayed due to network congestion.
+-spec probe(node(), ekka_rlog:shard()) -> boolean().
+probe(Node, Shard) ->
+    ekka_rlog_lib:rpc_call(Node, ?MODULE, do_probe, [Shard]) =:= true.
 
 -spec subscribe(ekka_rlog:shard(), ekka_rlog_lib:subscriber(), checkpoint()) ->
           {_NeedBootstrap :: boolean(), _Agent :: pid()}.
@@ -83,35 +94,32 @@ bootstrap_me(RemoteNode, Shard) ->
 %% gen_server callbacks
 %%================================================================================
 
-init({Shard, Config}) ->
+init({Parent, Shard}) ->
     logger:set_process_metadata(#{ domain => [ekka, rlog, server]
                                  , shard => Shard
                                  }),
     ?tp(rlog_server_start, #{node => node()}),
-    {ok, AgentSup} = ekka_rlog_shard_sup:start_link_agent_sup(Shard),
-    {ok, BootstrapperSup} = ekka_rlog_shard_sup:start_link_bootstrapper_sup(Shard),
-    TlogReplay =
-        erlang:convert_time_unit(maps:get(tlog_replay, Config, 10), second, nanosecond),
-    BootstrapThreshold =
-        erlang:convert_time_unit(maps:get(tlog_replay, Config, 300), second, nanosecond),
-    self() ! post_init,
-    {ok, #s{ shard               = Shard
-           , agent_sup           = AgentSup
-           , bootstrapper_sup    = BootstrapperSup
-           , tlog_replay         = TlogReplay
-           , bootstrap_threshold = BootstrapThreshold
-           }}.
+    {ok, {Parent, Shard}, {continue, post_init}}.
 
-handle_info(post_init, St = #s{shard = Shard}) ->
-    #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
-    mnesia:wait_for_tables([Shard|Tables], 100000),
-    ?tp(notice, "Shard fully up",
-        #{ node => node()
-         , shard => St#s.shard
-         }),
-    {noreply, St};
 handle_info(_Info, St) ->
     {noreply, St}.
+
+handle_continue(post_init, {Parent, Shard}) ->
+    #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
+    AgentSup = ekka_rlog_shard_sup:start_agent_sup(Parent, Shard),
+    BootstrapperSup = ekka_rlog_shard_sup:start_bootstrapper_sup(Parent, Shard),
+    mnesia:wait_for_tables([Shard|Tables], 100000),
+    ?tp(notice, "Shard fully up",
+        #{ node  => node()
+         , shard => Shard
+         }),
+    State = #s{ shard               = Shard
+              , agent_sup           = AgentSup
+              , bootstrapper_sup    = BootstrapperSup
+              , tlog_replay         = 30 %% TODO: unused. Remove?
+              , bootstrap_threshold = 3000 %% TODO: unused. Remove?
+              },
+    {noreply, State}.
 
 handle_cast(_Cast, St) ->
     {noreply, St}.
@@ -126,6 +134,8 @@ handle_call({subscribe, Subscriber, Checkpoint}, _From, State) ->
 handle_call({bootstrap, Subscriber}, _From, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),
     {reply, {ok, Pid}, State};
+handle_call(probe, _From, State) ->
+    {reply, true, State};
 handle_call(_From, Call, St) ->
     {reply, {error, {unknown_call, Call}}, St}.
 
@@ -170,3 +180,7 @@ maybe_start_child(Supervisor, Args) ->
 -spec do_bootstrap(ekka_rlog:shard(), ekka_rlog_lib:subscriber()) -> {ok, pid()}.
 do_bootstrap(Shard, Subscriber) ->
     gen_server:call(Shard, {bootstrap, Subscriber}, infinity).
+
+-spec do_probe(ekka_rlog:shard()) -> true.
+do_probe(Shard) ->
+    gen_server:call(Shard, probe, 1000).

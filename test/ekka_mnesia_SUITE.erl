@@ -34,11 +34,12 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
-init_per_testcase(_TestCase, Config) ->
+init_per_testcase(TestCase, Config) ->
     Config.
 
 end_per_testcase(TestCase, Config) ->
     ekka_ct:cleanup(TestCase),
+    snabbkaffe:stop(),
     Config.
 
 t_data_dir(_) ->
@@ -271,12 +272,48 @@ t_rlog_dirty_operations(_) ->
            ok = rpc:call(N2, ekka_mnesia, dirty_delete, [test_tab, 2]),
            ok = rpc:call(N2, ekka_mnesia, dirty_delete, [{test_tab, 3}]),
            ekka_mnesia_test_util:stabilize(1000),
-           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes)
+           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
+           ?assertMatch(#{ backend        := rlog
+                         , role           := replicant
+                         , shards_in_sync := [test_shard]
+                         , shards_down    := []
+                         , shard_stats    := #{test_shard :=
+                                                   #{ state               := normal
+                                                    , last_imported_trans := _
+                                                    , replayq_len         := _
+                                                    , upstream            := _
+                                                    , bootstrap_time      := _
+                                                    , bootstrap_num_keys  := _
+                                                    }}
+                         }, rpc:call(N3, ekka_rlog, status, []))
        after
            ekka_ct:teardown_cluster(Cluster)
        end,
        fun(_, _) ->
                true
+       end).
+
+%% This testcase verifies verifies various modes of ekka_mnesia:ro_transaction
+t_sum_verify(_) ->
+    Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
+    NTrans = 100,
+    ?check_trace(
+       try
+           ?force_ordering( #{?snk_kind := verify_trans_step, n := N} when N =:= NTrans div 3
+                          , #{?snk_kind := state_change, to := normal}
+                          ),
+           Nodes = ekka_ct:start_cluster(ekka, Cluster),
+           [ok = rpc:call(N, ekka_transaction_gen, verify_trans_sum, [NTrans, 10])
+            || N <- lists:reverse(Nodes)],
+           [?block_until(#{?snk_kind := verify_trans_sum, node := N}, 5000)
+            || N <- Nodes]
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(_, Trace) ->
+               ?assertMatch( [ok, ok]
+                           , ?projection(result, ?of_kind(verify_trans_sum, Trace))
+                           )
        end).
 
 cluster_benchmark(_) ->

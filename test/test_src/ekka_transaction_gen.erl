@@ -29,6 +29,8 @@
         , counter/2
         , counter/3
         , ro_read_all_keys/0
+
+        , verify_trans_sum/2
         ]).
 
 -record(test_tab, {key, val}).
@@ -42,8 +44,14 @@ mnesia(boot) ->
 mnesia(copy) ->
     ok = ekka_mnesia:copy_table(test_tab, ram_copies).
 
+verify_trans_sum(N, Delay) ->
+    mnesia:wait_for_tables([test_tab], 10000),
+    do_trans_gen(),
+    verify_trans_sum_loop(N, Delay).
+
 init() ->
     ekka_mnesia:transaction(
+      test_shard,
       fun() ->
               [mnesia:write(#test_tab{ key = I
                                      , val = 0
@@ -52,6 +60,7 @@ init() ->
 
 ro_read_all_keys() ->
     ekka_mnesia:ro_transaction(
+      test_shard,
       fun() ->
               Keys = mnesia:all_keys(test_tab),
               [ekka_ct:read(test_tab, K) || K <- Keys]
@@ -59,6 +68,7 @@ ro_read_all_keys() ->
 
 delete(K) ->
     ekka_mnesia:transaction(
+      test_shard,
       fun() ->
               mnesia:delete({test_tab, K})
       end).
@@ -71,6 +81,7 @@ counter(_Key, 0, _) ->
 counter(Key, NIter, Delay) ->
     {atomic, Val} =
         ekka_mnesia:transaction(
+          test_shard,
           fun() ->
                   case ekka_ct:read(test_tab, Key) of
                       [] -> V = 0;
@@ -86,12 +97,16 @@ counter(Key, NIter, Delay) ->
     timer:sleep(Delay),
     counter(Key, NIter - 1, Delay).
 
+%% Test that behavior of ekka_mnesia is the same when transacion aborts:
 abort(Backend, AbortKind) ->
-    Backend:transaction(
-      fun() ->
-              mnesia:write(#test_tab{key = canary_key, val = canary_dead}),
-              do_abort(AbortKind)
-      end).
+    Fun = fun() ->
+                  mnesia:write(#test_tab{key = canary_key, val = canary_dead}),
+                  do_abort(AbortKind)
+          end,
+    case Backend of
+        mnesia      -> mnesia:transaction(Fun);
+        ekka_mnesia -> ekka_mnesia:transaction(test_shard, Fun)
+    end.
 
 do_abort(abort) ->
     mnesia:abort(deliberate);
@@ -104,23 +119,16 @@ do_abort(throw) ->
 
 benchmark(ResultFile,
           #{ delays := Delays
-           , backend := Backend
            , trans_size := NKeys
            , max_time := MaxTime
            }, NNodes) ->
-    NReplicas = length(mnesia:table_info(test_tab, ram_copies)),
-    case Backend of
-        ekka_mnesia ->
-            true = NReplicas =< 2;
-        mnesia ->
-            NNodes = NReplicas
-    end,
     TransTimes =
         [begin
              ekka_ct:set_network_delay(Delay),
-             do_benchmark(Backend, NKeys, MaxTime)
+             do_benchmark(NKeys, MaxTime)
          end
          || Delay <- Delays],
+    Backend = ekka_rlog:backend(),
     [snabbkaffe:push_stat({Backend, Delay}, NNodes, T)
      || {Delay, T} <- lists:zip(Delays, TransTimes)],
     ok = file:write_file( ResultFile
@@ -128,23 +136,72 @@ benchmark(ResultFile,
                         , [append]
                         ).
 
-do_benchmark(Backend, NKeys, MaxTime) ->
+do_benchmark(NKeys, MaxTime) ->
     {T, NTrans} = timer:tc(fun() ->
                                    timer:send_after(MaxTime, complete),
-                                   loop(0, Backend, NKeys)
+                                   loop(0, NKeys)
                            end),
     T / NTrans.
 
-loop(Cnt, Backend, NKeys) ->
+loop(Cnt, NKeys) ->
     receive
         complete -> Cnt
     after 0 ->
-            {atomic, _} = Backend:transaction(
+            {atomic, _} = ekka_mnesia:transaction(
+                            test_shard,
                             fun() ->
                                     [begin
                                          mnesia:read({test_tab, Key}),
                                          mnesia:write(#test_tab{key = Key, val = Cnt})
                                      end || Key <- lists:seq(1, NKeys)]
                             end),
-            loop(Cnt + 1, Backend, NKeys)
+            loop(Cnt + 1, NKeys)
     end.
+
+verify_trans_sum_loop(0, _Delay) ->
+    ?tp(verify_trans_sum,
+        #{ result => ok
+         , node   => node()
+         });
+verify_trans_sum_loop(N, Delay) ->
+    ?tp(verify_trans_step, #{n => N}),
+    %% Perform write transaction:
+    N rem 2 =:= 0 andalso
+        do_trans_gen(),
+    %% Perform r/o transaction:
+    case do_trans_verify(Delay) of
+        {atomic, true} ->
+            verify_trans_sum_loop(N - 1, Delay);
+        Result ->
+            ?tp(verify_trans_sum,
+                #{ result => nok
+                 , reason => Result
+                 , node   => node()
+                 })
+    end.
+
+do_trans_gen() ->
+    ekka_mnesia:transaction(
+      test_shard,
+      fun() ->
+              [mnesia:write(#test_tab{key = I, val = rand:uniform()})
+               || I <- lists:seq(1, 10)],
+              mnesia:write(#test_tab{key = sum, val = sum_keys()}),
+              true
+      end).
+
+do_trans_verify(Delay) ->
+    ekka_mnesia:ro_transaction(
+      test_shard,
+      fun() ->
+              Sum = sum_keys(),
+              timer:sleep(Delay),
+              [#test_tab{val = Expected}] = mnesia:read(test_tab, sum),
+              Sum == Expected
+      end).
+
+sum_keys() ->
+    L = lists:map( fun(K) -> [#test_tab{val = V}] = mnesia:read(test_tab, K), V end
+                 , lists:seq(1, 10)
+                 ),
+    lists:sum(L).

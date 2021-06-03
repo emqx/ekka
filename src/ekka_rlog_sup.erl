@@ -77,7 +77,8 @@ init([replicant, Shards]) ->
                 , intensity => 100
                 , period => 1
                 },
-    Children = [status_mgr()|lists:map(fun replicant_worker/1, Shards)],
+    Children = [status_mgr(), core_node_lb()
+               |lists:map(fun replicant_worker/1, Shards)],
     {ok, {SupFlags, Children}}.
 
 %%================================================================================
@@ -103,6 +104,14 @@ replicant_worker(Shard) ->
 status_mgr() ->
     #{ id => ekka_rlog_status
      , start => {ekka_rlog_status, start_link, []}
+     , restart => permanent
+     , shutdown => 5000
+     , type => worker
+     }.
+
+core_node_lb() ->
+    #{ id => ekka_rlog_lb
+     , start => {ekka_rlog_lb, start_link, []}
      , restart => permanent
      , shutdown => 5000
      , type => worker

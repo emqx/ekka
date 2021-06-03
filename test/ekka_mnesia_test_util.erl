@@ -26,7 +26,7 @@ stabilize(Timeout) ->
     case ?block_until(#{?snk_meta := #{domain := [ekka, rlog|_]}}, Timeout, 0) of
         timeout -> ok;
         {ok, Evt} ->
-            %%ct:pal("Restart waiting for cluster stabilize sue to ~p", [Evt]),
+            ct:pal("Restart waiting for cluster stabilize sue to ~p", [Evt]),
             stabilize(Timeout)
     end.
 

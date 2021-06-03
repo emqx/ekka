@@ -54,9 +54,9 @@
         ]).
 
 %% Database API
--export([ ro_transaction/1
+-export([ ro_transaction/2
+        , transaction/3
         , transaction/2
-        , transaction/1
         , clear_table/1
 
         , dirty_write/2
@@ -371,26 +371,47 @@ do_wait_for_tables(Tables) ->
 %% Transaction API
 %%--------------------------------------------------------------------
 
--spec ro_transaction(fun(() -> A)) -> t_result(A).
-ro_transaction(Fun) ->
-    %% TODO:
-    %% case ekka_rlog:role() of
-    %%     core      -> ok;
-    %%     replicant -> _ = ekka_rlog_status:upstream() % assert that replica is fully up
-    %% end,
-    mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]).
+-spec ro_transaction(ekka_rlog:shard(), fun(() -> A)) -> t_result(A).
+ro_transaction(Shard, Fun) ->
+    case ekka_rlog:role() of
+        core ->
+            mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]);
+        replicant ->
+            ?tp(ekka_ro_transaction, #{role => replicant}),
+            case ekka_rlog_status:upstream(Shard) of
+                {ok, AgentPid} ->
+                    Ret = mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]),
+                    %% Now we check that the agent pid is still the
+                    %% same, meaning the replicant node haven't gone
+                    %% through bootstrapping process while running the
+                    %% transaction and it didn't have a chance to
+                    %% observe the stale writes.
+                    case ekka_rlog_status:upstream(Shard) of
+                        {ok, AgentPid} ->
+                            Ret;
+                        _ ->
+                            %% Restart transaction. If the shard is
+                            %% still disconnected, it will become an
+                            %% RPC call to a core node:
+                            ro_transaction(Shard, Fun)
+                    end;
+                disconnected ->
+                    ro_trans_rpc(Shard, Fun)
+            end
+    end.
 
--spec transaction(fun((...) -> A), list()) -> t_result(A).
-transaction(Fun, Args) ->
-    ekka_rlog:call_backend_rw_trans(transaction, [Fun, Args]).
+-spec transaction(ekka_rlog:shard(), fun((...) -> A), list()) -> t_result(A).
+transaction(Shard, Fun, Args) ->
+    ekka_rlog:call_backend_rw_trans(Shard, transaction, [Fun, Args]).
 
--spec transaction(fun(() -> A)) -> t_result(A).
-transaction(Fun) ->
-    transaction(fun erlang:apply/2, [Fun, []]).
+-spec transaction(ekka_rlog:shard(), fun(() -> A)) -> t_result(A).
+transaction(Shard, Fun) ->
+    transaction(Shard, fun erlang:apply/2, [Fun, []]).
 
 -spec clear_table(ekka_rlog_lib:table()) -> t_result(ok).
 clear_table(Table) ->
-    ekka_rlog:call_backend_rw_trans(clear_table, [Table]).
+    Shard = ekka_rlog_config:shard_rlookup(Table),
+    ekka_rlog:call_backend_rw_trans(Shard, clear_table, [Table]).
 
 -spec dirty_write(tuple()) -> ok.
 dirty_write(Record) ->
@@ -411,3 +432,27 @@ dirty_delete({Tab, Key}) ->
 -spec dirty_delete_object(ekka_rlog_lib:table(), term()) -> ok.
 dirty_delete_object(Tab, Key) ->
     ekka_rlog:call_backend_rw_dirty(dirty_delete_object, Tab, [Key]).
+
+%%================================================================================
+%% Internal functions
+%%================================================================================
+
+-spec ro_trans_rpc(ekka_rlog:shard(), fun(() -> A)) -> t_result(A).
+ro_trans_rpc(Shard, Fun) ->
+    {ok, Core} = ekka_rlog_status:get_core_node(Shard, 5000),
+    case ekka_rlog_lib:rpc_call(Core, ?MODULE, ro_transaction, [Shard, Fun]) of
+        {badrpc, Err} ->
+            ?tp(error, ro_trans_badrpc,
+                #{ core   => Core
+                 , reason => Err
+                 }),
+            error(badrpc);
+        {badtcp, Err} ->
+            ?tp(error, ro_trans_badtcp,
+                #{ core   => Core
+                 , reason => Err
+                 }),
+            error(badrpc);
+        Ans ->
+            Ans
+    end.
