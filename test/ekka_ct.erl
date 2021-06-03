@@ -90,6 +90,7 @@ start_cluster(ekka_async, Specs) ->
 
 teardown_cluster(Specs) ->
     Nodes = [I || #{node := I} <- Specs],
+    [rpc:call(I, ekka, stop, []) || I <- Nodes],
     [rpc:call(I, mnesia, stop, []) || I <- Nodes],
     [ok = stop_slave(I) || I <- Nodes],
     ok.
