@@ -106,8 +106,8 @@ handle_info(_Info, St) ->
 
 handle_continue(post_init, {Parent, Shard}) ->
     #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
-    AgentSup = start_sibling(Parent, agent_sup, start_link_agent_sup, Shard),
-    BootstrapperSup = start_sibling(Parent, bootstrapper_sup, start_link_bootstrapper_sup, Shard),
+    AgentSup = ekka_rlog_shard_sup:start_agent_sup(Parent, Shard),
+    BootstrapperSup = ekka_rlog_shard_sup:start_bootstrapper_sup(Parent, Shard),
     mnesia:wait_for_tables([Shard|Tables], 100000),
     ?tp(notice, "Shard fully up",
         #{ node  => node()
@@ -172,20 +172,6 @@ maybe_start_child(Supervisor, Args) ->
         {ok, Pid, _} -> Pid;
         {error, {already_started, Pid}} -> Pid
     end.
-
--spec start_sibling(pid(), atom(), atom(), ekka_rlog:shard()) -> pid().
-start_sibling(Parent, Id, StartFun, Shard) ->
-    {ok, Pid} = supervisor:start_child(Parent, simple_sup(Id, StartFun, Shard)),
-    Pid.
-
--spec simple_sup(atom(), atom(), ekka_rlog:shard()) -> supervisor:child_spec().
-simple_sup(Id, StartFun, Shard) ->
-    #{ id => Id
-     , start => {ekka_rlog_shard_sup, StartFun, [Shard]}
-     , restart => permanent
-     , shutdown => infinity
-     , type => supervisor
-     }.
 
 %%================================================================================
 %% Internal exports (gen_rpc)

@@ -21,10 +21,10 @@
 -behaviour(supervisor).
 
 %% API:
--export([start_link/1, start_link_agent_sup/1, start_link_bootstrapper_sup/1]).
+-export([start_link/1, start_agent_sup/2, start_bootstrapper_sup/2]).
 
-%% supervisor callbacks:
--export([init/1]).
+%% supervisor callbacks & external exports:
+-export([init/1, start_link/2]).
 
 %%================================================================================
 %% API funcions
@@ -33,20 +33,20 @@
 start_link(Shard) ->
     supervisor:start_link(?MODULE, [shard, Shard]).
 
-start_link_agent_sup(Shard) ->
-    supervisor:start_link(?MODULE, [agent, Shard]).
+start_agent_sup(SupPid, Shard) ->
+    start_sibling(SupPid, agent, Shard).
 
-start_link_bootstrapper_sup(Shard) ->
-    supervisor:start_link(?MODULE, [bootstrapper, Shard]).
+start_bootstrapper_sup(SupPid, Shard) ->
+    start_sibling(SupPid, bootstrapper, Shard).
 
 %%================================================================================
 %% Supervisor callbacks
 %%================================================================================
 
 init([shard, Shard]) ->
-    SupFlags = #{ strategy => one_for_all
+    SupFlags = #{ strategy  => one_for_all
                 , intensity => 0
-                , period => 1
+                , period    => 1
                 },
     Children = [server(ekka_rlog_server, Shard)],
     {ok, {SupFlags, Children}};
@@ -54,6 +54,13 @@ init([agent, Shard]) ->
     init_simple_sup(ekka_rlog_agent, Shard);
 init([bootstrapper, Shard]) ->
     init_simple_sup(ekka_rlog_bootstrapper, Shard).
+
+%%================================================================================
+%% Internal exports
+%%================================================================================
+
+start_link(Type, Shard) ->
+    supervisor:start_link(?MODULE, [Type, Shard]).
 
 %%================================================================================
 %% Internal functions
@@ -78,3 +85,17 @@ init_simple_sup(Module, Shard) ->
                  , type => worker
                  },
     {ok, {SupFlags, [ChildSpec]}}.
+
+-spec start_sibling(pid(), agent | bootstrapper, ekka_rlog:shard()) -> pid().
+start_sibling(Parent, Id, Shard) ->
+    {ok, Pid} = supervisor:start_child(Parent, simple_sup(Id, Shard)),
+    Pid.
+
+-spec simple_sup(agent | bootstrapper, ekka_rlog:shard()) -> supervisor:child_spec().
+simple_sup(Id, Shard) ->
+    #{ id => Id
+     , start => {?MODULE, start_link, [Id, Shard]}
+     , restart => permanent
+     , shutdown => infinity
+     , type => supervisor
+     }.
