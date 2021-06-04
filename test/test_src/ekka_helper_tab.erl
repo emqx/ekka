@@ -43,22 +43,23 @@ mnesia(copy) ->
     ok = ekka_mnesia:copy_table(?TABLE, ram_copies).
 
 wait_full_replication(Cluster) ->
-    wait_full_replication(Cluster, 100).
+    wait_full_replication(Cluster, infinity).
 
-%% Emit a special transaction and wait until all replicants replicate it.
+%% Emit a special transaction and wait until all replicants consume it.
 wait_full_replication(Cluster, Timeout) ->
     [CoreNode|_] = [N || #{node := N, role := core} <- Cluster],
-    emit_last_transaction(CoreNode),
+    Ref = make_ref(),
+    emit_last_transaction(CoreNode, Ref),
     [{ok, _} = ?block_until(#{ ?snk_kind := rlog_import_trans
-                             , ops       := [{{?TABLE, '$seal'}, #?TABLE{key = '$seal', val = '$last_trans'}, write}]
+                             , ops       := [{{?TABLE, '$seal'}, #?TABLE{key = '$seal', val = Ref}, write}]
                              , ?snk_meta := #{node := N}
                              }, Timeout)
      || #{node := N, role := replicant} <- Cluster],
     ok.
 
 %% We use this transaction to indicate the end of the testcase.
-emit_last_transaction(Node) ->
+emit_last_transaction(Node, Ref) ->
     Fun = fun() ->
-                  mnesia:write(#?TABLE{key = '$seal', val = '$last_trans'})
+                  mnesia:write(#?TABLE{key = '$seal', val = Ref})
           end,
     {atomic, ok} = rpc:call(Node, ekka_mnesia, transaction, [test_shard, Fun]).

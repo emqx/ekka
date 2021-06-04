@@ -24,8 +24,8 @@
 %% Types
 %%================================================================================
 
--type key() :: proper:range(1, 20).
--type value() :: proper:range(1, 50).
+-type key() :: non_neg_integer().
+-type value() :: non_neg_integer().
 
 -record(s,
         { bag = []  :: [{key, value()}]
@@ -38,7 +38,7 @@
 
 t_import_transactions(Config0) when is_list(Config0) ->
     Config = [{proper, #{max_size => 300,
-                         numtests => 100,
+                         numtests => 50,
                          timeout  => 100000
                         }} | Config0],
     ?run_prop(Config, prop()).
@@ -68,7 +68,7 @@ prop() ->
 %%================================================================================
 
 table_key() ->
-    non_neg_integer().
+    range(1, 100).
 
 value() ->
     non_neg_integer().
