@@ -203,10 +203,16 @@ do_trans_verify(Delay) ->
     ekka_mnesia:ro_transaction(
       test_shard,
       fun() ->
-              Sum = sum_keys(),
-              timer:sleep(Delay),
-              [#test_tab{val = Expected}] = mnesia:read(test_tab, sum),
-              Sum == Expected
+              case mnesia:all_keys(test_tab) of
+                  [] ->
+                      %% The replica hasn't got any data yet, ignore.
+                      timer:sleep(Delay);
+                  _ ->
+                      Sum = sum_keys(),
+                      timer:sleep(Delay),
+                      [#test_tab{val = Expected}] = mnesia:read(test_tab, sum),
+                      Sum == Expected
+              end
       end).
 
 sum_keys() ->
