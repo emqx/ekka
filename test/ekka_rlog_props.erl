@@ -16,15 +16,28 @@
 
 -module(ekka_rlog_props).
 
--export([ replicant_bootstrap_stages/2
+-export([ replicant_no_restarts/1
+        , replicant_bootstrap_stages/2
         , all_batches_received/1
         , counter_import_check/3
         ]).
 
 -include_lib("snabbkaffe/include/test_macros.hrl").
 -include_lib("stdlib/include/assert.hrl").
+-include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+%%================================================================================
+%% Checks
+%%================================================================================
+
+%% Check that each replicant didn't restart
+replicant_no_restarts(Trace) ->
+    StartEvents = ?projection([node, shard], ?of_kind(rlog_replica_start, Trace)),
+    ?assertEqual(length(StartEvents), length(lists:usort(StartEvents))),
+    true.
+
+%% Check that replicant FSM goes through all the stages in the right sequence
 replicant_bootstrap_stages(Node, Trace0) ->
     Trace = ?of_domain([ekka, rlog, replica|_], Trace0),
     ?causality( #{?snk_kind := state_change, to := disconnected, ?snk_meta := #{pid := _Pid}}
@@ -40,6 +53,7 @@ replicant_bootstrap_stages(Node, Trace0) ->
               , Trace
               ).
 
+%% Check that the replicant processed all batches sent by its agent
 all_batches_received(Trace0) ->
     Trace = ?of_domain([ekka, rlog|_], Trace0),
     ?strict_causality(
@@ -48,6 +62,8 @@ all_batches_received(Trace0) ->
                                                          K =:= rlog_replica_store_trans
       , Trace).
 
+%% Check that transactions are imported in an order that guarantees
+%% that the end result is consistent.
 -spec counter_import_check(term(), node(), snabbkaffe:trace()) -> integer().
 counter_import_check(CounterKey, Node, Trace0) ->
     Trace1 = ?of_node(Node, Trace0),
@@ -63,13 +79,6 @@ counter_import_check(CounterKey, Node, Trace0) ->
       0,
       Sequences).
 
-do_counter_import_check(CounterKey, Trace) ->
-    Writes = [element(3, Rec) || #{ ?snk_kind := rlog_import_trans
-                                  , ops := [{{test_tab, K}, Rec, write}]
-                                  } <- Trace, K =:= CounterKey],
-    ?assert(check_transaction_replay_sequence(Writes)),
-    length(Writes).
-
 %% Check sequence of numbers. It should be increasing by no more than
 %% 1, with possible restarts from an earler point. If restart
 %% happened, then the last element of the sequence must be greater
@@ -78,6 +87,17 @@ check_transaction_replay_sequence([]) ->
     true;
 check_transaction_replay_sequence([First|Rest]) ->
     check_transaction_replay_sequence(First, First, Rest).
+
+%%================================================================================
+%% Internal functions
+%%================================================================================
+
+do_counter_import_check(CounterKey, Trace) ->
+    Writes = [element(3, Rec) || #{ ?snk_kind := rlog_import_trans
+                                  , ops := [{{test_tab, K}, Rec, write}]
+                                  } <- Trace, K =:= CounterKey],
+    ?assert(check_transaction_replay_sequence(Writes)),
+    length(Writes).
 
 check_transaction_replay_sequence(Max, LastElem, []) ->
     LastElem >= Max orelse

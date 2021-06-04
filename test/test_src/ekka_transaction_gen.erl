@@ -20,6 +20,7 @@
 -boot_mnesia({mnesia, [boot]}).
 -copy_mnesia({mnesia, [copy]}).
 -rlog_shard({test_shard, test_tab}).
+-rlog_shard({test_shard, test_bag}).
 
 -export([ init/0
         , delete/1
@@ -35,14 +36,22 @@
 
 -record(test_tab, {key, val}).
 
+-record(test_bag, {key, val}).
+
 mnesia(boot) ->
     ok = ekka_mnesia:create_table(test_tab, [{type, ordered_set},
                                              {ram_copies, [node()]},
                                              {record_name, test_tab},
                                              {attributes, record_info(fields, test_tab)}
+                                            ]),
+    ok = ekka_mnesia:create_table(test_bag, [{type, bag},
+                                             {ram_copies, [node()]},
+                                             {record_name, test_bag},
+                                             {attributes, record_info(fields, test_bag)}
                                             ]);
 mnesia(copy) ->
-    ok = ekka_mnesia:copy_table(test_tab, ram_copies).
+    ok = ekka_mnesia:copy_table(test_tab, ram_copies),
+    ok = ekka_mnesia:copy_table(test_bag, ram_copies).
 
 verify_trans_sum(N, Delay) ->
     mnesia:wait_for_tables([test_tab], 10000),
@@ -194,10 +203,16 @@ do_trans_verify(Delay) ->
     ekka_mnesia:ro_transaction(
       test_shard,
       fun() ->
-              Sum = sum_keys(),
-              timer:sleep(Delay),
-              [#test_tab{val = Expected}] = mnesia:read(test_tab, sum),
-              Sum == Expected
+              case mnesia:all_keys(test_tab) of
+                  [] ->
+                      %% The replica hasn't got any data yet, ignore.
+                      timer:sleep(Delay);
+                  _ ->
+                      Sum = sum_keys(),
+                      timer:sleep(Delay),
+                      [#test_tab{val = Expected}] = mnesia:read(test_tab, sum),
+                      Sum == Expected
+              end
       end).
 
 sum_keys() ->

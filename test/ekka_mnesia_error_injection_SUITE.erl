@@ -79,7 +79,7 @@ t_rand_error_injection(_) ->
                         , snabbkaffe_nemesis:random_crash(0.1)
                         ),
            ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 300, 100]),
-           ekka_mnesia_test_util:stabilize(5000),
+           ekka_mnesia_test_util:wait_full_replication(Cluster),
            ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
            N3
        after
