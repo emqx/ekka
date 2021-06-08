@@ -76,10 +76,10 @@ t_rand_error_injection(_) ->
            ekka_mnesia_test_util:stabilize(1000),
            %% Everything in ekka RLOG will crash
            ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog|_]}}
-                        , snabbkaffe_nemesis:random_crash(0.1)
+                        , snabbkaffe_nemesis:random_crash(0.01)
                         ),
            ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 300, 100]),
-           ekka_mnesia_test_util:wait_full_replication(Cluster),
+           ekka_mnesia_test_util:stabilize(5100),
            ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
            N3
        after
@@ -87,8 +87,7 @@ t_rand_error_injection(_) ->
        end,
        fun(N3, Trace) ->
                ?assert(ekka_rlog_props:replicant_bootstrap_stages(N3, Trace)),
-               ?assert(ekka_rlog_props:counter_import_check(CounterKey, N3, Trace) > 0),
-               ?assert(length(?of_kind(snabbkaffe_crash, Trace)) > 1)
+               ?assert(ekka_rlog_props:counter_import_check(CounterKey, N3, Trace) > 0)
        end).
 
 %% This testcase verifies verifies various modes of ekka_mnesia:ro_transaction
