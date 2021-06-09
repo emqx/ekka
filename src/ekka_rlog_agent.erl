@@ -92,7 +92,7 @@ init({Shard, Subscriber, ReplaySince}) ->
 -spec handle_event(gen_statem:event_type(), _EventContent, state(), data()) ->
           gen_statem:event_handler_result(state()).
 %% Events specific to `?normal' state:
-%% TODO: Shouldn't we handle the other mnesia events here (i.e., delete and delete_object)?
+%% Note that we only expect writes here.
 handle_event(info, {mnesia_table_event, {write, Record, ActivityId}}, ?normal, D) ->
     handle_mnesia_event(Record, ActivityId, D);
 %% Common actions:
