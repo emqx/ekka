@@ -34,7 +34,7 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
-init_per_testcase(TestCase, Config) ->
+init_per_testcase(_TestCase, Config) ->
     Config.
 
 end_per_testcase(TestCase, Config) ->
@@ -85,7 +85,8 @@ t_cluster_status(_) ->
     Cluster = ekka_ct:cluster([core, core], []),
     try
         [N0, N1] = ekka_ct:start_cluster(ekka, Cluster),
-        running = rpc:call(N0, ekka_mnesia, cluster_status, [N1])
+        running = rpc:call(N0, ekka_mnesia, cluster_status, [N1]),
+        running = rpc:call(N1, ekka_mnesia, cluster_status, [N0])
     after
         ok = ekka_ct:teardown_cluster(Cluster)
     end.
@@ -101,6 +102,17 @@ t_remove_from_cluster(_) ->
             [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(all)),
             [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(running)),
             [] = ekka_mnesia:cluster_nodes(stopped),
+            ok
+          end),
+        ekka_ct:run_on(N1, fun() ->
+            #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
+            [N0, N1] = lists:sort(ekka_mnesia:running_nodes()),
+            [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(all)),
+            [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(running)),
+            [] = ekka_mnesia:cluster_nodes(stopped),
+            ok
+          end),
+        ekka_ct:run_on(N0, fun() ->
             ok = ekka_mnesia:remove_from_cluster(N1),
             #{running_nodes := [N0]} = ekka_mnesia:cluster_info(),
             [N0] = ekka_mnesia:running_nodes(),
@@ -144,8 +156,10 @@ t_rlog_smoke_test(_) ->
            ekka_mnesia_test_util:stabilize(1000),
            ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
            %% Create a delete transaction, to see if deletes are propagated too:
-           {atomic, _} = rpc:call(N2, ekka_transaction_gen, delete, [1]),
+           K = rpc:call(N2, mnesia, dirty_first, [test_tab]),
+           {atomic, _} = rpc:call(N2, ekka_transaction_gen, delete, [K]),
            ekka_mnesia_test_util:stabilize(1000),
+           [] = rpc:call(N2, mnesia, dirty_read, [test_tab, K]),
            ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
            ekka_ct:stop_slave(N3),
            Nodes
