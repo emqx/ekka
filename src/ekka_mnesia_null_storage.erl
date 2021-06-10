@@ -14,9 +14,12 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
-%% @doc This module implements a "/dev/null" storage for mnesia. It's
-%% used to "store" rlogs.
-
+%% @doc This module implements a "/dev/null" storage for mnesia: it
+%% discards any data that is written into it. This is useful for
+%% emitting events in a transactional manner without worriying about
+%% cleanup.
+%%
+%% Ekka uses it to "store" transaction logs.
 -module(ekka_mnesia_null_storage).
 
 -include_lib("snabbkaffe/include/trace.hrl").
@@ -61,6 +64,10 @@
          validate_record/6
         ]).
 
+%%================================================================================
+%% API
+%%================================================================================
+
 register() ->
     register(null_copies).
 
@@ -74,6 +81,10 @@ register(Alias) ->
         {aborted, Reason} ->
             {error, Reason}
     end.
+
+%%================================================================================
+%% Mnesia storage callbacks
+%%================================================================================
 
 insert(Alias, Tab, Val) ->
     ?tp(ekka_rlog_insert_val,
@@ -195,6 +206,10 @@ receive_data(_Data, _Alias, _Tab, _Sender, State) ->
 
 receive_done(_Alias, _Tab, _Sender, _State) ->
     ok.
+
+%%================================================================================
+%% Internal functions
+%%================================================================================
 
 eot(_) ->
     '$end_of_table'.

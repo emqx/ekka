@@ -6,7 +6,10 @@
    [ekka_sup,
     ekka_membership,
     ekka_cluster_sup,
-    ekka_node_monitor
+    ekka_node_monitor,
+    ekka_rlog_server,
+    ekka_rlog_lb,
+    ekka_rlog_sup
    ]},
   {applications,
    [kernel,
@@ -14,7 +17,9 @@
     mnesia,
     inets,
     eetcd,
-    gen_rpc
+    gen_rpc,
+    replayq,
+    snabbkaffe
    ]},
   {modules, []},
   {licenses, ["Apache 2.0"]},
