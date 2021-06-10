@@ -72,6 +72,18 @@ start_link_client(Shard, RemoteNode, Parent) ->
     gen_server:start_link(?MODULE, {client, Shard, RemoteNode, Parent}, []).
 
 %%================================================================================
+%% Internal exports (gen_rpc)
+%%================================================================================
+
+-spec do_push_batch(pid(), batch()) -> ok.
+do_push_batch(Pid, Batch) ->
+    gen_server:call(Pid, {batch, Batch}, infinity).
+
+-spec do_complete(pid(), pid(), ekka_rlog_server:checkpoint()) -> ok.
+do_complete(Client, Server, Snapshot) ->
+    gen_server:call(Client, {complete, Server, Snapshot}, infinity).
+
+%%================================================================================
 %% gen_server callbacks
 %%================================================================================
 
@@ -198,15 +210,3 @@ prepare_batch(Table, Keys) ->
                , []
                , Keys
                ).
-
-%%================================================================================
-%% Internal exports (gen_rpc)
-%%================================================================================
-
--spec do_push_batch(pid(), batch()) -> ok.
-do_push_batch(Pid, Batch) ->
-    gen_server:call(Pid, {batch, Batch}, infinity).
-
--spec do_complete(pid(), pid(), ekka_rlog_server:checkpoint()) -> ok.
-do_complete(Client, Server, Snapshot) ->
-    gen_server:call(Client, {complete, Server, Snapshot}, infinity).

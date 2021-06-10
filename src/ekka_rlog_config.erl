@@ -22,6 +22,7 @@
         , role/0
         , backend/0
         , rpc_module/0
+        , strict_mode/0
 
           %% Shard config:
         , shard_rlookup/1
@@ -77,11 +78,17 @@ role() ->
 rpc_module() ->
     persistent_term:get(?ekka(rlog_rpc_module), gen_rpc).
 
+%% Flag that enables additional verification of transactions
+-spec strict_mode() -> boolean().
+strict_mode() ->
+    persistent_term:get(?ekka(strict_mode), false).
+
 -spec init() -> ok.
 init() ->
     copy_from_env(rlog_rpc_module),
     copy_from_env(db_backend),
     copy_from_env(node_role),
+    copy_from_env(strict_mode),
     load_shard_config().
 
 %%================================================================================

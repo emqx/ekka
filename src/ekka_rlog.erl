@@ -25,7 +25,6 @@
         , role/1
         , backend/0
 
-        , ensure_shard/1
         , core_nodes/0
         , subscribe/4
         , wait_for_shards/2
@@ -101,7 +100,7 @@ core_nodes() ->
 wait_for_shards(Shards, Timeout) ->
     case ekka_rlog_config:backend() of
         rlog ->
-            [ok = ensure_shard(I) || I <- Shards],
+            lists:foreach(fun ensure_shard/1, Shards),
             case role() of
                 core ->
                     ok;
@@ -124,7 +123,8 @@ ensure_shard(Shard) ->
     case ekka_rlog_sup:start_shard(Shard) of
         {ok, _}                       -> ok;
         {error, already_present}      -> ok;
-        {error, {already_started, _}} -> ok
+        {error, {already_started, _}} -> ok;
+        Err                           -> error({failed_to_create_shard, Shard, Err})
     end.
 
 -spec subscribe(ekka_rlog:shard(), node(), pid(), ekka_rlog_server:checkpoint()) ->
@@ -218,15 +218,14 @@ ensure_no_transaction() ->
         _         -> error(nested_transaction)
     end.
 
--ifdef(TEST).
-%% In test mode we verify that the transaction doesn't try to update
-%% tables that are not included in the shard.
 ensure_no_ops_outside_shard(TxStore, Shard) ->
+    case ekka_rlog_config:strict_mode() of
+        true  -> do_ensure_no_ops_outside_shard(TxStore, Shard);
+        false -> ok
+    end.
+
+do_ensure_no_ops_outside_shard(TxStore, Shard) ->
     Shards = ekka_rlog_config:shards(),
     Ops = lists:append([dig_ops_for_shard(TxStore, Shard) || Shard <- Shards -- [Shard]]),
     [] = Ops, % Asset
     ok.
--else.
-ensure_no_ops_outside_shard(_TxStore, _Shard) ->
-    ok.
--endif.
