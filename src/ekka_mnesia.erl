@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2021 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -17,6 +17,9 @@
 -module(ekka_mnesia).
 
 -include("ekka.hrl").
+-include_lib("kernel/include/logger.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
+
 
 %% Start and stop mnesia
 -export([ start/0
@@ -50,7 +53,30 @@
         , copy_table/2
         ]).
 
+%% Database API
+-export([ ro_transaction/2
+        , transaction/3
+        , transaction/2
+        , clear_table/1
+
+        , dirty_write/2
+        , dirty_write/1
+
+        , dirty_delete/2
+        , dirty_delete/1
+
+        , dirty_delete_object/2
+        ]).
+
+-export_type([ t_result/1
+             , backend/0
+             ]).
+
 -deprecated({copy_table, 1, next_major_release}).
+
+-type t_result(Res) :: {'atomic', Res} | {'aborted', Reason::term()}.
+
+-type backend() :: rlog | mnesia.
 
 %%--------------------------------------------------------------------
 %% Start and init mnesia
@@ -62,6 +88,8 @@ start() ->
     ensure_ok(ensure_data_dir()),
     ensure_ok(init_schema()),
     ok = mnesia:start(),
+    {ok, _} = ekka_mnesia_null_storage:register(),
+    ok = ekka_rlog:init(),
     init_tables(),
     wait_for(tables).
 
@@ -79,7 +107,9 @@ data_dir() -> mnesia:system_info(directory).
 %% @doc Ensure mnesia started
 -spec(ensure_started() -> ok | {error, any()}).
 ensure_started() ->
-    ok = mnesia:start(), wait_for(start).
+    ok = mnesia:start(),
+    {ok, _} = ekka_mnesia_null_storage:register(),
+    wait_for(start).
 
 %% @doc Ensure mnesia stopped
 -spec(ensure_stopped() -> ok | {error, any()}).
@@ -89,17 +119,29 @@ ensure_stopped() ->
 %% @private
 %% @doc Init mnesia schema or tables.
 init_schema() ->
-    case mnesia:system_info(extra_db_nodes) of
-        []    -> mnesia:create_schema([node()]);
-        [_|_] -> ok
+    IsAlone = case mnesia:system_info(extra_db_nodes) of
+                  []    -> true;
+                  [_|_] -> false
+              end,
+    case (ekka_rlog:role() =:= replicant) orelse IsAlone of
+        true ->
+            mnesia:create_schema([node()]);
+        false ->
+            ok
     end.
 
 %% @private
 %% @doc Init mnesia tables.
 init_tables() ->
-    case mnesia:system_info(extra_db_nodes) of
-        []    -> create_tables();
-        [_|_] -> copy_tables()
+    IsAlone = case mnesia:system_info(extra_db_nodes) of
+                  []    -> true;
+                  [_|_] -> false
+              end,
+    case (ekka_rlog:role() =:= replicant) orelse IsAlone of
+        true ->
+            create_tables();
+        false ->
+            copy_tables()
     end.
 
 %% @doc Create mnesia tables.
@@ -120,9 +162,14 @@ create_table(Name, TabDef) ->
 copy_table(Name) ->
     copy_table(Name, ram_copies).
 
--spec(copy_table(Name:: atom(), ram_copies | disc_copies) -> ok).
+-spec(copy_table(Name:: atom(), ram_copies | disc_copies | null_copies) -> ok).
 copy_table(Name, RamOrDisc) ->
-    ensure_tab(mnesia:add_table_copy(Name, node(), RamOrDisc)).
+    case ekka_rlog:role() of
+        core ->
+            ensure_tab(mnesia:add_table_copy(Name, node(), RamOrDisc));
+        replicant ->
+            ?LOG(warning, "Ignoring illegal attempt to create a table copy ~p on replicant node ~p", [Name, node()])
+    end.
 
 %% @doc Copy schema.
 copy_schema(Node) ->
@@ -152,16 +199,21 @@ del_schema_copy(Node) ->
 %% @doc Join the mnesia cluster
 -spec(join_cluster(node()) -> ok).
 join_cluster(Node) when Node =/= node() ->
-    %% Stop mnesia and delete schema first
-    ensure_ok(ensure_stopped()),
-    ensure_ok(delete_schema()),
-    %% Start mnesia and cluster to node
-    ensure_ok(ensure_started()),
-    ensure_ok(connect(Node)),
-    ensure_ok(copy_schema(node())),
-    %% Copy tables
-    copy_tables(),
-    ensure_ok(wait_for(tables)).
+    case {ekka_rlog:role(), ekka_rlog:role(Node)} of
+        {core, core} ->
+            %% Stop mnesia and delete schema first
+            ensure_ok(ensure_stopped()),
+            ensure_ok(delete_schema()),
+            %% Start mnesia and cluster to node
+            ensure_ok(ensure_started()),
+            ensure_ok(connect(Node)),
+            ensure_ok(copy_schema(node())),
+            %% Copy tables
+            copy_tables(),
+            ensure_ok(wait_for(tables));
+        _ ->
+            ok
+    end.
 
 %% @doc Cluster Info
 -spec(cluster_info() -> map()).
@@ -295,7 +347,6 @@ wait_for(start) ->
         stopping -> {error, mnesia_unexpectedly_stopping};
         starting -> timer:sleep(1000), wait_for(start)
     end;
-
 wait_for(stop) ->
     case mnesia:system_info(is_running) of
         no       -> ok;
@@ -303,7 +354,6 @@ wait_for(stop) ->
         starting -> {error, mnesia_unexpectedly_starting};
         stopping -> timer:sleep(1000), wait_for(stop)
     end;
-
 wait_for(tables) ->
     Tables = mnesia:system_info(local_tables),
     do_wait_for_tables(Tables).
@@ -315,4 +365,94 @@ do_wait_for_tables(Tables) ->
         {timeout, BadTables} ->
             logger:warning("~p: still waiting for table(s): ~p", [?MODULE, BadTables]),
             do_wait_for_tables(BadTables)
+    end.
+
+%%--------------------------------------------------------------------
+%% Transaction API
+%%--------------------------------------------------------------------
+
+-spec ro_transaction(ekka_rlog:shard(), fun(() -> A)) -> t_result(A).
+ro_transaction(Shard, Fun) ->
+    case ekka_rlog:role() of
+        core ->
+            mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]);
+        replicant ->
+            ?tp(ekka_ro_transaction, #{role => replicant}),
+            case ekka_rlog_status:upstream(Shard) of
+                {ok, AgentPid} ->
+                    Ret = mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]),
+                    %% Now we check that the agent pid is still the
+                    %% same, meaning the replicant node haven't gone
+                    %% through bootstrapping process while running the
+                    %% transaction and it didn't have a chance to
+                    %% observe the stale writes.
+                    case ekka_rlog_status:upstream(Shard) of
+                        {ok, AgentPid} ->
+                            Ret;
+                        _ ->
+                            %% Restart transaction. If the shard is
+                            %% still disconnected, it will become an
+                            %% RPC call to a core node:
+                            ro_transaction(Shard, Fun)
+                    end;
+                disconnected ->
+                    ro_trans_rpc(Shard, Fun)
+            end
+    end.
+
+-spec transaction(ekka_rlog:shard(), fun((...) -> A), list()) -> t_result(A).
+transaction(Shard, Fun, Args) ->
+    ekka_rlog:call_backend_rw_trans(Shard, transaction, [Fun, Args]).
+
+-spec transaction(ekka_rlog:shard(), fun(() -> A)) -> t_result(A).
+transaction(Shard, Fun) ->
+    transaction(Shard, fun erlang:apply/2, [Fun, []]).
+
+-spec clear_table(ekka_rlog_lib:table()) -> t_result(ok).
+clear_table(Table) ->
+    Shard = ekka_rlog_config:shard_rlookup(Table),
+    ekka_rlog:call_backend_rw_trans(Shard, clear_table, [Table]).
+
+-spec dirty_write(tuple()) -> ok.
+dirty_write(Record) ->
+    dirty_write(element(1, Record), Record).
+
+-spec dirty_write(ekka_rlog_lib:table(), tuple()) -> ok.
+dirty_write(Tab, Record) ->
+    ekka_rlog:call_backend_rw_dirty(dirty_write, Tab, [Record]).
+
+-spec dirty_delete(ekka_rlog_lib:table(), term()) -> ok.
+dirty_delete(Tab, Key) ->
+    ekka_rlog:call_backend_rw_dirty(dirty_delete, Tab, [Key]).
+
+-spec dirty_delete({ekka_rlog_lib:table(), term()}) -> ok.
+dirty_delete({Tab, Key}) ->
+    dirty_delete(Tab, Key).
+
+-spec dirty_delete_object(ekka_rlog_lib:table(), term()) -> ok.
+dirty_delete_object(Tab, Key) ->
+    ekka_rlog:call_backend_rw_dirty(dirty_delete_object, Tab, [Key]).
+
+%%================================================================================
+%% Internal functions
+%%================================================================================
+
+-spec ro_trans_rpc(ekka_rlog:shard(), fun(() -> A)) -> t_result(A).
+ro_trans_rpc(Shard, Fun) ->
+    {ok, Core} = ekka_rlog_status:get_core_node(Shard, 5000),
+    case ekka_rlog_lib:rpc_call(Core, ?MODULE, ro_transaction, [Shard, Fun]) of
+        {badrpc, Err} ->
+            ?tp(error, ro_trans_badrpc,
+                #{ core   => Core
+                 , reason => Err
+                 }),
+            error(badrpc);
+        {badtcp, Err} ->
+            ?tp(error, ro_trans_badtcp,
+                #{ core   => Core
+                 , reason => Err
+                 }),
+            error(badrpc);
+        Ans ->
+            Ans
     end.

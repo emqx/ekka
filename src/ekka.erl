@@ -90,6 +90,7 @@
 
 -spec(start() -> ok).
 start() ->
+    application:load(ekka),
     case ekka_mnesia:start() of
         ok -> ok;
         {error, {timeout, Tables}} ->

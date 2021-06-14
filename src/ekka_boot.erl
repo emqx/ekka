@@ -59,4 +59,3 @@ ignore_lib_apps(Apps) ->
                test_server, compiler, debugger, eunit, et,
                wx],
     [App || App = {Name, _, _} <- Apps, not lists:member(Name, LibApps)].
-

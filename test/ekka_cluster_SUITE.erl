@@ -26,17 +26,17 @@ all() -> ekka_ct:all(?MODULE).
 init_per_suite(Config) ->
     ok = application:set_env(ekka, cluster_name, ekka),
     ok = application:set_env(ekka, cluster_discovery, {manual, []}),
-    ok = ekka:start(),
     Config.
 
 end_per_suite(_Config) ->
-    application:stop(ekka),
-    ekka_mnesia:ensure_stopped().
+    ok.
 
 init_per_testcase(_TestCase, Config) ->
+    ok = ekka:start(),
     Config.
 
-end_per_testcase(_TestCase, Config) ->
+end_per_testcase(TestCase, Config) ->
+    ekka_ct:cleanup(TestCase),
     Config.
 
 t_join_leave(_) ->
@@ -112,4 +112,3 @@ t_status(_) ->
     after
         ok = ekka_ct:stop_slave(N1)
     end.
-

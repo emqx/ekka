@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2021 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -48,4 +48,3 @@ maybe_clean(#member{node = Node, ltime = LTime}, Expiry) ->
 
 expired(LTime, Expiry) ->
     timer:now_diff(erlang:timestamp(), LTime) div 1000 > Expiry.
-

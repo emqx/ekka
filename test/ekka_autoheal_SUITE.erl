@@ -20,6 +20,7 @@
 -compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 all() -> ekka_ct:all(?MODULE).
 
@@ -29,8 +30,14 @@ init_per_suite(Config) ->
     Config.
 
 end_per_suite(_Config) ->
-    ok = ekka:stop(),
-    ekka_mnesia:ensure_stopped().
+    ok.
+
+init_per_testcase(_TestCase, Config) ->
+    Config.
+
+end_per_testcase(TestCase, Config) ->
+    ekka_ct:cleanup(TestCase),
+    Config.
 
 t_enabled(_Config) ->
     {true, 2000} = ekka_autoheal:enabled().
@@ -55,10 +62,12 @@ t_autoheal(_Config) ->
         true = rpc:cast(N3, net_kernel, connect_node, [N1]),
         true = rpc:cast(N3, net_kernel, connect_node, [N2]),
         %% Wait for autoheal
-        ok = timer:sleep(6000),
-        [N1,N2,N3] = rpc:call(N1, ekka, info, [running_nodes]),
-        [N1,N2,N3] = rpc:call(N2, ekka, info, [running_nodes]),
-        [N1,N2,N3] = rpc:call(N3, ekka, info, [running_nodes]),
+        ?retry(1000, 20,
+               begin
+                   [N1,N2,N3] = rpc:call(N1, ekka, info, [running_nodes]),
+                   [N1,N2,N3] = rpc:call(N2, ekka, info, [running_nodes]),
+                   [N1,N2,N3] = rpc:call(N3, ekka, info, [running_nodes])
+               end),
         rpc:call(N1, ekka, leave, []),
         rpc:call(N2, ekka, leave, []),
         rpc:call(N3, ekka, leave, [])
@@ -83,4 +92,3 @@ init_app_envs(N) ->
                      ]
               }],
     rpc:call(N, application, set_env, [Config]).
-
