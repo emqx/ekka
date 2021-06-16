@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,6 +12,7 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(ekka_autoclean).
 
@@ -18,18 +20,23 @@
 
 -export([init/0, check/1]).
 
--record(?MODULE, {expiry, timer}).
+-record(autoclean, {expiry, timer}).
+
+-opaque(autoclean() :: #autoclean{}).
+
+-export_type([autoclean/0]).
 
 init() ->
     case ekka:env(cluster_autoclean) of
-        {ok, Expiry} -> timer_backoff(#?MODULE{expiry = Expiry});
+        {ok, Expiry} -> timer_backoff(#autoclean{expiry = Expiry});
         undefined    -> undefined
     end.
 
-timer_backoff(State = #?MODULE{expiry = Expiry}) ->
-    State#?MODULE{timer = ekka_node_monitor:run_after(Expiry div 4, autoclean)}.
+timer_backoff(State = #autoclean{expiry = Expiry}) ->
+    TRef = ekka_node_monitor:run_after(Expiry div 4, autoclean),
+    State#autoclean{timer = TRef}.
 
-check(State = #?MODULE{expiry = Expiry}) ->
+check(State = #autoclean{expiry = Expiry}) ->
     [maybe_clean(Member, Expiry) || Member <- ekka_membership:members(down)],
     timer_backoff(State).
 

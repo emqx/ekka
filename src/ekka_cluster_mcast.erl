@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,6 +12,7 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(ekka_cluster_mcast).
 
@@ -18,16 +20,32 @@
 
 -behaviour(ekka_cluster_strategy).
 
--import(proplists, [get_value/2, get_value/3]).
-
 %% Cluster strategy callbacks
--export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
+-export([ discover/1
+        , lock/1
+        , unlock/1
+        , register/1
+        , unregister/1
+        ]).
 
--export([start_link/1]).
+-export([ ensure_started/1
+        , start_link/1
+        , stop/0
+        ]).
 
-%% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+%% For tests
+-export([get_sock/0]).
+
+%% gen_server Callbacks
+-export([ init/1
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , terminate/2
+        , code_change/3
+        ]).
+
+-import(proplists, [get_value/2, get_value/3]).
 
 -type(option() :: {addr, inet:ip_address()}
                 | {ports, list(inet:port_number())}
@@ -38,9 +56,16 @@
                 | {recbuf, pos_integer()}
                 | {buffer, pos_integer()}).
 
--record(state, {sock, addr, ports, cookie, seen = []}).
+-record(state, {
+          sock   :: inet:socket(),
+          addr   :: inet:ip_address(),
+          ports  :: list(inet:port_number()),
+          cookie :: integer(),
+          seen   :: list(node())
+         }).
 
 -define(SERVER, ?MODULE).
+
 -define(LOG(Level, Format, Args),
         logger:Level("Ekka(Mcast): " ++ Format, Args)).
 
@@ -67,15 +92,26 @@ register(_Options) ->
 unregister(_Options) ->
     ignore.
 
+%%--------------------------------------------------------------------
+%% Start/stop mcast server
+%%--------------------------------------------------------------------
+
 ensure_started(Options) ->
     case ekka_cluster_sup:start_child(?SERVER, [Options]) of
         {ok, Pid} -> Pid;
         {error, {already_started, Pid}} -> Pid
     end.
 
--spec(start_link(list(option())) -> {ok, pid()} | ignore | {error, term()}).
+-spec(start_link(list(option())) -> {ok, pid()} | {error, term()}).
 start_link(Options) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
+
+-spec(stop() -> ok).
+stop() -> gen_server:stop(?SERVER).
+
+-spec(get_sock() -> inet:socket()).
+get_sock() ->
+    gen_server:call(?SERVER, get_sock).
 
 %%--------------------------------------------------------------------
 %% gen_server callbacks
@@ -92,10 +128,10 @@ init(Options) ->
                           {multicast_loop, Loop},
                           {add_membership, {Addr, Iface}}]) of
         {ok, Sock} ->
+            Cookie = erlang:phash2(erlang:get_cookie()),
             {ok, #state{sock = Sock, addr = Addr, ports = Ports,
-                        cookie = erlang:phash2(erlang:get_cookie())}};
-        {error, Error} ->
-            {stop, Error}
+                        cookie = Cookie, seen = []}};
+        {error, Error} -> {stop, Error}
     end.
 
 handle_call(discover, From, State = #state{sock = Sock, addr = Addr,
@@ -105,6 +141,9 @@ handle_call(discover, From, State = #state{sock = Sock, addr = Addr,
                   end, Ports),
     erlang:send_after(3000, self(), {reply, discover, From}),
     {noreply, State};
+
+handle_call(get_sock, _From, State = #state{sock = Sock}) ->
+    {reply, Sock, State};
 
 handle_call(Req, _From, State) ->
     ?LOG(error, "Unexpected call: ~p", [Req]),

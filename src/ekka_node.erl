@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,17 +12,25 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(ekka_node).
 
 %% Node API
--export([is_aliving/1, is_running/1, is_running/2, parse_name/1]).
+-export([ is_aliving/1
+        , is_running/1
+        , is_running/2
+        , parse_name/1
+        ]).
 
-%% @doc Is node aliving?
+%% @doc Is the node aliving?
 -spec(is_aliving(node()) -> boolean()).
+is_aliving(Node) when Node =:= node() ->
+    true;
 is_aliving(Node) ->
     lists:member(Node, nodes()) orelse net_adm:ping(Node) =:= pong.
 
+%% @doc Is the application running?
 -spec(is_running(atom()) -> boolean()).
 is_running(App) ->
     lists:keymember(App, 1, application:which_applications()).
@@ -29,12 +38,12 @@ is_running(App) ->
 %% @doc Is the application running?
 -spec(is_running(node(), atom()) -> boolean()).
 is_running(Node, App) ->
-    case rpc:call(Node, application, which_applications, []) of
-        {badrpc, _}  -> false;
-        Applications -> lists:keymember(App, 1, Applications)
+    case rpc:call(Node, ekka_node, is_running, [App]) of
+        {badrpc, _} -> false;
+        Result -> Result
     end.
 
-%% @doc Parse node name
+%% @doc Parse node name.
 -spec(parse_name(string()) -> atom()).
 parse_name(Name) when is_list(Name) ->
     case string:tokens(Name, "@") of

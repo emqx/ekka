@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,13 +12,16 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(ekka_cluster_sup).
 
 -behaviour(supervisor).
 
+-export([start_link/0]).
+
 %% API
--export([start_link/0, start_child/2, stop_child/1]).
+-export([start_child/2, stop_child/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -48,5 +52,17 @@ stop_child(M) ->
 %%--------------------------------------------------------------------
 
 init([]) ->
-    {ok, {{one_for_one, 10, 100}, []}}.
+    Childs = case ekka:env(cluster_discovery) of
+                 {ok, {mcast, Options}} ->
+                     Mcast = #{id       => ekka_cluster_mcast,
+                               start    => {ekka_cluster_mcast, start_link, [Options]},
+                               restart  => permanent,
+                               shutdown => 5000,
+                               type     => worker,
+                               modules  => [ekka_cluster_mcast]
+                              },
+                     [Mcast];
+                 _Other -> []
+             end,
+    {ok, {{one_for_one, 10, 100}, Childs}}.
 

@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,15 +12,18 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(ekka_autocluster).
 
 -include("ekka.hrl").
 
--export([enabled/0, run/1, unregister_node/0]).
+-export([enabled/0 , run/1, unregister_node/0]).
+
 -export([acquire_lock/1, release_lock/1]).
 
--define(LOG(Level, Format, Args), logger:Level("Ekka(AutoCluster): " ++ Format, Args)).
+-define(LOG(Level, Format, Args),
+        logger:Level("Ekka(AutoCluster): " ++ Format, Args)).
 
 -spec(enabled() -> boolean()).
 enabled() ->
@@ -158,6 +162,5 @@ find_oldest_node(Nodes) ->
 
 log_error(Format, {error, Reason}) ->
     ?LOG(error, Format ++ " error: ~p", [Reason]);
-log_error(_Format, _Ok) ->
-    ok.
+log_error(_Format, _Ok) -> ok.
 

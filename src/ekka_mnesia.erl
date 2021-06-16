@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,24 +12,43 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(ekka_mnesia).
 
 -include("ekka.hrl").
 
 %% Start and stop mnesia
--export([start/0, ensure_started/0, ensure_stopped/0, connect/1]).
+-export([ start/0
+        , ensure_started/0
+        , ensure_stopped/0
+        , connect/1
+        ]).
 
-%% Cluster mnesia
--export([join_cluster/1, leave_cluster/0, remove_from_cluster/1,
-         cluster_status/0, cluster_status/1, cluster_view/0,
-         cluster_nodes/1, running_nodes/0]).
+%% Mnesia Cluster API
+-export([ join_cluster/1
+        , leave_cluster/0
+        , remove_from_cluster/1
+        , cluster_info/0
+        , cluster_status/1
+        , cluster_view/0
+        , cluster_nodes/1
+        , running_nodes/0
+        ]).
 
--export([is_node_in_cluster/0, is_node_in_cluster/1]).
+-export([ is_node_in_cluster/0
+        , is_node_in_cluster/1
+        ]).
 
 %% Dir, schema and tables
--export([data_dir/0, copy_schema/1, delete_schema/0, del_schema_copy/1,
-         create_table/2, copy_table/1, copy_table/2]).
+-export([ data_dir/0
+        , copy_schema/1
+        , delete_schema/0
+        , del_schema_copy/1
+        , create_table/2
+        , copy_table/1
+        , copy_table/2
+        ]).
 
 %%--------------------------------------------------------------------
 %% Start and init mnesia
@@ -105,8 +125,7 @@ copy_table(Name, RamOrDisc) ->
 %% @doc Copy schema.
 copy_schema(Node) ->
     case mnesia:change_table_copy_type(schema, Node, disc_copies) of
-        {atomic, ok} ->
-            ok;
+        {atomic, ok} -> ok;
         {aborted, {already_exists, schema, Node, disc_copies}} ->
             ok;
         {aborted, Error} ->
@@ -142,28 +161,25 @@ join_cluster(Node) when Node =/= node() ->
     copy_tables(),
     ensure_ok(wait_for(tables)).
 
-%% @doc Cluster status
--spec(cluster_status() -> list()).
-cluster_status() ->
+%% @doc Cluster Info
+-spec(cluster_info() -> map()).
+cluster_info() ->
     Running = mnesia:system_info(running_db_nodes),
     Stopped = mnesia:system_info(db_nodes) -- Running,
-    case Stopped =:= [] of
-        true  -> [{running_nodes, Running}];
-        false -> [{running_nodes, Running},
-                  {stopped_nodes, Stopped}]
-    end.
+    #{running_nodes => lists:sort(Running),
+      stopped_nodes => lists:sort(Stopped)
+     }.
 
 %% @doc Cluster status of the node
 -spec(cluster_status(node()) -> running | stopped | false).
 cluster_status(Node) ->
     case is_node_in_cluster(Node) of
-        true  ->
+        true ->
             case lists:member(Node, running_nodes()) of
                 true  -> running;
                 false -> stopped
             end;
-        false ->
-            false
+        false -> false
     end.
 
 -spec(cluster_view() -> {[node()], [node()]}).
@@ -288,9 +304,14 @@ wait_for(stop) ->
 
 wait_for(tables) ->
     Tables = mnesia:system_info(local_tables),
-    case mnesia:wait_for_tables(Tables, 150000) of
+    do_wait_for_tables(Tables).
+
+do_wait_for_tables(Tables) ->
+    case mnesia:wait_for_tables(Tables, 30000) of
         ok                   -> ok;
         {error, Reason}      -> {error, Reason};
-        {timeout, BadTables} -> {error, {timeout, BadTables}}
+        {timeout, BadTables} ->
+            logger:warning("~p: still waiting for table(s): ~p", [?MODULE, BadTables]),
+            do_wait_for_tables(BadTables)
     end.
 

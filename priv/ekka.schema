@@ -27,8 +27,14 @@
 
 %% @doc Cluster autoheal
 {mapping, "cluster.autoheal", "ekka.cluster_autoheal", [
-  {datatype, flag},
+  {datatype, [flag, {duration, ms}]},
   {default, off}
+]}.
+
+%% @doc The erlang distributed protocol for the cluster
+{mapping, "cluster.proto_dist", "ekka.proto_dist", [
+  {default, inet_tcp},
+  {datatype, {enum, [inet_tcp, inet6_tcp, inet_tls]}}
 ]}.
 
 %%--------------------------------------------------------------------

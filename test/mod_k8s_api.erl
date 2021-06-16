@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,20 +12,17 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
--module(ekka_test_table).
+-module(mod_k8s_api).
 
--export([init/0, insert/2]).
+-include_lib("inets/include/httpd.hrl").
 
--record(test_table, {key, val}).
+-export([do/1]).
 
-init() ->
-    ok = ekka_mnesia:create_table(test_table, [
-            {type, set}, {disc_copies, [node()]},
-            {record_name, test_table},
-            {attributes, record_info(fields, test_table)}]),
-    ok = ekka_mnesia:copy_table(test_table, disc_copies).
+do(_Req = #mod{method = "GET", request_uri = "/api/v1/namespaces/" ++ _Uri}) ->
+    Response = {200, "{\"subsets\": [{\"addresses\": [{\"ip\": \"127.0.0.1\"}]}]}"},
+    {proceed, [{response, Response}]};
 
-insert(Key, Val) ->
-    mnesia:transaction(fun mnesia:write/1, [#test_table{key = Key, val = Val}]).
+do(Req) -> {proceed, Req#mod.data}.
 

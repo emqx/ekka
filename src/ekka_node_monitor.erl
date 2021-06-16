@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,6 +12,7 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(ekka_node_monitor).
 
@@ -19,24 +21,39 @@
 -include("ekka.hrl").
 
 %% API
--export([start_link/0, partitions/0]).
+-export([start_link/0, stop/0]).
+
+-export([partitions/0]).
 
 %% Internal Exports
 -export([cast/2, run_after/2]).
 
-%% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-         code_change/3]).
+%% gen_server Callbacks
+-export([ init/1
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , terminate/2
+        , code_change/3
+        ]).
 
--record(state, {partitions = [], heartbeat, autoheal, autoclean}).
+-record(state, {
+          partitions :: list(node()),
+          heartbeat  :: undefined | reference(),
+          autoheal   :: ekka_autoheal:autoheal(),
+          autoclean  :: ekka_autoclean:autoclean()
+         }).
 
 -define(SERVER, ?MODULE).
--define(LOG(Level, Format, Args), logger:Level("Ekka(Monitor): " ++ Format, Args)).
+-define(LOG(Level, Format, Args),
+        logger:Level("Ekka(Monitor): " ++ Format, Args)).
 
-%% @doc Start the node monitor
--spec(start_link() -> {ok, pid()} | ignore | {error, term()}).
+%% @doc Start the node monitor.
+-spec(start_link() -> {ok, pid()} | {error, term()}).
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+stop() -> gen_server:stop(?SERVER).
 
 %% @doc Get partitions.
 partitions() ->
@@ -50,18 +67,21 @@ cast(Node, Msg) ->
 run_after(Delay, Msg) ->
     erlang:send_after(Delay, ?SERVER, Msg).
 
-%%-----------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 %% gen_server Callbacks
-%%-----------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 
 init([]) ->
-    rand:seed(exsplus),
     process_flag(trap_exit, true),
+    rand:seed(exsplus, erlang:timestamp()),
     net_kernel:monitor_nodes(true, [{node_type, visible}, nodedown_reason]),
     {ok, _} = mnesia:subscribe(system),
     lists:foreach(fun(N) -> self() ! {nodeup, N, []} end, nodes() -- [node()]),
-    {ok, ensure_heartbeat(#state{autoheal  = ekka_autoheal:init(),
-                                 autoclean = ekka_autoclean:init()})}.
+    State = #state{partitions = [],
+                   autoheal   = ekka_autoheal:init(),
+                   autoclean  = ekka_autoclean:init()
+                  },
+    {ok, ensure_heartbeat(State)}.
 
 handle_call(partitions, _From, State = #state{partitions = Partitions}) ->
     {reply, Partitions, State};
@@ -85,7 +105,7 @@ handle_cast({suspect, FromNode, TargetNode}, State) ->
     {noreply, State};
 
 handle_cast({confirm, TargetNode, Status}, State) ->
-    ?LOG(info,"Confirm ~s ~s", [TargetNode, Status]),
+    ?LOG(info, "Confirm ~s ~s", [TargetNode, Status]),
     {noreply, State};
 
 handle_cast(Msg = {report_partition, _Node}, State) ->
@@ -118,6 +138,10 @@ handle_info({suspect, Node}, State) ->
 handle_info({mnesia_system_event, {mnesia_up, Node}},
             State = #state{partitions = Partitions}) ->
     ekka_membership:mnesia_up(Node),
+    case lists:member(Node, Partitions) of
+        false -> ok;
+        true -> ekka_membership:partition_healed(Node)
+    end,
     {noreply, State#state{partitions = lists:delete(Node, Partitions)}};
 
 handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
@@ -127,8 +151,9 @@ handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
 handle_info({mnesia_system_event, {inconsistent_database, Context, Node}},
             State = #state{partitions = Partitions}) ->
     ?LOG(critical, "Network partition detected from node ~s: ~p", [Node, Context]),
+    ekka_membership:partition_occurred(Node),
     case ekka_autoheal:enabled() of
-        true  -> run_after(3000, confirm_partition);
+        {true, _} -> run_after(3000, confirm_partition);
         false -> ignore
     end,
     {noreply, State#state{partitions = lists:usort([Node | Partitions])}};
@@ -184,9 +209,9 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%%-----------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 %% Internal functions
-%%-----------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 
 ensure_heartbeat(State = #state{heartbeat = undefined}) ->
     Interval = rand:uniform(2000) + 2000,

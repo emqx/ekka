@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,21 +12,27 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(ekka_cluster_etcd).
 
 -behaviour(ekka_cluster_strategy).
 
--export([discover/1, lock/1, unlock/1, register/1, unregister/1]).
+-export([ discover/1
+        , lock/1
+        , unlock/1
+        , register/1
+        , unregister/1
+        ]).
 
 %% TTL callback
 -export([etcd_set_node_key/1]).
 
 -define(LOG(Level, Format, Args), logger:Level("Ekka(etcd): " ++ Format, Args)).
 
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 %% ekka_cluster_strategy callbacks
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 
 discover(Options) ->
     case etcd_get_nodes_key(Options) of
@@ -48,8 +55,7 @@ lock(_Options, 0) ->
 
 lock(Options, Retries) ->
     case etcd_set_lock_key(Options) of
-        {ok, _Response} ->
-            ok;
+        {ok, _Response} -> ok;
         {error, {412, _}} ->
             timer:sleep(1000),
             lock(Options, Retries -1);
@@ -59,8 +65,7 @@ lock(Options, Retries) ->
 
 unlock(Options) ->
     case etcd_del_lock_key(Options) of
-        {ok, _Response} ->
-            ok;
+        {ok, _Response} -> ok;
         {error, Reason} ->
             {error, Reason}
     end.
@@ -76,15 +81,14 @@ register(Options) ->
 unregister(Options) ->
     ok = ekka_cluster_sup:stop_child(ekka_node_ttl),
     case etcd_del_node_key(Options) of
-        {ok, _Response} ->
-            ok;
+        {ok, _Response} -> ok;
         {error, Reason} ->
             {error, Reason}
     end.
 
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 %% Internal functions
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 
 extract_nodes([]) ->
     [];

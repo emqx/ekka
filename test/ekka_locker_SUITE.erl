@@ -1,4 +1,5 @@
-%% Copyright (c) 2018 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,26 +12,58 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(ekka_locker_SUITE).
-
--include_lib("eunit/include/eunit.hrl").
 
 -compile(export_all).
 -compile(nowarn_export_all).
 
-all() ->
-    [{group, locker}].
+-include("ekka.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
-groups() ->
-    [{locker, [], [acquire_local]}].
+-define(SERVER, locker_server).
 
-acquire_local(_Conf) ->
+all() -> ekka_ct:all(?MODULE).
+
+init_per_testcase(_TestCase, Config) ->
+    ok = meck:new(ekka_membership, [non_strict, passthrough, no_history]),
+    {ok, _Locker} = ekka_locker:start_link(?SERVER),
+    Config.
+
+end_per_testcase(_TestCase, Config) ->
+    ok = ekka_locker:stop(locker_server),
+    ok = meck:unload(ekka_membership),
+    Config.
+
+t_acquire_release_local(_) ->
     Node = node(),
-    {ok, Locker} = ekka_locker:start_link(test_locker),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:acquire(test_locker, resource1)),
-    ?assertEqual({true, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ?assertEqual({false, [Node]}, ekka_locker:release(test_locker, resource1)),
-    ekka_locker:stop(Locker).
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource)),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource)).
+
+t_acquire_release_leader(_) ->
+    Node = node(),
+    ok = meck:expect(ekka_membership, leader, fun() -> Node end),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, leader)),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, leader)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, leader)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, leader)).
+
+t_acquire_release_quorum(_) ->
+    Node = node(),
+    ok = meck:expect(ekka_membership, ring, fun(_) -> [#member{node = Node, status = up}] end),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, quorum)),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, quorum)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, quorum)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, quorum)).
+
+t_acquire_release_all(_) ->
+    Node = node(),
+    ok = meck:expect(ekka_membership, nodelist, fun(_) -> [Node] end),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, all)),
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, all)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, all)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, all)).
 
