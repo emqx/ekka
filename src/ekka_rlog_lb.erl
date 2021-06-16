@@ -92,11 +92,12 @@ do_update() ->
 do_update(Shard) ->
     Timeout = application:get_env(ekka, rlog_lb_update_timeout, 300),
     CoreNodes = ekka_rlog:core_nodes(),
-    case rpc:multicall(CoreNodes, ?MODULE, core_node_weight, [Shard], Timeout) of
-        {[], _} ->
+    {Resp0, _} = rpc:multicall(CoreNodes, ?MODULE, core_node_weight, [Shard], Timeout),
+    Resp = lists:sort([I || {ok, I} <- Resp0]),
+    case Resp of
+        [] ->
             ekka_rlog_status:notify_core_node_down(Shard);
-        {L0, _} ->
-            [{_Load, _Rand, Core}|_] = lists:sort(L0),
+        [{_Load, _Rand, Core}|_] ->
             ekka_rlog_status:notify_core_node_up(Shard, Core)
     end.
 
@@ -108,11 +109,11 @@ do_update(Shard) ->
 core_node_weight(Shard) ->
     case whereis(Shard) of
         undefined ->
-            throw(shard_down);
+            undefined;
         _Pid ->
             Load = 0,
             %% The return values will be lexicographically sorted. Load will
             %% be distributed evenly between the nodes with the same weight
             %% due to random term:
-            {Load, rand:uniform(), node()}
+            {ok, {Load, rand:uniform(), node()}}
     end.
