@@ -331,6 +331,47 @@ t_sum_verify(_) ->
                            )
        end).
 
+t_load_balancing(_) ->
+    Cluster = ekka_ct:cluster([core, core, replicant], ekka_mnesia_test_util:common_env()),
+    NTrans = 100,
+    ?check_trace(
+       try
+           [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           {ok, _} = ?block_until(#{ ?snk_kind := ekka_rlog_status_change
+                                   , status := up
+                                   , tag := core_node
+                                   }),
+           %% Stop ekka on all the core nodes:
+           {_, {ok, _}} =
+               ?wait_async_action(
+                  [rpc:call(I, application, stop, [ekka]) || I <- [N1, N2]],
+                  #{ ?snk_kind := ekka_rlog_status_change
+                   , status    := down
+                   , tag       := core_node
+                   }),
+           %% Restart ekka:
+           {_, {ok, _}} =
+               ?wait_async_action(
+                  [rpc:call(I, application, start, [ekka]) || I <- [N1, N2]],
+                  #{ ?snk_kind := ekka_rlog_status_change
+                   , status    := up
+                   , tag       := core_node
+                   }),
+           %% Now stop the core nodes:
+           {_, {ok, _}} =
+               ?wait_async_action(
+                  [ekka_ct:stop_slave(I) || I <- [N1, N2]],
+                  #{ ?snk_kind := ekka_rlog_status_change
+                   , status    := down
+                   , tag       := core_node
+                   })
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(_, _Trace) ->
+               true
+       end).
+
 cluster_benchmark(_) ->
     snabbkaffe:fix_ct_logging(),
     NReplicas = 6,
