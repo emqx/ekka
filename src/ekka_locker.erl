@@ -263,8 +263,14 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
     Monitors1 = lists:foldl(
                   fun(#lock{resource = Resource, owner = Owner}, MonAcc) ->
                       case maps:find(Owner, MonAcc) of
-                          {ok, ResourceSet} ->
-                              maps:put(Owner, set_put(Resource, ResourceSet), MonAcc);
+                          {ok, Resources} ->
+                              case lists:member(Resource, Resources) of
+                                  true ->
+                                      %% force kill it as it might have hung
+                                      exit(Owner, kill);
+                                  false ->
+                                      maps:put(Owner, [Resource|Resources], MonAcc)
+                              end;
                           error ->
                               _MRef = erlang:monitor(process, Owner),
                               maps:put(Owner, set_put(Resource, #{}), MonAcc)
