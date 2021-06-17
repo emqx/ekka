@@ -1,13 +1,23 @@
 %% -*-: erlang -*-
-{"0.7.7",
- [ {<<"0\\.7\\.[0-6]">>, [ {load_module, ekka_locker, brutal_purge, soft_purge, []}
-                         , {load_module, ekka_dist, brutal_purge, soft_purge, []}
-                         , {load_module, ekka_mnesia, brutal_purge, soft_purge, []}
-                          ]}
+{"0.7.8",
+ [
+  {"0.7.7", [
+    {load_module, ekka_locker, brutal_purge, soft_purge, []}
+  ]},
+  {<<"0\\.7\\.[0-6]">>, [
+    {load_module, ekka_locker, brutal_purge, soft_purge, []}
+  , {load_module, ekka_dist, brutal_purge, soft_purge, []}
+  , {load_module, ekka_mnesia, brutal_purge, soft_purge, []}
+  ]}
  ],
- [ {<<"0\\.7\\.[0-6]">>, [ {load_module, ekka_locker, brutal_purge, soft_purge, []}
-                         , {load_module, ekka_dist, brutal_purge, soft_purge, []}
-                         , {load_module, ekka_mnesia, brutal_purge, soft_purge, []}
-                          ]}
+ [
+  {"0.7.7", [
+    {load_module, ekka_locker, brutal_purge, soft_purge, []}
+  ]},
+  {<<"0\\.7\\.[0-6]">>, [
+    {load_module, ekka_locker, brutal_purge, soft_purge, []}
+  , {load_module, ekka_dist, brutal_purge, soft_purge, []}
+  , {load_module, ekka_mnesia, brutal_purge, soft_purge, []}
+  ]}
  ]
 }.
