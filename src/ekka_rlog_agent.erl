@@ -17,10 +17,6 @@
 %% @doc This module implements a gen_statem which pushes rlogs to
 %% a remote node.
 %%
-%% The state machine consists of 3 states:
-%% `catchup', `switchover', `normal', which are explained in detail below:
-%%
-%%
 %% All sends are done as `gen_rpc' calls to the replicant node.
 
 -module(ekka_rlog_agent).
