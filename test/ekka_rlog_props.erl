@@ -68,7 +68,7 @@ all_batches_received(Trace0) ->
 counter_import_check(CounterKey, Node, Trace0) ->
     Trace1 = ?of_node(Node, Trace0),
     %% Shard bootstrap resets the import sequence, so we should
-    %% consider them individually (assuming that the boostrap
+    %% consider them individually (assuming that the bootstrap
     %% procedure is correct):
     Sequences = ?splitr_trace(#{?snk_kind := shard_bootstrap_complete}, Trace1),
     %% Now check each sequence and return the number of import operations:

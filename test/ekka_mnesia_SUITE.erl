@@ -135,6 +135,7 @@ t_rlog_smoke_test(_) ->
     Cluster = ekka_ct:cluster([core, core, replicant], Env),
     CounterKey = counter,
     ?check_trace(
+       #{timetrap => 10000},
        try
            %% Inject some orderings to make sure the replicant
            %% receives transactions in all states.
@@ -370,6 +371,38 @@ t_load_balancing(_) ->
        end,
        fun(_, _Trace) ->
                true
+       end).
+
+t_dirty_reads(_) ->
+    Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
+    Key = 1,
+    Val = 42,
+    ?check_trace(
+       #{timetrap => 10000},
+       try
+           %% Delay shard startup:
+           ?force_ordering(#{?snk_kind := read1}, #{?snk_kind := state_change, to := local_replay}),
+           [N1, N2] = ekka_ct:start_cluster(ekka_async, Cluster),
+           ekka_mnesia_test_util:wait_shards([N1]),
+           %% Insert data:
+           ok = rpc:call(N1, ekka_mnesia, dirty_write, [{test_tab, Key, Val}]),
+           %% Ensure that the replicant still reads the correct value by doing an RPC to the core node:
+           ?block_until(#{?snk_kind := rlog_read_from, source := N1}),
+           ?assertEqual([{test_tab, Key, Val}], rpc:call(N2, mnesia, dirty_read, [test_tab, Key])),
+           %% Now allow the shard to start:
+           ?tp(read1, #{}),
+           ?block_until(#{?snk_kind := rlog_read_from, source := N2}),
+           %% Ensure that the replicant still reads the correct value locally:
+           ?assertEqual([{test_tab, Key, Val}], rpc:call(N2, mnesia, dirty_read, [test_tab, Key]))
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(_, Trace) ->
+               ?assert(
+                  ?strict_causality( #{?snk_kind := read1}
+                                   , #{?snk_kind := state_change, to := normal}
+                                   , Trace
+                                   ))
        end).
 
 cluster_benchmark(_) ->
