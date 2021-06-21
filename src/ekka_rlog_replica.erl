@@ -217,6 +217,8 @@ handle_tlog_entry(State, {Agent, SeqNo, TXID, _Transaction},
 
 -spec initiate_bootstrap(data()) -> fsm_result().
 initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
+    %% Disable local reads before starting bootstrap:
+    set_where_to_read(Remote, Shard),
     %% Discard all data of the shard:
     #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
     [ok = clear_table(Tab) || Tab <- Tables],
@@ -339,6 +341,8 @@ buffer_tlog_ops(Transaction, D = #d{replayq = Q0, shard = Shard}) ->
 -spec handle_normal(data()) -> ok.
 handle_normal(D = #d{shard = Shard, agent = Agent}) ->
     ekka_rlog_status:notify_shard_up(Shard, Agent),
+    %% Now we can enable local reads:
+    set_where_to_read(node(), Shard),
     ?tp(notice, "Shard fully up",
         #{ node => node()
          , shard => D#d.shard
@@ -392,3 +396,20 @@ clear_table(Table) ->
         {atomic, ok}              -> ok;
         {aborted, {no_exists, _}} -> ok
     end.
+
+%% @private Dirty hack: patch mnesia internal table (see
+%% implementation of `mnesia:dirty_rpc')
+-spec set_where_to_read(node(), ekka_rlog:shard()) -> ok.
+set_where_to_read(Node, Shard) ->
+    #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
+    lists:foreach(
+      fun(Tab) ->
+              Key = {Tab, where_to_read},
+              %% Sanity check (Hopefully it breaks if something inside
+              %% mnesia changes):
+              OldNode = ets:lookup_element(mnesia_gvar, Key, 2),
+              true = is_atom(OldNode),
+              %% Now change it:
+              ets:insert(mnesia_gvar, {Key, Node}),
+      end,
+      Tables).
