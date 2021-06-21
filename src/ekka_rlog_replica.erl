@@ -410,6 +410,10 @@ set_where_to_read(Node, Shard) ->
               OldNode = ets:lookup_element(mnesia_gvar, Key, 2),
               true = is_atom(OldNode),
               %% Now change it:
-              ets:insert(mnesia_gvar, {Key, Node}),
+              ets:insert(mnesia_gvar, {Key, Node})
       end,
-      Tables).
+      Tables),
+    ?tp(rlog_read_from,
+        #{ source => Node
+         , shard  => Shard
+         }).
