@@ -26,6 +26,7 @@
         , shuffle/1
         , send_after/3
         , cancel_timer/1
+        , subscriber_node/1
         ]).
 
 -export_type([ tlog_entry/0
@@ -192,6 +193,10 @@ cancel_timer(undefined) ->
     ok;
 cancel_timer(TRef) ->
     erlang:cancel_timer(TRef).
+
+-spec subscriber_node(subscriber()) -> node().
+subscriber_node({Node, _Pid}) ->
+    Node.
 
 %%================================================================================
 %% Internal

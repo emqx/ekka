@@ -93,22 +93,22 @@ t_cluster_status(_) ->
 
 %% -spec(remove_from_cluster(node()) -> ok | {error, any()}).
 t_remove_from_cluster(_) ->
-    Cluster = ekka_ct:cluster([core, core], []),
+    Cluster = ekka_ct:cluster([core, core, replicant, replicant], []),
     try
-        [N0, N1] = ekka_ct:start_cluster(ekka, Cluster),
+        [N0, N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
         ekka_ct:run_on(N0, fun() ->
-            #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
-            [N0, N1] = lists:sort(ekka_mnesia:running_nodes()),
-            [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(all)),
-            [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(running)),
+            #{running_nodes := [N0, N1, N2, N3]} = ekka_mnesia:cluster_info(),
+            [N0, N1, N2, N3] = lists:sort(ekka_mnesia:running_nodes()),
+            [N0, N1, N2, N3] = lists:sort(ekka_mnesia:cluster_nodes(all)),
+            [N0, N1, N2, N3] = lists:sort(ekka_mnesia:cluster_nodes(running)),
             [] = ekka_mnesia:cluster_nodes(stopped),
             ok
           end),
-        ekka_ct:run_on(N1, fun() ->
-            #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
-            [N0, N1] = lists:sort(ekka_mnesia:running_nodes()),
-            [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(all)),
-            [N0, N1] = lists:sort(ekka_mnesia:cluster_nodes(running)),
+        ekka_ct:run_on(N2, fun() ->
+            #{running_nodes := [N0, N1, N2, N3]} = ekka_mnesia:cluster_info(),
+            [N0, N1, N2, N3] = lists:sort(ekka_mnesia:running_nodes()),
+            [N0, N1, N2, N3] = lists:sort(ekka_mnesia:cluster_nodes(all)),
+            [N0, N1, N2, N3] = lists:sort(ekka_mnesia:cluster_nodes(running)),
             [] = ekka_mnesia:cluster_nodes(stopped),
             ok
           end),
@@ -332,8 +332,11 @@ t_sum_verify(_) ->
                            )
        end).
 
-t_load_balancing(_) ->
-    Cluster = ekka_ct:cluster([core, core, replicant], ekka_mnesia_test_util:common_env()),
+%% Test behavior of the replicant waiting for the core node
+t_core_node_down(_) ->
+    Cluster = ekka_ct:cluster( [core, core, replicant]
+                             , ekka_mnesia_test_util:common_env()
+                             ),
     NTrans = 100,
     ?check_trace(
        try

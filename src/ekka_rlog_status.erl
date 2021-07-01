@@ -23,14 +23,16 @@
 %% API:
 -export([start_link/0, subscribe_events/0, unsubscribe_events/1, notify_shard_up/2,
          notify_shard_down/1, wait_for_shards/2, upstream/1, upstream_node/1,
-         shards_up/0, shards_down/0, get_shard_stats/1,
+         shards_up/0, shards_down/0, get_shard_stats/1, agents/0, replicants/0,
 
          notify_core_node_up/2, notify_core_node_down/1, get_core_node/2,
 
          notify_replicant_state/2, notify_replicant_import_trans/2,
          notify_replicant_replayq_len/2,
          notify_replicant_bootstrap_start/1, notify_replicant_bootstrap_complete/1,
-         notify_replicant_bootstrap_import/1
+         notify_replicant_bootstrap_import/1,
+
+         notify_agent_connect/3, notify_agent_disconnect/2, notify_agent_disconnect/1
         ]).
 
 %% gen_event callbacks:
@@ -58,6 +60,7 @@
 -define(replicant_bootstrap_start, replicant_bootstrap_start).
 -define(replicant_bootstrap_complete, replicant_bootstrap_complete).
 -define(replicant_bootstrap_import, replicant_bootstrap_import).
+-define(agent_pid, agent_pid).
 
 %%================================================================================
 %% API funcions
@@ -120,6 +123,34 @@ notify_core_node_up(Shard, Node) ->
 notify_core_node_down(Shard) ->
     do_notify_down(?core_node, Shard).
 
+-spec notify_agent_connect(ekka_rlog:shard(), node(), pid()) -> ok.
+notify_agent_connect(Shard, ReplicantNode, AgentPid) ->
+    ets:insert(?stats_tab, {{?agent_pid, Shard, ReplicantNode}, AgentPid}),
+    ok.
+
+-spec notify_agent_disconnect(ekka_rlog:shard(), node()) -> ok.
+notify_agent_disconnect(Shard, ReplicantNode) ->
+    ets:delete(?stats_tab, {?agent_pid, Shard, ReplicantNode}),
+    ok.
+
+-spec notify_agent_disconnect(pid()) -> ok.
+notify_agent_disconnect(AgentPid) ->
+    ets:match_delete(?stats_tab, {{?agent_pid, '_', '_'}, AgentPid}),
+    ok.
+
+-spec agents() -> [{ekka_rlog:shard(), _Remote :: node(), _Agent :: pid()}].
+agents() ->
+    case ets:whereis(?stats_tab) of
+        undefined ->
+            [];
+        _ ->
+            ets:select(?stats_tab, [{{{?agent_pid, '$1', '$2'}, '$3'}, [], [{{'$1', '$2', '$3'}}]}])
+    end.
+
+-spec replicants() -> [node()].
+replicants() ->
+    lists:usort([N || {_, N, _} <- agents()]).
+
 %% Get a healthy core node that has the specified shard, and can
 %% accept or RPC calls.
 -spec get_core_node(ekka_rlog:shard(), timeout()) -> {ok, node()} | timeout.
@@ -153,7 +184,7 @@ wait_for_shards(Shards, Timeout) ->
         #{ shards => Shards
          , timeout => Timeout
          }),
-    Ret = wait_objects(?upstream_pid, Shards, Timeout),
+   Ret = wait_objects(?upstream_pid, Shards, Timeout),
     ?tp(notice, "Done waiting for shards",
         #{ shards => Shards
          , result =>  Ret
@@ -166,7 +197,12 @@ shards_up() ->
 
 -spec objects_up(atom()) -> [term()].
 objects_up(Tag) ->
-    lists:append(ets:match(?replica_tab, {{Tag, '$1'}, '_'})).
+    case ets:whereis(?replica_tab) of
+        undefined ->
+            [];
+        _ ->
+            lists:append(ets:match(?replica_tab, {{Tag, '$1'}, '_'}))
+    end.
 
 -spec shards_down() -> [ekka_rlog:shard()].
 shards_down() ->

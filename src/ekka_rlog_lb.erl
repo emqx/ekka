@@ -114,6 +114,6 @@ core_node_weight(Shard) ->
             Load = 0,
             %% The return values will be lexicographically sorted. Load will
             %% be distributed evenly between the nodes with the same weight
-            %% due to random term:
+            %% due to the random term:
             {ok, {Load, rand:uniform(), node()}}
     end.
