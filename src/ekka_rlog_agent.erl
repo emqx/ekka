@@ -102,9 +102,6 @@ handle_event(EventType, Event, State, D) ->
 code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
 
-%% terminate(_Reason, _State, #d{subscriber = Sub, shard = Shard}) ->
-%%     ekka_rlog_status:notify_agent_disconnect(Shard, ekka_rlog_lib:subscriber_node(Sub)),
-%%     ok;
 terminate(_Reason, _State, _Data) ->
     ok.
 
