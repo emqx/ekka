@@ -319,13 +319,18 @@ running_nodes() ->
     case ekka_rlog:role() of
         core ->
             CoreNodes = mnesia:system_info(running_db_nodes),
-            {Result, _BadNodes} = rpc:multicall(CoreNodes, ekka_rlog_status, replicants, []),
-            CoreNodes ++ lists:append(Result);
+            {Replicants0, _} = rpc:multicall(CoreNodes, ekka_rlog_status, replicants, [], 1000),
+            Replicants = [Node || Nodes <- Replicants0, is_list(Nodes), Node <- Nodes],
+            lists:usort(CoreNodes ++ Replicants);
         replicant ->
             case ekka_rlog_status:shards_up() of
                 [Shard|_] ->
-                    CoreNode = ekka_rlog_status:upstream_node(Shard),
-                    rpc:call(CoreNode, ?MODULE, running_nodes, []);
+                    {ok, CoreNode} = ekka_rlog_status:upstream_node(Shard),
+                    case ekka_rlog_lib:rpc_call(CoreNode, ?MODULE, running_nodes, []) of
+                        {badrpc, _} -> [];
+                        {badtcp, _} -> [];
+                        Result      -> Result
+                    end;
                 [] ->
                     []
             end
@@ -334,8 +339,9 @@ running_nodes() ->
 %% @doc Cluster nodes.
 -spec(cluster_nodes(all | running | stopped) -> [node()]).
 cluster_nodes(all) ->
+    Running = running_nodes(),
     %% Note: stopped replicant nodes won't appear in the list
-    lists:usort(running_nodes() ++ mnesia:system_info(db_nodes));
+    lists:usort(Running ++ mnesia:system_info(db_nodes));
 cluster_nodes(running) ->
     running_nodes();
 cluster_nodes(stopped) ->

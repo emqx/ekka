@@ -93,9 +93,10 @@ t_cluster_status(_) ->
 
 %% -spec(remove_from_cluster(node()) -> ok | {error, any()}).
 t_remove_from_cluster(_) ->
-    Cluster = ekka_ct:cluster([core, core, replicant, replicant], []),
+    Cluster = ekka_ct:cluster([core, core, replicant, replicant], ekka_mnesia_test_util:common_env()),
     try
         [N0, N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+        timer:sleep(1000),
         ekka_ct:run_on(N0, fun() ->
             #{running_nodes := [N0, N1, N2, N3]} = ekka_mnesia:cluster_info(),
             [N0, N1, N2, N3] = lists:sort(ekka_mnesia:running_nodes()),
@@ -114,10 +115,10 @@ t_remove_from_cluster(_) ->
           end),
         ekka_ct:run_on(N0, fun() ->
             ok = ekka_mnesia:remove_from_cluster(N1),
-            #{running_nodes := [N0]} = ekka_mnesia:cluster_info(),
-            [N0] = ekka_mnesia:running_nodes(),
-            [N0] = ekka_mnesia:cluster_nodes(all),
-            [N0] = ekka_mnesia:cluster_nodes(running),
+            Running = ekka_mnesia:running_nodes(),
+            All = ekka_mnesia:cluster_nodes(all),
+            ?assertMatch(false, lists:member(N1, Running)),
+            ?assertMatch(false, lists:member(N1, All)),
             ok = rpc:call(N1, ekka_mnesia, ensure_stopped, [])
           end)
     after
@@ -228,23 +229,25 @@ t_abort(_) ->
 t_core_node_competing_writes(_) ->
     Cluster = ekka_ct:cluster([core, core, replicant], ekka_mnesia_test_util:common_env()),
     CounterKey = counter,
-    NOper = 10000,
+    NOper = 1000,
     ?check_trace(
        try
            Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
            ekka_mnesia_test_util:wait_shards(Nodes),
            spawn(fun() ->
-                         rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, NOper])
+                         rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, NOper]),
+                         ?tp(n1_counter_done, #{})
                  end),
            ok = rpc:call(N2, ekka_transaction_gen, counter, [CounterKey, NOper]),
-           ekka_mnesia_test_util:stabilize(1000),
+           ?block_until(#{?snk_kind := n1_counter_done}),
+           ekka_mnesia_test_util:wait_full_replication(Cluster),
            N3
        after
            ekka_ct:teardown_cluster(Cluster)
        end,
        fun(N3, Trace) ->
-               Events = lists:flatten(?projection(ops, ?of_kind(rlog_import_trans,
-                                                                ?of_node(N3, Trace)))),
+               Events = [Val || #{?snk_kind := rlog_import_trans, ops := Ops} <- Trace,
+                                {{test_tab, _}, {test_tab, _Key, Val}, write} <- Ops],
                %% Check that the number of imported transaction equals to the expected number:
                ?assertEqual(NOper * 2, length(Events)),
                %% Check that the ops have been imported in order:
@@ -327,8 +330,8 @@ t_sum_verify(_) ->
        end,
        fun(_, Trace) ->
                ?assert(ekka_rlog_props:replicant_no_restarts(Trace)),
-               ?assertMatch( [ok, ok]
-                           , ?projection(result, ?of_kind(verify_trans_sum, Trace))
+               ?assertMatch( [#{result := ok}, #{result := ok}]
+                           , ?of_kind(verify_trans_sum, Trace)
                            )
        end).
 
