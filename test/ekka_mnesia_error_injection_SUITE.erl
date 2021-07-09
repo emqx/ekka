@@ -50,12 +50,11 @@ t_agent_restart(_) ->
            ekka_mnesia_test_util:wait_shards(Nodes),
            ekka_mnesia_test_util:stabilize(1000),
            %% Everything in ekka agent will crash
-           ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog, agent|_]}}
-                        , snabbkaffe_nemesis:random_crash(0.4)
-                        ),
+           CrashRef = ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog, agent|_]}}
+                                   , snabbkaffe_nemesis:random_crash(0.4)
+                                   ),
            ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 100, 100]),
-           ekka_mnesia_test_util:stabilize(5100),
-           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
+           complete_test(CrashRef, Cluster, Nodes),
            N3
        after
            ekka_ct:teardown_cluster(Cluster)
@@ -75,12 +74,11 @@ t_rand_error_injection(_) ->
            ekka_mnesia_test_util:wait_shards(Nodes),
            ekka_mnesia_test_util:stabilize(1000),
            %% Everything in ekka RLOG will crash
-           ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog|_]}}
-                        , snabbkaffe_nemesis:random_crash(0.01)
-                        ),
+           CrashRef = ?inject_crash( #{?snk_meta := #{domain := [ekka, rlog|_]}}
+                                   , snabbkaffe_nemesis:random_crash(0.01)
+                                   ),
            ok = rpc:call(N1, ekka_transaction_gen, counter, [CounterKey, 300, 100]),
-           ekka_mnesia_test_util:stabilize(5100),
-           ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes),
+           complete_test(CrashRef, Cluster, Nodes),
            N3
        after
            ekka_ct:teardown_cluster(Cluster)
@@ -114,3 +112,10 @@ t_sum_verify(_) ->
                            , ?projection(result, ?of_kind(verify_trans_sum, Trace))
                            )
        end).
+
+%% Remove the injected errors and check table consistency
+complete_test(CrashRef, Cluster, Nodes) ->
+    ekka_mnesia_test_util:stabilize(5100),
+    snabbkaffe_nemesis:fix_crash(CrashRef),
+    ekka_mnesia_test_util:wait_full_replication(Cluster),
+    ekka_mnesia_test_util:compare_table_contents(test_tab, Nodes).

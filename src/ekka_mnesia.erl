@@ -218,8 +218,8 @@ join_cluster(Node) when Node =/= node() ->
 %% @doc Cluster Info
 -spec(cluster_info() -> map()).
 cluster_info() ->
-    Running = mnesia:system_info(running_db_nodes),
-    Stopped = mnesia:system_info(db_nodes) -- Running,
+    Running = cluster_nodes(running),
+    Stopped = cluster_nodes(stopped),
     #{running_nodes => lists:sort(Running),
       stopped_nodes => lists:sort(Stopped)
      }.
@@ -315,14 +315,35 @@ connect(Node) ->
 
 %% @doc Running nodes.
 -spec(running_nodes() -> list(node())).
-running_nodes() -> cluster_nodes(running).
+running_nodes() ->
+    case ekka_rlog:role() of
+        core ->
+            CoreNodes = mnesia:system_info(running_db_nodes),
+            {Replicants0, _} = rpc:multicall(CoreNodes, ekka_rlog_status, replicants, []),
+            Replicants = [Node || Nodes <- Replicants0, is_list(Nodes), Node <- Nodes],
+            lists:usort(CoreNodes ++ Replicants);
+        replicant ->
+            case ekka_rlog_status:shards_up() of
+                [Shard|_] ->
+                    {ok, CoreNode} = ekka_rlog_status:upstream_node(Shard),
+                    case ekka_rlog_lib:rpc_call(CoreNode, ?MODULE, running_nodes, []) of
+                        {badrpc, _} -> [];
+                        {badtcp, _} -> [];
+                        Result      -> Result
+                    end;
+                [] ->
+                    []
+            end
+    end.
 
 %% @doc Cluster nodes.
 -spec(cluster_nodes(all | running | stopped) -> [node()]).
 cluster_nodes(all) ->
-    mnesia:system_info(db_nodes);
+    Running = running_nodes(),
+    %% Note: stopped replicant nodes won't appear in the list
+    lists:usort(Running ++ mnesia:system_info(db_nodes));
 cluster_nodes(running) ->
-    mnesia:system_info(running_db_nodes);
+    running_nodes();
 cluster_nodes(stopped) ->
     cluster_nodes(all) -- cluster_nodes(running).
 

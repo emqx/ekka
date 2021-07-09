@@ -101,6 +101,9 @@ init({Parent, Shard}) ->
     ?tp(rlog_server_start, #{node => node()}),
     {ok, {Parent, Shard}, {continue, post_init}}.
 
+handle_info({'DOWN', _MRef, process, Pid, _Info}, St) ->
+    ekka_rlog_status:notify_agent_disconnect(Pid),
+    {noreply, St};
 handle_info(_Info, St) ->
     {noreply, St}.
 
@@ -125,11 +128,18 @@ handle_cast(_Cast, St) ->
     {noreply, St}.
 
 handle_call({subscribe, Subscriber, Checkpoint}, _From, State) ->
-    {NeedBootstrap, ReplaySince} = needs_bootstrap( State#s.bootstrap_threshold
-                                                  , State#s.tlog_replay
+    #s{ bootstrap_threshold = BootstrapThreshold
+      , tlog_replay         = TlogReplay
+      , shard               = Shard
+      , agent_sup           = AgentSup
+      } = State,
+    {NeedBootstrap, ReplaySince} = needs_bootstrap( BootstrapThreshold
+                                                  , TlogReplay
                                                   , Checkpoint
                                                   ),
-    Pid = maybe_start_child(State#s.agent_sup, [Subscriber, ReplaySince]),
+    Pid = maybe_start_child(AgentSup, [Subscriber, ReplaySince]),
+    monitor(process, Pid),
+    ekka_rlog_status:notify_agent_connect(Shard, ekka_rlog_lib:subscriber_node(Subscriber), Pid),
     {reply, {ok, NeedBootstrap, Pid}, State};
 handle_call({bootstrap, Subscriber}, _From, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),

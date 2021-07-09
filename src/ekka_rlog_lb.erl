@@ -111,9 +111,11 @@ core_node_weight(Shard) ->
         undefined ->
             undefined;
         _Pid ->
-            Load = 0,
+            NAgents = length(ekka_rlog_status:agents()),
+            %% TODO: Add OLP check
+            Load = 1.0 * NAgents,
             %% The return values will be lexicographically sorted. Load will
             %% be distributed evenly between the nodes with the same weight
-            %% due to random term:
+            %% due to the random term:
             {ok, {Load, rand:uniform(), node()}}
     end.

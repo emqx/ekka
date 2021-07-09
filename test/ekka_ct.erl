@@ -170,7 +170,12 @@ node_id(Name) ->
 run_on(Node, Fun) ->
     %% Sending closures over erlang distribution is wrong, but for
     %% test purposes it should be ok.
-    rpc:call(Node, erlang, apply, [Fun, []]).
+    case rpc:call(Node, erlang, apply, [Fun, []]) of
+        {badrpc, Err} ->
+            error(Err);
+        Result ->
+            Result
+    end.
 
 set_network_delay(N) ->
     ok = file:write_file("/tmp/nemesis", integer_to_list(N) ++ "us\n").
