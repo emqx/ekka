@@ -17,7 +17,7 @@
 %% @doc Functions for accessing the RLOG configuration
 -module(ekka_rlog_config).
 
--export([ init/0
+-export([ load_config/0
 
         , role/0
         , backend/0
@@ -83,8 +83,8 @@ rpc_module() ->
 strict_mode() ->
     persistent_term:get(?ekka(strict_mode), false).
 
--spec init() -> ok.
-init() ->
+-spec load_config() -> ok.
+load_config() ->
     copy_from_env(rlog_rpc_module),
     copy_from_env(db_backend),
     copy_from_env(node_role),
