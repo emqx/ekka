@@ -59,7 +59,7 @@
                          }.
 
 init() ->
-    ekka_rlog_config:init().
+    ekka_rlog_config:load_config().
 
 status() ->
     Backend = backend(),
