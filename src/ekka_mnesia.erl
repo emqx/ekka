@@ -319,7 +319,7 @@ running_nodes() ->
     case ekka_rlog:role() of
         core ->
             CoreNodes = mnesia:system_info(running_db_nodes),
-            {Replicants0, _} = rpc:multicall(CoreNodes, ekka_rlog_status, replicants, [], 1000),
+            {Replicants0, _} = rpc:multicall(CoreNodes, ekka_rlog_status, replicants, []),
             Replicants = [Node || Nodes <- Replicants0, is_list(Nodes), Node <- Nodes],
             lists:usort(CoreNodes ++ Replicants);
         replicant ->
