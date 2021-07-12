@@ -28,16 +28,6 @@
         , core_nodes/0
         , subscribe/4
         , wait_for_shards/2
-
-        , get_internals/0
-
-        , call_backend_rw_trans/3
-        , call_backend_rw_dirty/3
-        ]).
-
-%% Internal exports
--export([ transactional_wrapper/3
-        , dirty_wrapper/3
         ]).
 
 -export_type([ shard/0
@@ -111,13 +101,6 @@ wait_for_shards(Shards, Timeout) ->
             ok
     end.
 
--spec find_upstream_node(ekka_rlog:shard()) -> node().
-find_upstream_node(Shard) ->
-    case ekka_rlog_status:get_core_node(Shard, 5000) of
-        {ok, Node} -> Node;
-        timeout    -> error(transaction_timeout)
-    end.
-
 -spec ensure_shard(shard()) -> ok.
 ensure_shard(Shard) ->
     case ekka_rlog_sup:start_shard(Shard) of
@@ -139,93 +122,3 @@ subscribe(Shard, RemoteNode, Subscriber, Checkpoint) ->
         false ->
             {badrpc, probe_failed}
     end.
-
--spec get_internals() -> {ekka_rlog_lib:mnesia_tid(), ets:tab()}.
-get_internals() ->
-    case mnesia:get_activity_id() of
-        {_, TID, #tidstore{store = TxStore}} ->
-            {TID, TxStore}
-    end.
-
--spec call_backend_rw_trans(ekka_rlog:shard(), atom(), list()) -> term().
-call_backend_rw_trans(Shard, Function, Args) ->
-    case {ekka_rlog:backend(), ekka_rlog:role()} of
-        {mnesia, core} ->
-            apply(mnesia, Function, Args);
-        {mnesia, replicant} ->
-            error(plain_mnesia_transaction_on_replicant);
-        {rlog, core} ->
-            transactional_wrapper(Shard, Function, Args);
-        {rlog, replicant} ->
-            Core = find_upstream_node(Shard),
-            ekka_rlog_lib:rpc_call(Core, ?MODULE, transactional_wrapper, [Shard, Function, Args])
-    end.
-
--spec call_backend_rw_dirty(atom(), ekka_rlog_lib:table(), list()) -> term().
-call_backend_rw_dirty(Function, Table, Args) ->
-    case {ekka_rlog:backend(), ekka_rlog:role()} of
-        {mnesia, core} ->
-            apply(mnesia, Function, [Table|Args]);
-        {mnesia, replicant} ->
-            error(plain_dirty_operation_on_replicant);
-        {rlog, core} ->
-            dirty_wrapper(Function, Table, Args);
-        {rlog, replicant} ->
-            Core = find_upstream_node(ekka_rlog_config:shard_rlookup(Table)),
-            ekka_rlog_lib:rpc_call(Core, ?MODULE, dirty_wrapper, [Function, Table, Args])
-    end.
-
-%% @doc Perform a transaction and log changes.
-%% the logged changes are to be replicated to other nodes.
--spec transactional_wrapper(ekka_rlog:shard(), atom(), list()) -> ekka_mnesia:t_result(term()).
-transactional_wrapper(Shard, Fun, Args) ->
-    ensure_no_transaction(),
-    TxFun =
-        fun() ->
-                Result = apply(ekka_rlog_activity, Fun, Args),
-                {TID, TxStore} = get_internals(),
-                ensure_no_ops_outside_shard(TxStore, Shard),
-                Key = ekka_rlog_lib:make_key(TID),
-                Ops = dig_ops_for_shard(TxStore, Shard),
-                mnesia:write(Shard, #rlog{key = Key, ops = Ops}, write),
-                Result
-        end,
-    mnesia:transaction(TxFun).
-
-%% @doc Perform a dirty operation and log changes.
--spec dirty_wrapper(atom(), ekka_rlog_lib:table(), list()) -> ok.
-dirty_wrapper(Fun, Table, Args) ->
-    Ret = apply(mnesia, Fun, [Table|Args]),
-    case ekka_rlog_config:shard_rlookup(Table) of
-        undefined ->
-            Ret;
-        Shard ->
-            %% This may look extremely inconsistent, and it is. But so
-            %% are dirty operations in mnesia...
-            OP = {dirty, Fun, [Table|Args]},
-            Key = ekka_rlog_lib:make_key(undefined),
-            mnesia:dirty_write(Shard, #rlog{key = Key, ops = OP}),
-            Ret
-    end.
-
-dig_ops_for_shard(TxStore, Shard) ->
-    #{match_spec := MS} = ekka_rlog_config:shard_config(Shard),
-    ets:select(TxStore, MS).
-
-ensure_no_transaction() ->
-    case mnesia:get_activity_id() of
-        undefined -> ok;
-        _         -> error(nested_transaction)
-    end.
-
-ensure_no_ops_outside_shard(TxStore, Shard) ->
-    case ekka_rlog_config:strict_mode() of
-        true  -> do_ensure_no_ops_outside_shard(TxStore, Shard);
-        false -> ok
-    end.
-
-do_ensure_no_ops_outside_shard(TxStore, Shard) ->
-    Shards = ekka_rlog_config:shards(),
-    Ops = lists:append([dig_ops_for_shard(TxStore, Shard) || Shard <- Shards -- [Shard]]),
-    [] = Ops, % Asset
-    ok.
