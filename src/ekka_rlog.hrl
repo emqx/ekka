@@ -6,4 +6,11 @@
         , ops :: ekka_rlog_lib:tx()
         }).
 
+-define(schema, ekka_rlog_schema).
+
+-record(?schema,
+        { mnesia_table :: ekka_rlog_lib:table()
+        , shard        :: ekka_rlog:shard()
+        }).
+
 -endif.
