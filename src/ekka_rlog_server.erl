@@ -109,9 +109,7 @@ handle_info(_Info, St) ->
     {noreply, St}.
 
 handle_continue(post_init, {Parent, Shard}) ->
-    ok = mnesia:wait_for_tables([?schema], infinity),
-    mnesia:subscribe({table, ?schema, simple}),
-    _Tables = ekka_rlog_schema:tables_of_shard(Shard),
+    Tables = process_schema(Shard),
     #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
     AgentSup = ekka_rlog_shard_sup:start_agent_sup(Parent, Shard),
     BootstrapperSup = ekka_rlog_shard_sup:start_bootstrapper_sup(Parent, Shard),
@@ -186,6 +184,13 @@ maybe_start_child(Supervisor, Args) ->
         {ok, Pid, _} -> Pid;
         {error, {already_started, Pid}} -> Pid
     end.
+
+-spec process_schema(ekka_rlog:shard()) -> [ekka_mnesia:table()].
+process_schema(Shard) ->
+    ok = mnesia:wait_for_tables([?schema], infinity),
+    mnesia:subscribe({table, ?schema, simple}),
+    Tables = ekka_rlog_schema:tables_of_shard(Shard),
+    Tables.
 
 %%================================================================================
 %% Internal exports (gen_rpc)
