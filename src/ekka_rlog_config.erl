@@ -36,7 +36,7 @@
 %% Type declarations
 %%================================================================================
 
--type raw_config() :: [{ekka_rlog:shard(), [ekka_rlog_lib:table()]}].
+-type raw_config() :: [{ekka_rlog:shard(), [ekka_mnesia:table()]}].
 
 %%================================================================================
 %% Persistent term keys
@@ -53,7 +53,7 @@
 %%================================================================================
 
 %% @doc Find which shard the table belongs to
--spec shard_rlookup(ekka_rlog_lib:table()) -> ekka_rlog:shard() | undefined.
+-spec shard_rlookup(ekka_mnesia:table()) -> ekka_rlog:shard() | undefined.
 shard_rlookup(Table) ->
     persistent_term:get(?shard_rlookup(Table), undefined).
 
@@ -129,7 +129,7 @@ load_shard_config(Raw) ->
 verify_shard_config(ShardConfig) ->
     verify_shard_config(ShardConfig, #{}).
 
--spec verify_shard_config(raw_config(), #{ekka_rlog_lib:table() => ekka_rlog:shard()}) -> ok.
+-spec verify_shard_config(raw_config(), #{ekka_mnesia:table() => ekka_rlog:shard()}) -> ok.
 verify_shard_config([], _) ->
     ok;
 verify_shard_config([{_Shard, []} | Rest], Acc) ->
@@ -148,7 +148,7 @@ verify_shard_config([{Shard, [Table|Tables]} | Rest], Acc0) ->
           end,
     verify_shard_config([{Shard, Tables} | Rest], Acc).
 
--spec read_shard_config() -> [{ekka_rlog:shard(), [ekka_rlog_lib:table()]}].
+-spec read_shard_config() -> [{ekka_rlog:shard(), [ekka_mnesia:table()]}].
 read_shard_config() ->
     L = lists:flatmap( fun({_App, _Module, Attrs}) ->
                                Attrs
@@ -160,7 +160,7 @@ read_shard_config() ->
      || Shard <- Shards].
 
 %% Create a reverse lookup table for finding shard of the table
--spec create_shard_rlookup([{ekka_rlog:shard(), [ekka_rlog_lib:table()]}]) -> ok.
+-spec create_shard_rlookup([{ekka_rlog:shard(), [ekka_mnesia:table()]}]) -> ok.
 create_shard_rlookup(Shards) ->
     lists:foreach(
       fun({Shard, Tables}) ->
@@ -185,7 +185,7 @@ erase_shard_config() ->
                  , persistent_term:get()
                  ).
 
--spec make_shard_match_spec([ekka_rlog_lib:table()]) -> ets:match_spec().
+-spec make_shard_match_spec([ekka_mnesia:table()]) -> ets:match_spec().
 make_shard_match_spec(Tables) ->
     [{ {{Table, '_'}, '_', '_'}
      , []

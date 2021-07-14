@@ -42,7 +42,7 @@
 %%================================================================================
 
 -type batch() :: { _From    :: pid()
-                 , _Table   :: ekka_rlog_lib:table()
+                 , _Table   :: ekka_mnesia:table()
                  , _Records :: [tuple()]
                  }.
 
@@ -50,7 +50,7 @@
         { shard       :: ekka_rlog:shard()
         , subscriber  :: ekka_rlog_lib:subscriber()
         , key_queue   :: replayq:q() | undefined
-        , tables      :: [ekka_rlog_lib:table()]
+        , tables      :: [ekka_mnesia:table()]
         }).
 
 -record(client,
@@ -206,7 +206,7 @@ traverse_queue(St0 = #server{key_queue = Q0, subscriber = Subscriber, tables = [
             {stop, normal, St0}
     end.
 
--spec prepare_batch(ekka_rlog_lib:table(), list()) -> [tuple()].
+-spec prepare_batch(ekka_mnesia:table(), list()) -> [tuple()].
 prepare_batch(Table, Keys) ->
     lists:foldl( fun(Key, Acc) -> mnesia:dirty_read(Table, Key) ++ Acc end
                , []

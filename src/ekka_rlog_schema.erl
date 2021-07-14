@@ -63,7 +63,7 @@
 %%
 %% Currently there is no requirement to implement this, so we can get
 %% away with managing each shard separately
--spec add_table(ekka_rlog:shard(), ekka_rlog_lib:table()) -> ok.
+-spec add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
 add_table(Shard, Table) ->
     case has_schema() of
         false ->
@@ -83,7 +83,7 @@ mnesia(StartType) ->
     end.
 
 %% @private Return the list of tables that belong to the shard.
--spec tables_of_shard(ekka_rlog:shard()) -> [ekka_rlog_lib:table()].
+-spec tables_of_shard(ekka_rlog:shard()) -> [ekka_mnesia:table()].
 tables_of_shard(Shard) ->
     true = has_schema(),
     {atomic, Tables} =
@@ -108,15 +108,15 @@ has_schema() ->
     end.
 
 do_mnesia(boot) ->
-    ok = ekka_mnesia:create_table(?schema, [{type, ordered_set},
-                                            {ram_copies, [node()]},
-                                            {record_name, ?schema},
-                                            {attributes, record_info(fields, ?schema)}
-                                           ]);
+    ok = ekka_mnesia:create_table_internal(?schema, [{type, ordered_set},
+                                                     {ram_copies, [node()]},
+                                                     {record_name, ?schema},
+                                                     {attributes, record_info(fields, ?schema)}
+                                                    ]);
 do_mnesia(copy) ->
     ok = ekka_mnesia:copy_table(?schema, ram_copies).
 
--spec do_add_table(ekka_rlog:shard(), ekka_rlog_lib:table()) -> ok.
+-spec do_add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
 do_add_table(Shard, Table) ->
     case mnesia:wread({?schema, Table}) of
         [] ->

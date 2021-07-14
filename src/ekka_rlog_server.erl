@@ -44,6 +44,7 @@
 -export_type([checkpoint/0]).
 
 -include_lib("snabbkaffe/include/trace.hrl").
+-include("ekka_rlog.hrl").
 
 %%================================================================================
 %% Type declarations
@@ -108,6 +109,9 @@ handle_info(_Info, St) ->
     {noreply, St}.
 
 handle_continue(post_init, {Parent, Shard}) ->
+    ok = mnesia:wait_for_tables([?schema], infinity),
+    mnesia:subscribe({table, ?schema, simple}),
+    _Tables = ekka_rlog_schema:tables_of_shard(Shard),
     #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
     AgentSup = ekka_rlog_shard_sup:start_agent_sup(Parent, Shard),
     BootstrapperSup = ekka_rlog_shard_sup:start_bootstrapper_sup(Parent, Shard),
