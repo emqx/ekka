@@ -17,7 +17,7 @@
 %% @doc Functions for accessing the RLOG configuration
 -module(ekka_rlog_config).
 
--export([ load_config/0
+-export([ load_config/2
 
         , role/0
         , backend/0
@@ -85,11 +85,11 @@ strict_mode() ->
 
 -spec load_config() -> ok.
 load_config() ->
+    erase_shard_config(),
     copy_from_env(rlog_rpc_module),
     copy_from_env(db_backend),
     copy_from_env(node_role),
-    copy_from_env(strict_mode),
-    load_shard_config().
+    copy_from_env(strict_mode).
 
 %%================================================================================
 %% Internal
@@ -102,15 +102,9 @@ copy_from_env(Key) ->
         undefined -> ok
     end.
 
--spec load_shard_config() -> ok.
-load_shard_config() ->
-    load_shard_config(read_shard_config()).
-
--spec load_shard_config(raw_config()) -> ok.
-load_shard_config(Raw) ->
-    ok = verify_shard_config(Raw),
-    erase_shard_config(),
-    create_shard_rlookup(Raw),
+-spec load_shard_config(ekka_rlog:shard(), [ekka_mnesia:table()]) -> ok.
+load_shard_config(Shard, Tables) ->
+    create_shard_rlookup(Shard, Tables),
     Shards = proplists:get_keys(Raw),
     ok = persistent_term:put(?shards, Shards),
     lists:foreach(fun({Shard, Tables}) ->
@@ -124,29 +118,6 @@ load_shard_config(Raw) ->
                           ok = persistent_term:put(?shard_config(Shard), Config)
                   end,
                   Raw).
-
--spec verify_shard_config(raw_config()) -> ok.
-verify_shard_config(ShardConfig) ->
-    verify_shard_config(ShardConfig, #{}).
-
--spec verify_shard_config(raw_config(), #{ekka_mnesia:table() => ekka_rlog:shard()}) -> ok.
-verify_shard_config([], _) ->
-    ok;
-verify_shard_config([{_Shard, []} | Rest], Acc) ->
-    verify_shard_config(Rest, Acc);
-verify_shard_config([{Shard, [Table|Tables]} | Rest], Acc0) ->
-    Acc = case Acc0 of
-              #{Table := Shard1} when Shard1 =/= Shard ->
-                  ?tp(critical, "Duplicate RLOG shard",
-                      #{ table       => Table
-                       , shard       => Shard
-                       , other_shard => Shard1
-                       }),
-                  error(badarg);
-              _ ->
-                  Acc0#{Table => Shard}
-          end,
-    verify_shard_config([{Shard, Tables} | Rest], Acc).
 
 -spec read_shard_config() -> [{ekka_rlog:shard(), [ekka_mnesia:table()]}].
 read_shard_config() ->
@@ -195,16 +166,6 @@ make_shard_match_spec(Tables) ->
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
-
--dialyzer({nowarn_function, verify_shard_config_test/0}).
-verify_shard_config_test() ->
-    ?assertMatch(ok, verify_shard_config([])),
-    ?assertMatch(ok, verify_shard_config([ {foo, [foo_tab, bar_tab]}
-                                         , {baz, [baz_tab, foo_bar_tab]}
-                                         ])),
-    ?assertError(_, verify_shard_config([ {foo, [foo_tab, bar_tab]}
-                                        , {baz, [baz_tab, foo_tab]}
-                                        ])).
 
 shard_rlookup_test() ->
     PersTerms = lists:sort(persistent_term:get()),
