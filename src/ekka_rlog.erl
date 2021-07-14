@@ -44,7 +44,7 @@
 
 -type role() :: core | replicant.
 
--type shard_config() :: #{ tables := [ekka_rlog_lib:table()]
+-type shard_config() :: #{ tables := [ekka_mnesia:table()]
                          , match_spec := ets:match_spec()
                          }.
 

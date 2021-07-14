@@ -59,7 +59,7 @@ init(boot, Shard) ->
          , shard => Shard
          , type => boot
          }),
-    ok = ekka_mnesia:create_table(Shard, Opts);
+    ok = ekka_mnesia:create_table_internal(Shard, Opts);
 init(copy, Shard) ->
     ?tp(notice, creating_rlog_tab,
         #{ node => node()
