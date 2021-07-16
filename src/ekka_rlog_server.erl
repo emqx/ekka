@@ -109,8 +109,9 @@ handle_info(_Info, St) ->
     {noreply, St}.
 
 handle_continue(post_init, {Parent, Shard}) ->
+    ok = ekka_rlog_tab:ensure_table(Shard),
     Tables = process_schema(Shard),
-    #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
+    ekka_rlog_config:load_shard_config(Shard, Tables),
     AgentSup = ekka_rlog_shard_sup:start_agent_sup(Parent, Shard),
     BootstrapperSup = ekka_rlog_shard_sup:start_bootstrapper_sup(Parent, Shard),
     mnesia:wait_for_tables([Shard|Tables], 100000),
