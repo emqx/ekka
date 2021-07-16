@@ -302,7 +302,7 @@ ensure_no_ops_outside_shard(TxStore, Shard) ->
     end.
 
 do_ensure_no_ops_outside_shard(TxStore, Shard) ->
-    Shards = ekka_rlog_config:shards(),
-    Ops = lists:append([dig_ops_for_shard(TxStore, Shard) || Shard <- Shards -- [Shard]]),
+    Shards = ekka_rlog_schema:shards(),
+    Ops = lists:append([dig_ops_for_shard(TxStore, S) || S <- Shards -- [Shard]]),
     [] = Ops, % Asset
     ok.

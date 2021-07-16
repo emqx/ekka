@@ -169,7 +169,7 @@ start_table_traverse(St = #server{tables = [], subscriber = Subscriber}) ->
     _ = complete(Subscriber, self(), ekka_rlog_lib:approx_checkpoint()),
     {stop, normal, St};
 start_table_traverse(St0 = #server{ shard = Shard
-                                  , tables = [Table|Rest]
+                                  , tables = [Table|_Rest]
                                   , key_queue = Q0
                                   }) ->
     ?tp(info, start_shard_table_bootstrap,
