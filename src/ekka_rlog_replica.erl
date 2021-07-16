@@ -287,11 +287,12 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
         #{ node => node()
          }),
     case try_connect(Shard, Checkpoint) of
-        {ok, _BootstrapNeeded = true, Node, ConnPid} ->
+        {ok, _BootstrapNeeded = true, Node, ConnPid, Tables} ->
             D = #d{ shard            = Shard
                   , agent            = ConnPid
                   , remote_core_node = Node
                   },
+            ekka_rlog_config:load_shard_config(Shard, Tables),
             {next_state, ?bootstrap, D};
         {ok, _BootstrapNeeded = false, Node, ConnPid} ->
             D = #d{ shard            = Shard
@@ -321,9 +322,9 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
         #{ node => Node
          }),
     case ekka_rlog:subscribe(Shard, Node, self(), Checkpoint) of
-        {ok, NeedBootstrap, Agent} ->
+        {ok, NeedBootstrap, Agent, Tables} ->
             link(Agent),
-            {ok, NeedBootstrap, Node, Agent};
+            {ok, NeedBootstrap, Node, Agent, Tables};
         Err ->
             ?tp(warning, "Failed to connect to the core node",
                 #{ node => Node
