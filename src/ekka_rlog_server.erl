@@ -78,12 +78,12 @@ probe(Node, Shard) ->
     ekka_rlog_lib:rpc_call(Node, ?MODULE, do_probe, [Shard]) =:= true.
 
 -spec subscribe(ekka_rlog:shard(), ekka_rlog_lib:subscriber(), checkpoint()) ->
-          {_NeedBootstrap :: boolean(), _Agent :: pid()}.
+          {ok, _NeedBootstrap :: boolean(), _Agent :: pid(), [ekka_mnesia:table()]}.
 subscribe(Shard, Subscriber, Checkpoint) ->
     gen_server:call(Shard, {subscribe, Subscriber, Checkpoint}, infinity).
 
 -spec bootstrap_me(node(), ekka_rlog:shard()) -> {ok, pid()}
-              | {error, term()}.
+                                               | {error, term()}.
 bootstrap_me(RemoteNode, Shard) ->
     Me = {node(), self()},
     case ekka_rlog_lib:rpc_call(RemoteNode, ?MODULE, do_bootstrap, [Shard, Me]) of
@@ -143,7 +143,8 @@ handle_call({subscribe, Subscriber, Checkpoint}, _From, State) ->
     Pid = maybe_start_child(AgentSup, [Subscriber, ReplaySince]),
     monitor(process, Pid),
     ekka_rlog_status:notify_agent_connect(Shard, ekka_rlog_lib:subscriber_node(Subscriber), Pid),
-    {reply, {ok, NeedBootstrap, Pid}, State};
+    Tables = ekka_rlog_schema:tables_of_shard(Shard),
+    {reply, {ok, NeedBootstrap, Pid, Tables}, State};
 handle_call({bootstrap, Subscriber}, _From, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),
     {reply, {ok, Pid}, State};

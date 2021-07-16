@@ -62,7 +62,7 @@ status() ->
             Info0;
         {rlog, replicant} ->
             Stats = [{I, ekka_rlog_status:get_shard_stats(I)}
-                     || I <- ekka_rlog_config:shards()],
+                     || I <- ekka_rlog_schema:shards()],
             Info0#{ shards_in_sync => ekka_rlog_status:shards_up()
                   , shards_down    => ekka_rlog_status:shards_down()
                   , shard_stats    => maps:from_list(Stats)

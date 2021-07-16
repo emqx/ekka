@@ -18,13 +18,23 @@
 -module(ekka_rlog_schema).
 
 %% API:
--export([mnesia/1, add_table/2, tables_of_shard/1]).
+-export([mnesia/1, add_table/2, tables_of_shard/1, shards/0]).
 
 
 -boot_mnesia({mnesia, [boot]}).
 -copy_mnesia({mnesia, [copy]}).
 
 -include("ekka_rlog.hrl").
+
+%% WARNING: Treatment of the schema table is different on the core
+%% nodes and replicants. Schema transactions on core nodes are
+%% replicated via mnesia and therefore this table is consistent, but
+%% these updates do not reach the replicants. The replicants use
+%% regular mnesia transactions to update the schema, so it might be
+%% inconsistent with the core nodes' view.
+%%
+%% Therefore one should be rather careful with the contents of the
+%% rlog_schema table.
 
 %%================================================================================
 %% Type declarations
@@ -65,10 +75,10 @@
 %% away with managing each shard separately
 -spec add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
 add_table(Shard, Table) ->
-    case has_schema() of
-        false ->
+    case ekka_rlog_config:backend() of
+        mnesia ->
             ok;
-        true ->
+        rlog ->
             case mnesia:transaction(fun do_add_table/2, [Shard, Table], infinity) of
                 {atomic, ok}   -> ok;
                 {aborted, Err} -> error({bad_schema, Shard, Table, Err})
@@ -77,42 +87,45 @@ add_table(Shard, Table) ->
 
 %% @doc Create the internal schema table if needed
 mnesia(StartType) ->
-    case has_schema() of
-        true -> do_mnesia(StartType);
+    case ekka_rlog_config:backend() of
+        rlog -> do_mnesia(StartType);
         _    -> ok
     end.
 
-%% @private Return the list of tables that belong to the shard.
+%% @doc Return the list of tables that belong to the shard.
 -spec tables_of_shard(ekka_rlog:shard()) -> [ekka_mnesia:table()].
 tables_of_shard(Shard) ->
-    true = has_schema(),
-    {atomic, Tables} =
-        mnesia:transaction(
-          fun() ->
-                  mnesia:match_object(#?schema{mnesia_table = '$1', shard = Shard})
-          end),
-    lists:flatten(Tables).
+    %%core = ekka_rlog_config:role(), % assert
+    MS = {#?schema{mnesia_table = '$1', shard = Shard}, [], ['$1']},
+    {atomic, Tables} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
+    Tables.
+
+%% @doc Return the list of known shards
+-spec shards() -> [ekka_rlog:shard()].
+shards() ->
+    MS = {#?schema{mnesia_table = '_', shard = '$1'}, [], ['$1']},
+    {atomic, Shards} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
+    lists:usort(Shards).
 
 %%================================================================================
 %% Internal functions
 %%================================================================================
 
--spec has_schema() -> boolean().
-has_schema() ->
-    %% Note: replicant nodes don't have their own copies of the schema
-    %% table. All the data is transferred to the replicant in the
-    %% handshake message
-    case {ekka_rlog_config:backend(), ekka_rlog_config:role()} of
-        {rlog, core} -> true;
-        _            -> false
-    end.
+-spec load_static_config() -> ok.
+load_static_config() ->
+    lists:foreach( fun({_App, _Module, Attrs}) ->
+                           [add_table(Shard, Table) || {Shard, Table} <- Attrs]
+                   end
+                 , ekka_boot:all_module_attributes(rlog_shard)
+                 ).
 
 do_mnesia(boot) ->
     ok = ekka_mnesia:create_table_internal(?schema, [{type, ordered_set},
                                                      {ram_copies, [node()]},
                                                      {record_name, ?schema},
                                                      {attributes, record_info(fields, ?schema)}
-                                                    ]);
+                                                    ]),
+    load_static_config();
 do_mnesia(copy) ->
     ok = ekka_mnesia:copy_table(?schema, ram_copies).
 
