@@ -26,6 +26,7 @@
 
           %% Shard config:
         , load_shard_config/2
+        , erase_shard_config/1
         , shard_rlookup/1
         , shard_config/1
         ]).

@@ -294,12 +294,13 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
                   },
             ekka_rlog_config:load_shard_config(Shard, Tables),
             {next_state, ?bootstrap, D};
-        {ok, _BootstrapNeeded = false, Node, ConnPid} ->
+        {ok, _BootstrapNeeded = false, Node, ConnPid, Tables} ->
             D = #d{ shard            = Shard
                   , agent            = ConnPid
                   , remote_core_node = Node
                   , checkpoint       = Checkpoint
                   },
+            ekka_rlog_config:load_shard_config(Shard, Tables),
             {next_state, ?normal, D};
         {error, Err} ->
             ReconnectTimeout = application:get_env(ekka, rlog_replica_reconnect_interval, 5000),
@@ -307,13 +308,13 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
     end.
 
 -spec try_connect(ekka_rlog:shard(), ekka_rlog_server:checkpoint()) ->
-                {ok, boolean(), node(), pid()}
+                {ok, boolean(), node(), pid(), [ekka_mnesia:table()]}
               | {error, term()}.
 try_connect(Shard, Checkpoint) ->
     try_connect(ekka_rlog_lib:shuffle(ekka_rlog:core_nodes()), Shard, Checkpoint).
 
 -spec try_connect([node()], ekka_rlog:shard(), ekka_rlog_server:checkpoint()) ->
-                {ok, boolean(), node(), pid()}
+                {ok, boolean(), node(), pid(), [ekka_mnesia:table()]}
               | {error, term()}.
 try_connect([], _, _) ->
     {error, no_core_available};

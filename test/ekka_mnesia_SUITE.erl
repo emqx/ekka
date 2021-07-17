@@ -411,6 +411,39 @@ t_dirty_reads(_) ->
                                    ))
        end).
 
+%% Test adding tables to the schema:
+t_rlog_schema(_) ->
+    snabbkaffe:fix_ct_logging(),
+    Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
+    ?check_trace(
+       try
+           Nodes = [N1, N2] = ekka_ct:start_cluster(ekka, Cluster),
+           ekka_mnesia_test_util:wait_shards(Nodes),
+           %% Add a new table
+           ?assertMatch( {[ok, ok], []}
+                       , rpc:multicall([N1, N2], ekka_mnesia, create_table,
+                                       [tab1, [{rlog_shard, test_shard}]])
+                       ),
+           %ok = rpc:call(N1, ekka_mnesia, dirty_write, [{tab1, 1, 1}]),
+           %% Check idempotency:
+           ?assertMatch( {[ok, ok], []}
+                       , rpc:multicall([N1, N2], ekka_mnesia, create_table,
+                                       [tab1, [{rlog_shard, test_shard}]])
+                       ),
+           %% Try to change the shard of an existing table (this should crash):
+           ?assertMatch( {[{badrpc, {'EXIT', _}}, {badrpc, {'EXIT', _}}], []}
+                       , rpc:multicall([N1, N2], ekka_mnesia, create_table,
+                                       [tab1, [{rlog_shard, another_shard}]])
+                       ),
+           ekka_mnesia_test_util:stabilize(1000),
+           ekka_mnesia_test_util:compare_table_contents(tab1, Nodes)
+       after
+           ekka_ct:teardown_cluster(Cluster)
+       end,
+       fun(_, _) ->
+               true
+       end).
+
 cluster_benchmark(_) ->
     snabbkaffe:fix_ct_logging(),
     NReplicas = 6,
