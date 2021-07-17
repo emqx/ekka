@@ -25,6 +25,7 @@
 -copy_mnesia({mnesia, [copy]}).
 
 -include("ekka_rlog.hrl").
+-include_lib("snabbkaffe/include/trace.hrl").
 
 %% WARNING: Treatment of the schema table is different on the core
 %% nodes and replicants. Schema transactions on core nodes are
@@ -133,6 +134,11 @@ do_mnesia(copy) ->
 do_add_table(Shard, Table) ->
     case mnesia:wread({?schema, Table}) of
         [] ->
+            ?tp(info, "Adding table to a shard",
+                #{ shard => Shard
+                 , table => Table
+                 , live_change => is_pid(whereis(Shard))
+                 }),
             mnesia:write(#?schema{ mnesia_table = Table
                                  , shard = Shard
                                  }),

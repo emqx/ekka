@@ -105,6 +105,19 @@ init({Parent, Shard}) ->
 handle_info({'DOWN', _MRef, process, Pid, _Info}, St) ->
     ekka_rlog_status:notify_agent_disconnect(Pid),
     {noreply, St};
+handle_info({mnesia_table_event, Event}, St) ->
+    #s{shard = Shard} = St,
+    case Event of
+        {write, #?schema{mnesia_table = Tab, shard = Shard}, _ActivityId} ->
+            ?tp(notice, "Shard schema change",
+                #{ shard     => Shard
+                 , new_table => Tab
+                 }),
+            ekka_rlog_sup:restart_shard(Shard, schema_change);
+        _ ->
+            ok
+    end,
+    {noreply, St};
 handle_info(_Info, St) ->
     {noreply, St}.
 

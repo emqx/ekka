@@ -424,7 +424,7 @@ t_rlog_schema(_) ->
                        , rpc:multicall([N1, N2], ekka_mnesia, create_table,
                                        [tab1, [{rlog_shard, test_shard}]])
                        ),
-           %ok = rpc:call(N1, ekka_mnesia, dirty_write, [{tab1, 1, 1}]),
+           ok = rpc:call(N1, ekka_mnesia, dirty_write, [{tab1, 1, 1}]),
            %% Check idempotency:
            ?assertMatch( {[ok, ok], []}
                        , rpc:multicall([N1, N2], ekka_mnesia, create_table,
@@ -436,12 +436,29 @@ t_rlog_schema(_) ->
                                        [tab1, [{rlog_shard, another_shard}]])
                        ),
            ekka_mnesia_test_util:stabilize(1000),
-           ekka_mnesia_test_util:compare_table_contents(tab1, Nodes)
+           ekka_mnesia_test_util:compare_table_contents(tab1, Nodes),
+           Nodes
        after
            ekka_ct:teardown_cluster(Cluster)
        end,
-       fun(_, _) ->
-               true
+       fun([N1, N2], Trace) ->
+               ?assert(
+                  ?strict_causality( #{?snk_kind := "Adding table to a shard", shard := _Shard, live_change := true}
+                                   , #{?snk_kind := "Shard schema change"}
+                                   , ?of_node(N1, Trace)
+                                   )),
+               ?assert(
+                  ?strict_causality( #{?snk_kind := "Shard schema change", shard := _Shard}
+                                   , #{?snk_kind := "Restarting RLOG shard", shard := _Shard}
+                                   , ?of_node(N1, Trace)
+                                   )),
+               %% Schema change must cause restart of the replica process and bootstrap:
+               {_, Rest} = ?split_trace_at(#{?snk_kind := "Shard schema change"}, Trace),
+               ?assert(
+                  ?strict_causality( #{?snk_kind := "Restarting RLOG shard", shard := _Shard}
+                                   , #{?snk_kind := state_change, to := bootstrap, ?snk_meta := #{node := N2}}
+                                   , Rest
+                                   ))
        end).
 
 cluster_benchmark(_) ->
