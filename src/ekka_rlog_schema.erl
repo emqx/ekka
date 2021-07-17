@@ -18,11 +18,7 @@
 -module(ekka_rlog_schema).
 
 %% API:
--export([mnesia/1, add_table/2, tables_of_shard/1, shards/0]).
-
-
--boot_mnesia({mnesia, [boot]}).
--copy_mnesia({mnesia, [copy]}).
+-export([init/1, add_table/2, tables_of_shard/1, shard_of_table/1, shards/0]).
 
 -include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/trace.hrl").
@@ -87,7 +83,7 @@ add_table(Shard, Table) ->
     end.
 
 %% @doc Create the internal schema table if needed
-mnesia(StartType) ->
+init(StartType) ->
     case ekka_rlog_config:backend() of
         rlog -> do_mnesia(StartType);
         _    -> ok
@@ -100,6 +96,16 @@ tables_of_shard(Shard) ->
     MS = {#?schema{mnesia_table = '$1', shard = Shard}, [], ['$1']},
     {atomic, Tables} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
     Tables.
+
+%% @doc Get the shard of a table
+-spec shard_of_table(ekka_mnesia:table()) -> {ok, ekka_rlog:shard()} | undefined.
+shard_of_table(Table) ->
+    case mnesia:dirty_read(?schema, Table) of
+        [#?schema{shard = Shard}] ->
+            {ok, Shard};
+        [] ->
+            undefined
+    end.
 
 %% @doc Return the list of known shards
 -spec shards() -> [ekka_rlog:shard()].

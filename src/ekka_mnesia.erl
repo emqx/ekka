@@ -143,8 +143,10 @@ init_tables() ->
               end,
     case (ekka_rlog:role() =:= replicant) orelse IsAlone of
         true ->
+            ekka_rlog_schema:init(boot),
             create_tables();
         false ->
+            ekka_rlog_schema:init(copy),
             copy_tables()
     end.
 
@@ -161,7 +163,11 @@ copy_tables() ->
 create_table(Name, TabDef) ->
     case proplists:get_value(rlog_shard, TabDef) of
         undefined ->
-            ?LOG(warning, "Table ~p doesn't belong to any RLOG shard.", [Name]);
+            %% Perhaps the shard has been declared already?
+            case ekka_rlog_schema:shard_of_table(Name) of
+                {ok, _}   -> ok;
+                undefined -> ?LOG(warning, "Table ~p doesn't belong to any RLOG shard.", [Name])
+            end;
         Shard ->
             ekka_rlog_schema:add_table(Shard, Name)
     end,
