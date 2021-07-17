@@ -72,22 +72,21 @@
 %% away with managing each shard separately
 -spec add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
 add_table(Shard, Table) ->
-    case ekka_rlog_config:backend() of
-        mnesia ->
-            ok;
-        rlog ->
-            case mnesia:transaction(fun do_add_table/2, [Shard, Table], infinity) of
-                {atomic, ok}   -> ok;
-                {aborted, Err} -> error({bad_schema, Shard, Table, Err})
-            end
+    case mnesia:transaction(fun do_add_table/2, [Shard, Table], infinity) of
+        {atomic, ok}   -> ok;
+        {aborted, Err} -> error({bad_schema, Shard, Table, Err})
     end.
 
 %% @doc Create the internal schema table if needed
-init(StartType) ->
-    case ekka_rlog_config:backend() of
-        rlog -> do_mnesia(StartType);
-        _    -> ok
-    end.
+init(boot) ->
+    ok = ekka_mnesia:create_table_internal(?schema, [{type, ordered_set},
+                                                     {ram_copies, [node()]},
+                                                     {record_name, ?schema},
+                                                     {attributes, record_info(fields, ?schema)}
+                                                    ]),
+    load_static_config();
+init(copy) ->
+    ok = ekka_mnesia:copy_table(?schema, ram_copies).
 
 %% @doc Return the list of tables that belong to the shard.
 -spec tables_of_shard(ekka_rlog:shard()) -> [ekka_mnesia:table()].
@@ -125,16 +124,6 @@ load_static_config() ->
                    end
                  , ekka_boot:all_module_attributes(rlog_shard)
                  ).
-
-do_mnesia(boot) ->
-    ok = ekka_mnesia:create_table_internal(?schema, [{type, ordered_set},
-                                                     {ram_copies, [node()]},
-                                                     {record_name, ?schema},
-                                                     {attributes, record_info(fields, ?schema)}
-                                                    ]),
-    load_static_config();
-do_mnesia(copy) ->
-    ok = ekka_mnesia:copy_table(?schema, ram_copies).
 
 -spec do_add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
 do_add_table(Shard, Table) ->

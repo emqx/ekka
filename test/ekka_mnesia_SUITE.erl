@@ -444,7 +444,7 @@ t_rlog_schema(_) ->
        fun([N1, N2], Trace) ->
                ?assert(
                   ?strict_causality( #{?snk_kind := "Adding table to a shard", shard := _Shard, live_change := true}
-                                   , #{?snk_kind := "Shard schema change"}
+                                   , #{?snk_kind := "Shard schema change", shard := _Shard}
                                    , ?of_node(N1, Trace)
                                    )),
                ?assert(
