@@ -47,7 +47,7 @@ t_data_dir(_) ->
 
 t_create_del_table(_) ->
     try
-        application:ensure_all_started(ekka),
+        ekka:start(),
         ok = ekka_mnesia:create_table(kv_tab, [
                     {ram_copies, [node()]},
                     {record_name, kv_tab},
