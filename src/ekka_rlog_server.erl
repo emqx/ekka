@@ -44,6 +44,7 @@
 -export_type([checkpoint/0]).
 
 -include_lib("snabbkaffe/include/trace.hrl").
+-include("ekka_rlog.hrl").
 
 %%================================================================================
 %% Type declarations
@@ -53,6 +54,7 @@
 
 -record(s,
         { shard               :: ekka_rlog:shard()
+        , parent_sup          :: pid()
         , agent_sup           :: pid()
         , bootstrapper_sup    :: pid()
         , tlog_replay         :: integer()
@@ -77,12 +79,12 @@ probe(Node, Shard) ->
     ekka_rlog_lib:rpc_call(Node, ?MODULE, do_probe, [Shard]) =:= true.
 
 -spec subscribe(ekka_rlog:shard(), ekka_rlog_lib:subscriber(), checkpoint()) ->
-          {_NeedBootstrap :: boolean(), _Agent :: pid()}.
+          {ok, _NeedBootstrap :: boolean(), _Agent :: pid(), [ekka_mnesia:table()]}.
 subscribe(Shard, Subscriber, Checkpoint) ->
     gen_server:call(Shard, {subscribe, Subscriber, Checkpoint}, infinity).
 
 -spec bootstrap_me(node(), ekka_rlog:shard()) -> {ok, pid()}
-              | {error, term()}.
+                                               | {error, term()}.
 bootstrap_me(RemoteNode, Shard) ->
     Me = {node(), self()},
     case ekka_rlog_lib:rpc_call(RemoteNode, ?MODULE, do_bootstrap, [Shard, Me]) of
@@ -101,14 +103,21 @@ init({Parent, Shard}) ->
     ?tp(rlog_server_start, #{node => node()}),
     {ok, {Parent, Shard}, {continue, post_init}}.
 
+handle_info({mnesia_table_event, {write, Record, ActivityId}}, St) ->
+    handle_mnesia_event(Record, ActivityId, St);
 handle_info({'DOWN', _MRef, process, Pid, _Info}, St) ->
     ekka_rlog_status:notify_agent_disconnect(Pid),
     {noreply, St};
-handle_info(_Info, St) ->
+handle_info(Info, St) ->
+    ?tp(warning, "Received unknown event",
+        #{ info => Info
+         }),
     {noreply, St}.
 
 handle_continue(post_init, {Parent, Shard}) ->
-    #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
+    ok = ekka_rlog_tab:ensure_table(Shard),
+    Tables = process_schema(Shard),
+    ekka_rlog_config:load_shard_config(Shard, Tables),
     AgentSup = ekka_rlog_shard_sup:start_agent_sup(Parent, Shard),
     BootstrapperSup = ekka_rlog_shard_sup:start_bootstrapper_sup(Parent, Shard),
     mnesia:wait_for_tables([Shard|Tables], 100000),
@@ -117,6 +126,7 @@ handle_continue(post_init, {Parent, Shard}) ->
          , shard => Shard
          }),
     State = #s{ shard               = Shard
+              , parent_sup          = Parent
               , agent_sup           = AgentSup
               , bootstrapper_sup    = BootstrapperSup
               , tlog_replay         = 30 %% TODO: unused. Remove?
@@ -140,7 +150,8 @@ handle_call({subscribe, Subscriber, Checkpoint}, _From, State) ->
     Pid = maybe_start_child(AgentSup, [Subscriber, ReplaySince]),
     monitor(process, Pid),
     ekka_rlog_status:notify_agent_connect(Shard, ekka_rlog_lib:subscriber_node(Subscriber), Pid),
-    {reply, {ok, NeedBootstrap, Pid}, State};
+    Tables = ekka_rlog_schema:tables_of_shard(Shard),
+    {reply, {ok, NeedBootstrap, Pid, Tables}, State};
 handle_call({bootstrap, Subscriber}, _From, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),
     {reply, {ok, Pid}, State};
@@ -152,7 +163,7 @@ handle_call(_From, Call, St) ->
 code_change(_OldVsn, St, _Extra) ->
     {ok, St}.
 
-terminate(_Reason, #{} = St) ->
+terminate(_Reason, St) ->
     {ok, St}.
 
 %%================================================================================
@@ -181,6 +192,34 @@ maybe_start_child(Supervisor, Args) ->
         {ok, Pid} -> Pid;
         {ok, Pid, _} -> Pid;
         {error, {already_started, Pid}} -> Pid
+    end.
+
+-spec process_schema(ekka_rlog:shard()) -> [ekka_mnesia:table()].
+process_schema(Shard) ->
+    ok = mnesia:wait_for_tables([?schema], infinity),
+    {ok, SchemaNode} = mnesia:subscribe({table, ?schema, simple}),
+    Tables = ekka_rlog_schema:tables_of_shard(Shard),
+    Tables.
+
+handle_mnesia_event(#?schema{mnesia_table = NewTab, shard = ChangedShard}, ActivityId, St0) ->
+    #s{shard = Shard, parent_sup = Parent} = St0,
+    case ChangedShard of
+        Shard ->
+            ?tp(notice, "Shard schema change",
+                #{ shard       => Shard
+                 , new_table   => NewTab
+                 , activity_id => ActivityId
+                 }),
+            Tables = ekka_rlog_schema:tables_of_shard(Shard),
+            ekka_rlog_config:load_shard_config(Shard, Tables),
+            %% Shut down all the downstream connections by restarting the supervisors:
+            AgentSup = ekka_rlog_shard_sup:restart_agent_sup(Parent),
+            BootstrapperSup = ekka_rlog_shard_sup:restart_bootstrapper_sup(Parent),
+            {noreply, St0#s{ agent_sup        = AgentSup
+                           , bootstrapper_sup = BootstrapperSup
+                           }};
+        _ ->
+            {noreply, St0}
     end.
 
 %%================================================================================
