@@ -21,7 +21,12 @@
 -behaviour(supervisor).
 
 %% API:
--export([start_link/1, start_agent_sup/2, start_bootstrapper_sup/2]).
+-export([ start_link/1
+        , start_agent_sup/2
+        , start_bootstrapper_sup/2
+        , restart_agent_sup/1
+        , restart_bootstrapper_sup/1
+        ]).
 
 %% supervisor callbacks & external exports:
 -export([init/1, start_link/2]).
@@ -38,6 +43,14 @@ start_agent_sup(SupPid, Shard) ->
 
 start_bootstrapper_sup(SupPid, Shard) ->
     start_sibling(SupPid, bootstrapper, Shard).
+
+%% @doc Restart agent sup without modifying its child spec
+restart_agent_sup(SupPid) ->
+    restart_sibling(SupPid, agent).
+
+%% @doc Restart bootstrapper sup without modifying its child spec
+restart_bootstrapper_sup(SupPid) ->
+    restart_sibling(SupPid, bootstrapper).
 
 %%================================================================================
 %% Supervisor callbacks
@@ -87,8 +100,14 @@ init_simple_sup(Module, Shard) ->
     {ok, {SupFlags, [ChildSpec]}}.
 
 -spec start_sibling(pid(), agent | bootstrapper, ekka_rlog:shard()) -> pid().
-start_sibling(Parent, Id, Shard) ->
-    {ok, Pid} = supervisor:start_child(Parent, simple_sup(Id, Shard)),
+start_sibling(Sup, Id, Shard) ->
+    {ok, Pid} = supervisor:start_child(Sup, simple_sup(Id, Shard)),
+    Pid.
+
+-spec restart_sibling(pid(), agent | bootstrapper) -> pid().
+restart_sibling(Sup, Id) ->
+    ok = supervisor:terminate_child(Sup, Id),
+    {ok, Pid} = supervisor:restart_child(Sup, Id),
     Pid.
 
 -spec simple_sup(agent | bootstrapper, ekka_rlog:shard()) -> supervisor:child_spec().

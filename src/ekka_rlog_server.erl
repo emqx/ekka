@@ -54,6 +54,7 @@
 
 -record(s,
         { shard               :: ekka_rlog:shard()
+        , parent_sup          :: pid()
         , agent_sup           :: pid()
         , bootstrapper_sup    :: pid()
         , tlog_replay         :: integer()
@@ -102,23 +103,15 @@ init({Parent, Shard}) ->
     ?tp(rlog_server_start, #{node => node()}),
     {ok, {Parent, Shard}, {continue, post_init}}.
 
+handle_info({mnesia_table_event, {write, Record, ActivityId}}, St) ->
+    handle_mnesia_event(Record, ActivityId, St);
 handle_info({'DOWN', _MRef, process, Pid, _Info}, St) ->
     ekka_rlog_status:notify_agent_disconnect(Pid),
     {noreply, St};
-handle_info({mnesia_table_event, Event}, St) ->
-    #s{shard = Shard} = St,
-    case Event of
-        {write, #?schema{mnesia_table = Tab, shard = Shard}, _ActivityId} ->
-            ?tp(notice, "Shard schema change",
-                #{ shard     => Shard
-                 , new_table => Tab
-                 }),
-            ekka_rlog_sup:restart_shard(Shard, schema_change);
-        _ ->
-            ok
-    end,
-    {noreply, St};
-handle_info(_Info, St) ->
+handle_info(Info, St) ->
+    ?tp(warning, "Received unknown event",
+        #{ info => Info
+         }),
     {noreply, St}.
 
 handle_continue(post_init, {Parent, Shard}) ->
@@ -133,6 +126,7 @@ handle_continue(post_init, {Parent, Shard}) ->
          , shard => Shard
          }),
     State = #s{ shard               = Shard
+              , parent_sup          = Parent
               , agent_sup           = AgentSup
               , bootstrapper_sup    = BootstrapperSup
               , tlog_replay         = 30 %% TODO: unused. Remove?
@@ -169,7 +163,7 @@ handle_call(_From, Call, St) ->
 code_change(_OldVsn, St, _Extra) ->
     {ok, St}.
 
-terminate(_Reason, #{} = St) ->
+terminate(_Reason, St) ->
     {ok, St}.
 
 %%================================================================================
@@ -203,9 +197,30 @@ maybe_start_child(Supervisor, Args) ->
 -spec process_schema(ekka_rlog:shard()) -> [ekka_mnesia:table()].
 process_schema(Shard) ->
     ok = mnesia:wait_for_tables([?schema], infinity),
-    mnesia:subscribe({table, ?schema, simple}),
+    {ok, SchemaNode} = mnesia:subscribe({table, ?schema, simple}),
     Tables = ekka_rlog_schema:tables_of_shard(Shard),
     Tables.
+
+handle_mnesia_event(#?schema{mnesia_table = NewTab, shard = ChangedShard}, ActivityId, St0) ->
+    #s{shard = Shard, parent_sup = Parent} = St0,
+    case ChangedShard of
+        Shard ->
+            ?tp(notice, "Shard schema change",
+                #{ shard       => Shard
+                 , new_table   => NewTab
+                 , activity_id => ActivityId
+                 }),
+            Tables = ekka_rlog_schema:tables_of_shard(Shard),
+            ekka_rlog_config:load_shard_config(Shard, Tables),
+            %% Shut down all the downstream connections by restarting the supervisors:
+            AgentSup = ekka_rlog_shard_sup:restart_agent_sup(Parent),
+            BootstrapperSup = ekka_rlog_shard_sup:restart_bootstrapper_sup(Parent),
+            {noreply, St0#s{ agent_sup        = AgentSup
+                           , bootstrapper_sup = BootstrapperSup
+                           }};
+        _ ->
+            {noreply, St0}
+    end.
 
 %%================================================================================
 %% Internal exports (gen_rpc)

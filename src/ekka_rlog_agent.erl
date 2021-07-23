@@ -150,7 +150,7 @@ subscribe_realtime(D) ->
     Table = D#d.shard,
     {ok, Node} = mnesia:subscribe({table, Table, simple}),
     ?tp(info, subscribe_realtime_stream,
-        #{ rlog => Table
+        #{ rlog           => Table
          , subscribe_node => Node
          }),
     ok.
