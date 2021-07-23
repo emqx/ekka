@@ -438,6 +438,11 @@ t_rlog_schema(_) ->
            ekka_mnesia_test_util:stabilize(1000),
            ekka_mnesia_test_util:wait_full_replication(Cluster),
            ekka_mnesia_test_util:compare_table_contents(tab1, Nodes),
+           %% Now create a new record that will be replicated in normal mode:
+           ok = rpc:call(N1, ekka_mnesia, dirty_write, [{tab1, 2, 2}]),
+           ekka_mnesia_test_util:stabilize(1000),
+           ekka_mnesia_test_util:wait_full_replication(Cluster),
+           ekka_mnesia_test_util:compare_table_contents(tab1, Nodes),
            Nodes
        after
            ekka_ct:teardown_cluster(Cluster)
