@@ -73,7 +73,7 @@ stop(Pid) ->
 callback_mode() -> [handle_event_function, state_enter].
 
 -spec init({ekka_rlog:shard(), ekka_rlog_lib:subscriber(), ekka_rlog_lib:txid()}) -> {ok, state(), data()}.
-init({Shard, Subscriber, ReplaySince}) ->
+init({Shard, Subscriber, _ReplaySince}) ->
     logger:update_process_metadata(#{ domain     => [ekka, rlog, agent]
                                     , shard      => Shard
                                     , subscriber => Subscriber
@@ -109,10 +109,10 @@ terminate(_Reason, _State, _Data) ->
 %% Internal functions
 %%--------------------------------------------------------------------
 
-handle_stop(State, From, Data) ->
+handle_stop(_State, From, _Data) ->
     ?tp(rlog_agent_stop,
-        #{ state => State
-         , data => Data
+        #{ state => _State
+         , data => _Data
          }),
     {stop_and_reply, normal, {reply, From, ok}}.
 
@@ -125,20 +125,20 @@ handle_unknown(EventType, Event, State, Data) ->
          }),
     keep_state_and_data.
 
-handle_state_trans(OldState, State, _Data) ->
+handle_state_trans(_OldState, _State, _Data) ->
     ?tp(rlog_agent_state_change,
-        #{ from => OldState
-         , to => State
+        #{ from => _OldState
+         , to => _State
          }),
     keep_state_and_data.
 
 -spec handle_mnesia_event(ekka_rlog_lib:rlog(), term(), data()) -> fsm_result().
-handle_mnesia_event({Shard, TXID, Ops}, ActivityId, D = #d{shard = Shard}) ->
+handle_mnesia_event({Shard, TXID, Ops}, _ActivityId, D = #d{shard = Shard}) ->
     SeqNo = D#d.seqno,
     ?tp(rlog_realtime_op,
         #{ ops         => Ops
          , txid        => TXID
-         , activity_id => ActivityId
+         , activity_id => _ActivityId
          , agent       => self()
          , seqno       => SeqNo
          }),

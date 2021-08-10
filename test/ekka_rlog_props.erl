@@ -39,7 +39,7 @@ replicant_no_restarts(Trace) ->
 
 %% Check that replicant FSM goes through all the stages in the right sequence
 replicant_bootstrap_stages(Node, Trace0) ->
-    Trace = ?of_domain([ekka, rlog, replica|_], Trace0),
+    Trace = ?of_node(Node, ?of_domain([ekka, rlog, replica|_], Trace0)),
     ?causality( #{?snk_kind := state_change, to := disconnected, ?snk_meta := #{pid := _Pid}}
               , #{?snk_kind := state_change, to := bootstrap,    ?snk_meta := #{pid := _Pid}}
               , Trace

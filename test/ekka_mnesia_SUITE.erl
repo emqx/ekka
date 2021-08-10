@@ -67,7 +67,7 @@ t_join_leave_cluster(_) ->
     Cluster = ekka_ct:cluster([core, core], []),
     try
         %% Implicitly causes N1 to join N0:
-        [N0, N1] = Nodes = ekka_ct:start_cluster(ekka, Cluster),
+        [N0, N1] = ekka_ct:start_cluster(ekka, Cluster),
         ekka_ct:run_on(N0,
           fun() ->
                   #{running_nodes := [N0, N1]} = ekka_mnesia:cluster_info(),
@@ -194,7 +194,7 @@ t_transaction_on_replicant(_) ->
        after
            ekka_ct:teardown_cluster(Cluster)
        end,
-       fun([N1, N2], Trace) ->
+       fun([_N1, N2], Trace) ->
                ?assert(ekka_rlog_props:replicant_bootstrap_stages(N2, Trace)),
                ?assert(ekka_rlog_props:all_batches_received(Trace))
        end).
@@ -245,7 +245,7 @@ t_core_node_competing_writes(_) ->
        after
            ekka_ct:teardown_cluster(Cluster)
        end,
-       fun(N3, Trace) ->
+       fun(_N3, Trace) ->
                Events = [Val || #{?snk_kind := rlog_import_trans, ops := Ops} <- Trace,
                                 {{test_tab, _}, {test_tab, _Key, Val}, write} <- Ops],
                %% Check that the number of imported transaction equals to the expected number:
@@ -259,7 +259,7 @@ t_rlog_clear_table(_) ->
     Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
     ?check_trace(
        try
-           Nodes = [N1, N2] = ekka_ct:start_cluster(ekka, Cluster),
+           Nodes = [N1, _N2] = ekka_ct:start_cluster(ekka, Cluster),
            ekka_mnesia_test_util:wait_shards(Nodes),
            rpc:call(N1, ekka_transaction_gen, init, []),
            ekka_mnesia_test_util:stabilize(1000),
@@ -340,10 +340,9 @@ t_core_node_down(_) ->
     Cluster = ekka_ct:cluster( [core, core, replicant]
                              , ekka_mnesia_test_util:common_env()
                              ),
-    NTrans = 100,
     ?check_trace(
        try
-           [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           [N1, N2, _N3] = ekka_ct:start_cluster(ekka, Cluster),
            {ok, _} = ?block_until(#{ ?snk_kind := ekka_rlog_status_change
                                    , status := up
                                    , tag := core_node
@@ -482,10 +481,10 @@ cluster_benchmark(_) ->
     ?check_trace(
        begin
            do_cluster_benchmark(Config#{ backend => mnesia
-                                       , cluster => [core || I <- lists:seq(1, NReplicas)]
+                                       , cluster => [core || _ <- lists:seq(1, NReplicas)]
                                        }),
            do_cluster_benchmark(Config#{ backend  => ekka_mnesia
-                                       , cluster => [core, core] ++ [replicant || I <- lists:seq(3, NReplicas)]
+                                       , cluster => [core, core] ++ [replicant || _ <- lists:seq(3, NReplicas)]
                                        })
        end,
        fun(_, _) ->
@@ -493,8 +492,6 @@ cluster_benchmark(_) ->
        end).
 
 do_cluster_benchmark(#{ backend    := Backend
-                      , trans_size := NKeys
-                      , max_time   := MaxTime
                       , delays     := Delays
                       , cluster    := ClusterSpec
                       } = Config) ->

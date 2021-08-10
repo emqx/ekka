@@ -45,6 +45,7 @@ t_import_transactions(Config0) when is_list(Config0) ->
 
 prop() ->
     Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
+    snabbkaffe:fix_ct_logging(),
     ?forall_trace(
        Cmds, commands(?MODULE),
        #{timetrap => 10000},
@@ -58,7 +59,7 @@ prop() ->
        after
            ekka_ct:teardown_cluster(Cluster)
        end,
-       fun({History, State, Result}, Trace) ->
+       fun({_History, _State, Result}, _Trace) ->
                ?assertMatch(ok, Result),
                true
        end).
@@ -122,7 +123,7 @@ initial_state() ->
 
 command(State) ->
     frequency([ {90, {call, ?MODULE, execute, [participant(), transaction(State)]}}
-              , {10, {call, ?MODULE, restart_ekka, [participant()]}}
+              , {0, {call, ?MODULE, restart_ekka, [participant()]}} %% TODO
               ]).
 
 %% Picks whether a command should be valid under the current state.
@@ -196,8 +197,8 @@ execute(Node, {transaction, Ops}) ->
     {atomic, ok} = rpc:call(Node, ekka_mnesia, transaction, [test_shard, Fun]).
 
 restart_ekka(Node) ->
-    rpc:call(node(), application, stop, [ekka]),
-    {ok, _} = rpc:call(replicant_node(), application, ensure_all_started, [ekka]).
+    rpc:call(Node, application, stop, [ekka]),
+    {ok, _} = rpc:call(Node, application, ensure_all_started, [ekka]).
 
 core_node() ->
     ekka_ct:node_id(n1).

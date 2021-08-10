@@ -224,9 +224,10 @@ initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
     [ok = clear_table(Tab) || Tab <- Tables],
     %% Do bootstrap:
     {ok, Pid} = ekka_rlog_bootstrapper:start_link_client(Shard, Remote, self()),
-    Q = replayq:open(#{ mem_only => true
-                      , sizer => fun(_) -> 1 end
-                      }), % TODO
+    ReplayqOpts = application:get_env(ekka, rlog_replayq_options,
+                                      #{ mem_only => true
+                                       }),
+    Q = replayq:open(ReplayqOpts #{sizer => fun(_) -> 1 end}),
     {keep_state, D#d{ tmp_worker = Pid
                     , replayq    = Q
                     }}.
@@ -265,6 +266,7 @@ replay_local(D0 = #d{replayq = Q0, shard = Shard}) ->
     {Q, AckRef, Items} = replayq:pop(Q0, #{}),
     ekka_rlog_status:notify_replicant_replayq_len(Shard, replayq:count(Q)),
     ekka_rlog_lib:import_batch(dirty, Items),
+    ok = replayq:ack(Q, AckRef),
     case replayq:is_empty(Q) of
         true ->
             replayq:close(Q),
@@ -303,6 +305,9 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
             ekka_rlog_config:load_shard_config(Shard, Tables),
             {next_state, ?normal, D};
         {error, Err} ->
+            ?tp(debug, "Replicant couldn't connect to the upstream node",
+                #{ reason => Err
+                 }),
             ReconnectTimeout = application:get_env(ekka, rlog_replica_reconnect_interval, 5000),
             {keep_state_and_data, [{timeout, ReconnectTimeout, ?reconnect}]}
     end.
