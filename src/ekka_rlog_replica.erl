@@ -224,10 +224,14 @@ initiate_bootstrap(D = #d{shard = Shard, remote_core_node = Remote}) ->
     [ok = clear_table(Tab) || Tab <- Tables],
     %% Do bootstrap:
     {ok, Pid} = ekka_rlog_bootstrapper:start_link_client(Shard, Remote, self()),
-    ReplayqOpts = application:get_env(ekka, rlog_replayq_options,
-                                      #{ mem_only => true
-                                       }),
-    Q = replayq:open(ReplayqOpts #{sizer => fun(_) -> 1 end}),
+    ReplayqMemOnly = application:get_env(ekka, rlog_replayq_mem_only, true),
+    ReplayqBaseDir = application:get_env(ekka, rlog_replayq_dir, "/tmp/rlog"),
+    ReplayqExtraOpts = application:get_env(ekka, rlog_replayq_options, #{}),
+    Q = replayq:open(ReplayqExtraOpts
+                     #{ mem_only => ReplayqMemOnly
+                      , sizer    => fun(_) -> 1 end
+                      , dir      => filename:join(ReplayqBaseDir, atom_to_list(Shard))
+                      }),
     {keep_state, D#d{ tmp_worker = Pid
                     , replayq    = Q
                     }}.
