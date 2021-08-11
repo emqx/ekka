@@ -33,7 +33,7 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
-init_per_testcase(TestCase, Config) ->
+init_per_testcase(_TestCase, Config) ->
     Config.
 
 end_per_testcase(TestCase, Config) ->
@@ -46,7 +46,7 @@ t_agent_restart(_) ->
     CounterKey = counter,
     ?check_trace(
        try
-           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           Nodes = [N1, _N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
            ekka_mnesia_test_util:wait_shards(Nodes),
            ekka_mnesia_test_util:stabilize(1000),
            %% Everything in ekka agent will crash
@@ -70,7 +70,7 @@ t_rand_error_injection(_) ->
     CounterKey = counter,
     ?check_trace(
        try
-           Nodes = [N1, N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
+           Nodes = [N1, _N2, N3] = ekka_ct:start_cluster(ekka, Cluster),
            ekka_mnesia_test_util:wait_shards(Nodes),
            ekka_mnesia_test_util:stabilize(1000),
            %% Everything in ekka RLOG will crash

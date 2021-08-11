@@ -47,13 +47,17 @@ wait_full_replication(Cluster) ->
 
 %% Emit a special transaction and wait until all replicants consume it.
 wait_full_replication(Cluster, Timeout) ->
+    %% Wait until all nodes are healthy:
+    [rpc:call(Node, ekka_rlog, wait_for_shards, [[test_shard], infinity])
+     || #{node := Node} <- Cluster],
+    %% Emit a transaction and wait for replication:
     [CoreNode|_] = [N || #{node := N, role := core} <- Cluster],
     Ref = make_ref(),
     emit_last_transaction(CoreNode, Ref),
     [{ok, _} = ?block_until(#{ ?snk_kind := rlog_import_trans
                              , ops       := [{{?TABLE, '$seal'}, #?TABLE{key = '$seal', val = Ref}, write}]
                              , ?snk_meta := #{node := N}
-                             }, Timeout)
+                             }, Timeout, infinity)
      || #{node := N, role := replicant} <- Cluster],
     ok.
 

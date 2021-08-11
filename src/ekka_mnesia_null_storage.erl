@@ -86,11 +86,11 @@ register(Alias) ->
 %% Mnesia storage callbacks
 %%================================================================================
 
-insert(Alias, Tab, Val) ->
+insert(_Alias, _Tab, _Val) ->
     ?tp(ekka_rlog_insert_val,
-        #{ tab   => Tab
-         , value => Val
-         , alias => Alias
+        #{ tab   => _Tab
+         , value => _Val
+         , alias => _Alias
          }),
     ok.
 

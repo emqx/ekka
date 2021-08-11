@@ -197,7 +197,7 @@ maybe_start_child(Supervisor, Args) ->
 -spec process_schema(ekka_rlog:shard()) -> [ekka_mnesia:table()].
 process_schema(Shard) ->
     ok = mnesia:wait_for_tables([?schema], infinity),
-    {ok, SchemaNode} = mnesia:subscribe({table, ?schema, simple}),
+    {ok, _} = mnesia:subscribe({table, ?schema, simple}),
     Tables = ekka_rlog_schema:tables_of_shard(Shard),
     Tables.
 
