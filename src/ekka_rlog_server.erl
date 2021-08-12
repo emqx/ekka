@@ -121,6 +121,7 @@ handle_continue(post_init, {Parent, Shard}) ->
     AgentSup = ekka_rlog_shard_sup:start_agent_sup(Parent, Shard),
     BootstrapperSup = ekka_rlog_shard_sup:start_bootstrapper_sup(Parent, Shard),
     mnesia:wait_for_tables([Shard|Tables], 100000),
+    ekka_rlog_status:notify_shard_up(Shard, self()),
     ?tp(notice, "Shard fully up",
         #{ node  => node()
          , shard => Shard
