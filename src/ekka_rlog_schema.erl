@@ -79,6 +79,9 @@ add_table(Shard, Table) ->
 
 %% @doc Create the internal schema table if needed
 init(boot) ->
+    ?tp(debug, rlog_schema_init,
+        #{ type => boot
+         }),
     ok = ekka_mnesia:create_table_internal(?schema, [{type, ordered_set},
                                                      {ram_copies, [node()]},
                                                      {record_name, ?schema},
@@ -86,6 +89,9 @@ init(boot) ->
                                                     ]),
     load_static_config();
 init(copy) ->
+    ?tp(debug, rlog_schema_init,
+        #{ type => copy
+         }),
     ok = ekka_mnesia:copy_table(?schema, ram_copies).
 
 %% @doc Return the list of tables that belong to the shard.

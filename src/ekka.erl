@@ -17,6 +17,7 @@
 -module(ekka).
 
 -include("ekka.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 %% Start/Stop
 -export([start/0, stop/0]).
@@ -90,6 +91,7 @@
 
 -spec(start() -> ok).
 start() ->
+    ?tp(info, "Starting ekka", #{}),
     application:load(ekka),
     case ekka_mnesia:start() of
         ok -> ok;
@@ -100,6 +102,7 @@ start() ->
             error(Reason)
     end,
     {ok, _Apps} = application:ensure_all_started(ekka),
+    ?tp(info, "Ekka is running", #{}),
     ok.
 
 -spec(stop() -> ok).

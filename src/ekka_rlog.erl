@@ -91,12 +91,7 @@ wait_for_shards(Shards, Timeout) ->
     case ekka_rlog_config:backend() of
         rlog ->
             lists:foreach(fun ensure_shard/1, Shards),
-            case role() of
-                core ->
-                    ok;
-                replicant ->
-                    ekka_rlog_status:wait_for_shards(Shards, Timeout)
-            end;
+            ekka_rlog_status:wait_for_shards(Shards, Timeout);
         mnesia ->
             ok
     end.
