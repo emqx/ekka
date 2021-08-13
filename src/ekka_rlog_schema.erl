@@ -87,12 +87,16 @@ init(boot) ->
                                                      {record_name, ?schema},
                                                      {attributes, record_info(fields, ?schema)}
                                                     ]),
+    ekka_mnesia:wait_for_tables([?schema]),
     load_static_config();
 init(copy) ->
     ?tp(debug, rlog_schema_init,
         #{ type => copy
          }),
-    ok = ekka_mnesia:copy_table(?schema, ram_copies).
+    ok = ekka_mnesia:copy_table(?schema, ram_copies),
+    ekka_mnesia:wait_for_tables([?schema]),
+    ok.
+
 
 %% @doc Return the list of tables that belong to the shard.
 -spec tables_of_shard(ekka_rlog:shard()) -> [ekka_mnesia:table()].
