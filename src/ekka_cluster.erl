@@ -116,13 +116,15 @@ prepare(Action) ->
     ekka_membership:announce(Action),
     case ekka:callback(prepare) of
         {ok, Prepare} -> Prepare(Action);
-        undefined     -> application:stop(ekka)
-    end.
+        undefined     -> ok
+    end,
+    application:stop(ekka).
 
 %% @doc Reboot after join or leave cluster.
 -spec(reboot() -> ok | {error, term()}).
 reboot() ->
+    ekka:start(),
     case ekka:callback(reboot) of
         {ok, Reboot} -> Reboot();
-        undefined    -> ekka:start()
+        undefined    -> ok
     end.
