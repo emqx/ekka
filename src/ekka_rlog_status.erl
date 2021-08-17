@@ -180,12 +180,12 @@ unsubscribe_events(Ref) ->
 
 -spec wait_for_shards([ekka_rlog:shard()], timeout()) -> ok | {timeout, [ekka_rlog:shard()]}.
 wait_for_shards(Shards, Timeout) ->
-    ?tp(notice, "Waiting for shards",
+    ?tp(info, "Waiting for shards",
         #{ shards => Shards
          , timeout => Timeout
          }),
    Ret = wait_objects(?upstream_pid, Shards, Timeout),
-    ?tp(notice, "Done waiting for shards",
+    ?tp(info, "Done waiting for shards",
         #{ shards => Shards
          , result =>  Ret
          }),
