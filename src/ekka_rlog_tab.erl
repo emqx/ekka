@@ -40,7 +40,7 @@ ensure_table(Shard) ->
            , {attributes, record_info(fields, rlog)}
            , {null_copies, [node()]}
            ],
-    ?tp(notice, creating_rlog_tab,
+    ?tp(info, creating_rlog_tab,
         #{ node => node()
          , shard => Shard
          }),

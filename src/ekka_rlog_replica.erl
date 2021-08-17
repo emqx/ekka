@@ -87,7 +87,7 @@ init({Shard, _Opts}) ->
     logger:update_process_metadata(#{ domain => [ekka, rlog, replica]
                                     , shard  => Shard
                                     }),
-    ?tp(notice, rlog_replica_start,
+    ?tp(info, rlog_replica_start,
         #{ node => node()
          , shard => Shard
          }),
@@ -328,7 +328,7 @@ try_connect(Shard, Checkpoint) ->
 try_connect([], _, _) ->
     {error, no_core_available};
 try_connect([Node|Rest], Shard, Checkpoint) ->
-    ?tp(notice, "Trying to connect to the core node",
+    ?tp(info, "Trying to connect to the core node",
         #{ node => Node
          }),
     case ekka_rlog:subscribe(Shard, Node, self(), Checkpoint) of
@@ -336,7 +336,7 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
             link(Agent),
             {ok, NeedBootstrap, Node, Agent, Tables};
         Err ->
-            ?tp(warning, "Failed to connect to the core node",
+            ?tp(info, "Failed to connect to the core node",
                 #{ node => Node
                  , reason => Err
                  }),
