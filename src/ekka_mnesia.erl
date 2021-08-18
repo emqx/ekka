@@ -371,7 +371,7 @@ cluster_nodes(stopped) ->
 
 %% @private
 ensure_ok(ok) -> ok;
-ensure_ok({error, {_Node, {already_exists, _Node}}}) -> ok;
+ensure_ok({error, {Node, {already_exists, Node}}}) -> ok;
 ensure_ok({badrpc, Reason}) -> throw({error, {badrpc, Reason}});
 ensure_ok({error, Reason}) -> throw({error, Reason}).
 
