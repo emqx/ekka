@@ -165,20 +165,17 @@ copy_tables() ->
 %% @doc Create mnesia table.
 -spec(create_table(Name:: table(), TabDef :: list()) -> ok | {error, any()}).
 create_table(Name, TabDef) ->
-    case {proplists:get_value(rlog_shard, TabDef),
+    case {proplists:get_value(rlog_shard, TabDef, ?LOCAL_CONTENT_SHARD),
           proplists:get_value(local_content, TabDef, false)} of
-        {undefined, true} ->
+        {?LOCAL_CONTENT_SHARD, true} ->
             %% Local content table:
             ok;
-        {undefined, false} ->
-            %% No shard given. Perhaps the shard has been declared already?
-            case ekka_rlog_schema:shard_of_table(Name) of
-                {ok, _}   -> ok;
-                undefined -> ?LOG(warning, "Table ~p doesn't belong to any RLOG shard.", [Name])
-            end;
+        {?LOCAL_CONTENT_SHARD, false} ->
+            ?LOG(critical, "Table ~p doesn't belong to any shard", [Name]),
+            error(badarg);
         {Shard, false} ->
             ekka_rlog_schema:add_table(Shard, Name);
-        {_Shard, true}->
+        {_Shard, true} ->
             ?LOG(critical, "local_content table ~p should belong to ?LOCAL_CONTENT_SHARD.", [Name]),
             error(badarg)
     end,
