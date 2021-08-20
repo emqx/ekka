@@ -19,8 +19,6 @@
 
 -boot_mnesia({mnesia, [boot]}).
 -copy_mnesia({mnesia, [copy]}).
--rlog_shard({test_shard, test_tab}).
--rlog_shard({test_shard, test_bag}).
 
 -export([ init/0
         , delete/1
@@ -40,11 +38,13 @@
 
 mnesia(boot) ->
     ok = ekka_mnesia:create_table(test_tab, [{type, ordered_set},
+                                             {rlog_shard, test_shard},
                                              {ram_copies, [node()]},
                                              {record_name, test_tab},
                                              {attributes, record_info(fields, test_tab)}
                                             ]),
     ok = ekka_mnesia:create_table(test_bag, [{type, bag},
+                                             {rlog_shard, test_shard},
                                              {ram_copies, [node()]},
                                              {record_name, test_bag},
                                              {attributes, record_info(fields, test_bag)}

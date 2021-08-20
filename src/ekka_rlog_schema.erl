@@ -88,7 +88,7 @@ init(boot) ->
                                                      {attributes, record_info(fields, ?schema)}
                                                     ]),
     ekka_mnesia:wait_for_tables([?schema]),
-    load_static_config();
+    ok;
 init(copy) ->
     ?tp(debug, rlog_schema_init,
         #{ type => copy
@@ -126,14 +126,6 @@ shards() ->
 %%================================================================================
 %% Internal functions
 %%================================================================================
-
--spec load_static_config() -> ok.
-load_static_config() ->
-    lists:foreach( fun({_App, _Module, Attrs}) ->
-                           [add_table(Shard, Table) || {Shard, Table} <- Attrs]
-                   end
-                 , ekka_boot:all_module_attributes(rlog_shard)
-                 ).
 
 -spec do_add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
 do_add_table(Shard, Table) ->

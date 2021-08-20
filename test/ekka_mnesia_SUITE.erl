@@ -50,6 +50,7 @@ t_create_del_table(_) ->
         ekka:start(),
         ok = ekka_mnesia:create_table(kv_tab, [
                     {ram_copies, [node()]},
+                    {rlog_shard, test_shard},
                     {record_name, kv_tab},
                     {attributes, record_info(fields, kv_tab)},
                     {storage_properties, []}]),

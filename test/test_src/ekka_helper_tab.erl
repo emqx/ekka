@@ -27,7 +27,6 @@
 
 -boot_mnesia({mnesia, [boot]}).
 -copy_mnesia({mnesia, [copy]}).
--rlog_shard({test_shard, ?TABLE}).
 
 -record(?TABLE, {key, val}).
 
@@ -35,6 +34,7 @@
 
 mnesia(boot) ->
     ok = ekka_mnesia:create_table(?TABLE, [{type, ordered_set},
+                                           {rlog_shard, test_shard},
                                            {ram_copies, [node()]},
                                            {record_name, ?TABLE},
                                            {attributes, record_info(fields, ?TABLE)}
