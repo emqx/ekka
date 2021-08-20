@@ -66,4 +66,5 @@ compare_table_contents(Table, Nodes) ->
 common_env() ->
     [ {ekka, db_backend, rlog}
     , {ekka, rlog_startup_shards, [test_shard]}
+    , {ekka, strict_mode, true}
     ].

@@ -13,4 +13,6 @@
         , shard        :: ekka_rlog:shard()
         }).
 
+-define(LOCAL_CONTENT_SHARD, undefined).
+
 -endif.

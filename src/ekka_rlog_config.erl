@@ -32,6 +32,7 @@
         ]).
 
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %%================================================================================
 %% Type declarations
@@ -82,7 +83,8 @@ load_config() ->
     copy_from_env(rlog_rpc_module),
     copy_from_env(db_backend),
     copy_from_env(node_role),
-    copy_from_env(strict_mode).
+    copy_from_env(strict_mode),
+    consistency_check().
 
 -spec load_shard_config(ekka_rlog:shard(), [ekka_mnesia:table()]) -> ok.
 load_shard_config(Shard, Tables) ->
@@ -100,6 +102,17 @@ load_shard_config(Shard, Tables) ->
 %%================================================================================
 %% Internal
 %%================================================================================
+
+-spec consistency_check() -> ok.
+consistency_check() ->
+    case {backend(), role()} of
+        {mnesia, replicant} ->
+            ?LOG(critical, "Configuration error: cannot use mnesia DB "
+                           "backend on the replicant node", []),
+            error(unsupported_backend);
+         _ ->
+            ok
+    end.
 
 -spec copy_from_env(atom()) -> ok.
 copy_from_env(Key) ->

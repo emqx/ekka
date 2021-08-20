@@ -17,6 +17,7 @@
 -module(ekka_mnesia).
 
 -include("ekka.hrl").
+-include("ekka_rlog.hrl").
 -include_lib("kernel/include/logger.hrl").
 -include_lib("snabbkaffe/include/trace.hrl").
 
@@ -68,6 +69,8 @@
         , dirty_delete/1
 
         , dirty_delete_object/2
+
+        , local_content_shard/0
         ]).
 
 -export_type([ t_result/1
@@ -162,15 +165,22 @@ copy_tables() ->
 %% @doc Create mnesia table.
 -spec(create_table(Name:: table(), TabDef :: list()) -> ok | {error, any()}).
 create_table(Name, TabDef) ->
-    case proplists:get_value(rlog_shard, TabDef) of
-        undefined ->
-            %% Perhaps the shard has been declared already?
+    case {proplists:get_value(rlog_shard, TabDef),
+          proplists:get_value(local_content, TabDef, false)} of
+        {undefined, true} ->
+            %% Local content table:
+            ok;
+        {undefined, false} ->
+            %% No shard given. Perhaps the shard has been declared already?
             case ekka_rlog_schema:shard_of_table(Name) of
                 {ok, _}   -> ok;
                 undefined -> ?LOG(warning, "Table ~p doesn't belong to any RLOG shard.", [Name])
             end;
-        Shard ->
-            ekka_rlog_schema:add_table(Shard, Name)
+        {Shard, false} ->
+            ekka_rlog_schema:add_table(Shard, Name);
+        {_Shard, true}->
+            ?LOG(critical, "local_content table ~p should belong to ?LOCAL_CONTENT_SHARD.", [Name]),
+            error(badarg)
     end,
     create_table_internal(Name, lists:keydelete(rlog_shard, 1, TabDef)).
 
@@ -413,11 +423,16 @@ wait_for_tables(Tables) ->
             wait_for_tables(BadTables)
     end.
 
+local_content_shard() ->
+    ?LOCAL_CONTENT_SHARD.
+
 %%--------------------------------------------------------------------
 %% Transaction API
 %%--------------------------------------------------------------------
 
 -spec ro_transaction(ekka_rlog:shard(), fun(() -> A)) -> t_result(A).
+ro_transaction(?LOCAL_CONTENT_SHARD, Fun) ->
+    mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]);
 ro_transaction(Shard, Fun) ->
     case ekka_rlog:role() of
         core ->

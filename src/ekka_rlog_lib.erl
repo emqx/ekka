@@ -36,7 +36,8 @@
 
 %% Internal exports
 -export([ transactional_wrapper/3
-        , dirty_wrapper/3
+        , local_transactional_wrapper/2
+        , dirty_wrapper/4
         ]).
 
 -export_type([ tlog_entry/0
@@ -207,30 +208,39 @@ subscriber_node({Node, _Pid}) ->
 
 -spec call_backend_rw_trans(ekka_rlog:shard(), atom(), list()) -> term().
 call_backend_rw_trans(Shard, Function, Args) ->
-    case {ekka_rlog:backend(), ekka_rlog:role()} of
-        {mnesia, core} ->
+    case {ekka_rlog:backend(), ekka_rlog:role(), Shard} of
+        {mnesia, core, _} ->
             apply(mnesia, Function, Args);
-        {mnesia, replicant} ->
+        {mnesia, replicant, _} ->
             error(plain_mnesia_transaction_on_replicant);
-        {rlog, core} ->
+        {rlog, _, ?LOCAL_CONTENT_SHARD} ->
+            local_transactional_wrapper(Function, Args);
+        {rlog, core, _} ->
             transactional_wrapper(Shard, Function, Args);
-        {rlog, replicant} ->
+        {rlog, replicant, _} ->
             Core = find_upstream_node(Shard),
             ekka_rlog_lib:rpc_call(Core, ?MODULE, transactional_wrapper, [Shard, Function, Args])
     end.
 
 -spec call_backend_rw_dirty(atom(), ekka_mnesia:table(), list()) -> term().
 call_backend_rw_dirty(Function, Table, Args) ->
-    case {ekka_rlog:backend(), ekka_rlog:role()} of
-        {mnesia, core} ->
+    Role = ekka_rlog:role(),
+    case ekka_rlog:backend() of
+        mnesia ->
+            Role = core, %% Assert
             apply(mnesia, Function, [Table|Args]);
-        {mnesia, replicant} ->
-            error(plain_dirty_operation_on_replicant);
-        {rlog, core} ->
-            dirty_wrapper(Function, Table, Args);
-        {rlog, replicant} ->
-            Core = find_upstream_node(ekka_rlog_config:shard_rlookup(Table)),
-            ekka_rlog_lib:rpc_call(Core, ?MODULE, dirty_wrapper, [Function, Table, Args])
+        rlog ->
+            Shard = ekka_rlog_config:shard_rlookup(Table),
+            case Shard =:= ?LOCAL_CONTENT_SHARD orelse Role =:= core of
+                true ->
+                    %% Run dirty operation locally:
+                    dirty_wrapper(Shard, Function, Table, Args);
+                false ->
+                    %% Run dirty operation via RPC:
+                    Core = find_upstream_node(Shard),
+                    ekka_rlog_lib:rpc_call(Core, ?MODULE, dirty_wrapper,
+                                           [Shard, Function, Table, Args])
+            end
     end.
 
 %% @doc Perform a transaction and log changes.
@@ -250,12 +260,24 @@ transactional_wrapper(Shard, Fun, Args) ->
         end,
     mnesia:transaction(TxFun).
 
+-spec local_transactional_wrapper(atom(), list()) -> ekka_mnesia:t_result(term()).
+local_transactional_wrapper(Activity, Args) ->
+    ensure_no_transaction(),
+    TxFun =
+        fun() ->
+                Result = apply(ekka_rlog_activity, Activity, Args),
+                {_TID, TxStore} = get_internals(),
+                ensure_no_ops_outside_shard(TxStore, ?LOCAL_CONTENT_SHARD),
+                Result
+        end,
+    mnesia:transaction(TxFun).
+
 %% @doc Perform a dirty operation and log changes.
--spec dirty_wrapper(atom(), ekka_mnesia:table(), list()) -> ok.
-dirty_wrapper(Fun, Table, Args) ->
+-spec dirty_wrapper(ekka_rlog:shard(), atom(), ekka_mnesia:table(), list()) -> ok.
+dirty_wrapper(Shard, Fun, Table, Args) ->
     Ret = apply(mnesia, Fun, [Table|Args]),
-    case ekka_rlog_config:shard_rlookup(Table) of
-        undefined ->
+    case Shard of
+        ?LOCAL_CONTENT_SHARD ->
             Ret;
         Shard ->
             %% This may look extremely inconsistent, and it is. But so
@@ -284,7 +306,6 @@ find_upstream_node(Shard) ->
         timeout    -> error(transaction_timeout)
     end.
 
-
 dig_ops_for_shard(TxStore, Shard) ->
     #{match_spec := MS} = ekka_rlog_config:shard_config(Shard),
     ets:select(TxStore, MS).
@@ -302,7 +323,13 @@ ensure_no_ops_outside_shard(TxStore, Shard) ->
     end.
 
 do_ensure_no_ops_outside_shard(TxStore, Shard) ->
-    Shards = ekka_rlog_schema:shards(),
-    Ops = lists:append([dig_ops_for_shard(TxStore, S) || S <- Shards -- [Shard]]),
-    [] = Ops, % Asset
+    Tables = ets:match(TxStore, {{'$1', '_'}, '_', '_'}),
+    lists:foreach( fun([Table]) ->
+                           case ekka_rlog_config:shard_rlookup(Table) =:= Shard of
+                               true  -> ok;
+                               false -> mnesia:abort({invalid_transaction, Table, Shard})
+                           end
+                   end
+                 , Tables
+                 ),
     ok.
