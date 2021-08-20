@@ -18,7 +18,7 @@
 -module(ekka_rlog_schema).
 
 %% API:
--export([init/1, add_table/2, tables_of_shard/1, shard_of_table/1, shards/0]).
+-export([init/1, add_table/3, tables_of_shard/1, shard_of_table/1, shards/0]).
 
 -include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/trace.hrl").
@@ -70,9 +70,9 @@
 %%
 %% Currently there is no requirement to implement this, so we can get
 %% away with managing each shard separately
--spec add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
-add_table(Shard, Table) ->
-    case mnesia:transaction(fun do_add_table/2, [Shard, Table], infinity) of
+-spec add_table(ekka_rlog:shard(), ekka_mnesia:table(), list()) -> ok.
+add_table(Shard, Table, Config) ->
+    case mnesia:transaction(fun do_add_table/3, [Shard, Table, Config], infinity) of
         {atomic, ok}   -> ok;
         {aborted, Err} -> error({bad_schema, Shard, Table, Err})
     end.
@@ -97,12 +97,11 @@ init(copy) ->
     ekka_mnesia:wait_for_tables([?schema]),
     ok.
 
-
 %% @doc Return the list of tables that belong to the shard.
 -spec tables_of_shard(ekka_rlog:shard()) -> [ekka_mnesia:table()].
 tables_of_shard(Shard) ->
     %%core = ekka_rlog_config:role(), % assert
-    MS = {#?schema{mnesia_table = '$1', shard = Shard}, [], ['$1']},
+    MS = {#?schema{mnesia_table = '$1', shard = Shard, config = '_'}, [], ['$1']},
     {atomic, Tables} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
     Tables.
 
@@ -119,7 +118,7 @@ shard_of_table(Table) ->
 %% @doc Return the list of known shards
 -spec shards() -> [ekka_rlog:shard()].
 shards() ->
-    MS = {#?schema{mnesia_table = '_', shard = '$1'}, [], ['$1']},
+    MS = {#?schema{mnesia_table = '_', shard = '$1', config = '_'}, [], ['$1']},
     {atomic, Shards} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
     lists:usort(Shards).
 
@@ -127,8 +126,8 @@ shards() ->
 %% Internal functions
 %%================================================================================
 
--spec do_add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
-do_add_table(Shard, Table) ->
+-spec do_add_table(ekka_rlog:shard(), ekka_mnesia:table(), list()) -> ok.
+do_add_table(Shard, Table, Config) ->
     case mnesia:wread({?schema, Table}) of
         [] ->
             ?tp(info, "Adding table to a shard",
@@ -138,6 +137,7 @@ do_add_table(Shard, Table) ->
                  }),
             mnesia:write(#?schema{ mnesia_table = Table
                                  , shard = Shard
+                                 , config = Config
                                  }),
             ok;
         [#?schema{shard = Shard}] ->

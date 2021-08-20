@@ -298,6 +298,7 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
                   , agent            = ConnPid
                   , remote_core_node = Node
                   },
+            {Tables, Tables} = {Tables, ekka_rlog_schema:tables_of_shard(Shard)}, %% Assert
             ekka_rlog_config:load_shard_config(Shard, Tables),
             {next_state, ?bootstrap, D};
         {ok, _BootstrapNeeded = false, Node, ConnPid, Tables} ->
@@ -306,6 +307,7 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
                   , remote_core_node = Node
                   , checkpoint       = Checkpoint
                   },
+            {Tables, Tables} = {Tables, ekka_rlog_schema:tables_of_shard(Shard)}, %% Assert
             ekka_rlog_config:load_shard_config(Shard, Tables),
             {next_state, ?normal, D};
         {error, Err} ->

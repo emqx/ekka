@@ -87,7 +87,8 @@ core_nodes() ->
     application:get_env(ekka, core_nodes, []).
 
 -spec wait_for_shards([shard()], timeout()) -> ok | {timeout, [shard()]}.
-wait_for_shards(Shards, Timeout) ->
+wait_for_shards(Shards0, Timeout) ->
+    Shards = [I || I <- Shards0, I =/= ?LOCAL_CONTENT_SHARD],
     case ekka_rlog_config:backend() of
         rlog ->
             lists:foreach(fun ensure_shard/1, Shards),

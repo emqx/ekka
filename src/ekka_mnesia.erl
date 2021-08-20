@@ -165,21 +165,32 @@ copy_tables() ->
 %% @doc Create mnesia table.
 -spec(create_table(Name:: table(), TabDef :: list()) -> ok | {error, any()}).
 create_table(Name, TabDef) ->
+    ?tp(debug, ekka_mnesia_create_table,
+        #{ name    => Name
+         , options => TabDef
+         }),
+    MnesiaTabDef = lists:keydelete(rlog_shard, 1, TabDef),
     case {proplists:get_value(rlog_shard, TabDef, ?LOCAL_CONTENT_SHARD),
           proplists:get_value(local_content, TabDef, false)} of
         {?LOCAL_CONTENT_SHARD, true} ->
             %% Local content table:
-            ok;
+            create_table_internal(Name, MnesiaTabDef);
         {?LOCAL_CONTENT_SHARD, false} ->
             ?LOG(critical, "Table ~p doesn't belong to any shard", [Name]),
             error(badarg);
         {Shard, false} ->
-            ekka_rlog_schema:add_table(Shard, Name);
+            case create_table_internal(Name, MnesiaTabDef) of
+                ok ->
+                    %% It's important to add the table to the shard
+                    %% _after_ we actually create it:
+                    ekka_rlog_schema:add_table(Shard, Name, TabDef);
+                Err ->
+                    Err
+            end;
         {_Shard, true} ->
             ?LOG(critical, "local_content table ~p should belong to ?LOCAL_CONTENT_SHARD.", [Name]),
             error(badarg)
-    end,
-    create_table_internal(Name, lists:keydelete(rlog_shard, 1, TabDef)).
+    end.
 
 %% @doc Create mnesia table (skip RLOG stuff)
 -spec(create_table_internal(Name:: atom(), TabDef :: list()) -> ok | {error, any()}).
