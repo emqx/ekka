@@ -18,7 +18,13 @@
 -module(ekka_rlog_schema).
 
 %% API:
--export([init/1, add_table/3, tables_of_shard/1, shard_of_table/1, shards/0]).
+-export([ init/1
+        , add_table/3
+        , tables_of_shard/1
+        , shard_of_table/1
+        , table_specs_of_shard/1
+        , shards/0
+        ]).
 
 -include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/trace.hrl").
@@ -100,10 +106,17 @@ init(copy) ->
 %% @doc Return the list of tables that belong to the shard.
 -spec tables_of_shard(ekka_rlog:shard()) -> [ekka_mnesia:table()].
 tables_of_shard(Shard) ->
-    %%core = ekka_rlog_config:role(), % assert
-    MS = {#?schema{mnesia_table = '$1', shard = Shard, config = '_'}, [], ['$1']},
-    {atomic, Tables} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
+    {Tables, _} = lists:unzip(table_specs_of_shard(Shard)),
     Tables.
+
+%% @doc Return the list of tables that belong to the shard and their
+%% properties:
+-spec table_specs_of_shard(ekka_rlog:shard()) -> [{ekka_mnesia:table(), ekka_mnesia:table_config()}].
+table_specs_of_shard(Shard) ->
+    %%core = ekka_rlog_config:role(), % assert
+    MS = {#?schema{mnesia_table = '$1', shard = Shard, config = '$2'}, [], [{{'$1', '$2'}}]},
+    {atomic, Tuples} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
+    Tuples.
 
 %% @doc Get the shard of a table
 -spec shard_of_table(ekka_mnesia:table()) -> {ok, ekka_rlog:shard()} | undefined.

@@ -84,7 +84,9 @@
 
 -type backend() :: rlog | mnesia.
 
--type table():: atom().
+-type table() :: atom().
+
+-type table_config() :: list().
 
 %%--------------------------------------------------------------------
 %% Start and init mnesia
