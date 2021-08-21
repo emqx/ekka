@@ -298,9 +298,9 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
                   , agent            = ConnPid
                   , remote_core_node = Node
                   },
-            ok = ekka_rlog_schema:converge(Shard, TableSpecs),
             {Tables, _} = lists:unzip(TableSpecs),
             ekka_rlog_config:load_shard_config(Shard, Tables),
+            ok = ekka_rlog_schema:converge(Shard, TableSpecs),
             {next_state, ?bootstrap, D};
         {ok, _BootstrapNeeded = false, Node, ConnPid, TableSpecs} ->
             D = #d{ shard            = Shard
@@ -308,9 +308,9 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
                   , remote_core_node = Node
                   , checkpoint       = Checkpoint
                   },
-            ok = ekka_rlog_schema:converge(Shard, TableSpecs),
             {Tables, _} = lists:unzip(TableSpecs),
             ekka_rlog_config:load_shard_config(Shard, Tables),
+            ok = ekka_rlog_schema:converge(Shard, TableSpecs),
             {next_state, ?normal, D};
         {error, Err} ->
             ?tp(debug, "Replicant couldn't connect to the upstream node",

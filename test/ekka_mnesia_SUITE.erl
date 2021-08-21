@@ -29,6 +29,7 @@
 all() -> ekka_ct:all(?MODULE).
 
 init_per_suite(Config) ->
+    snabbkaffe:fix_ct_logging(),
     Config.
 
 end_per_suite(_Config) ->
@@ -130,7 +131,6 @@ t_remove_from_cluster(_) ->
 %% the stages of startup and online transaction replication, so it can
 %% be used to check if anything is _obviously_ broken.
 t_rlog_smoke_test(_) ->
-    snabbkaffe:fix_ct_logging(),
     Env = [ {ekka, bootstrapper_chunk_config, #{count_limit => 3}}
           | ekka_mnesia_test_util:common_env()
           ],
@@ -256,7 +256,6 @@ t_core_node_competing_writes(_) ->
        end).
 
 t_rlog_clear_table(_) ->
-    snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
     ?check_trace(
        try
@@ -276,7 +275,6 @@ t_rlog_clear_table(_) ->
        end).
 
 t_rlog_dirty_operations(_) ->
-    snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, core, replicant], ekka_mnesia_test_util:common_env()),
     ?check_trace(
        try
@@ -492,7 +490,6 @@ t_dirty_reads(_) ->
 
 %% Test adding tables to the schema:
 t_rlog_schema(_) ->
-    snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
     ?check_trace(
        try
@@ -552,7 +549,6 @@ t_rlog_schema(_) ->
        end).
 
 cluster_benchmark(_) ->
-    snabbkaffe:fix_ct_logging(),
     NReplicas = 6,
     Config = #{ trans_size => 10
               , max_time   => 15000
