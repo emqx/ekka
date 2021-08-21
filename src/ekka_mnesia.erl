@@ -76,6 +76,7 @@
 -export_type([ t_result/1
              , backend/0
              , table/0
+             , table_config/0
              ]).
 
 -deprecated({copy_table, 1, next_major_release}).
@@ -185,7 +186,7 @@ create_table(Name, TabDef) ->
                 ok ->
                     %% It's important to add the table to the shard
                     %% _after_ we actually create it:
-                    ekka_rlog_schema:add_table(Shard, Name, TabDef);
+                    ekka_rlog_schema:add_table(Shard, Name, MnesiaTabDef);
                 Err ->
                     Err
             end;

@@ -107,7 +107,11 @@ ensure_shard(Shard) ->
     end.
 
 -spec subscribe(ekka_rlog:shard(), node(), pid(), ekka_rlog_server:checkpoint()) ->
-          {ok, _NeedBootstrap :: boolean(), _Agent :: pid(), [ekka_mnesia:table()]}
+          { ok
+          , _NeedBootstrap :: boolean()
+          , _Agent :: pid()
+          , [{ekka_mnesia:table(), ekka_mnesia:table_config()}]
+          }
         | {badrpc | badtcp, term()}.
 subscribe(Shard, RemoteNode, Subscriber, Checkpoint) ->
     case ekka_rlog_server:probe(RemoteNode, Shard) of

@@ -11,7 +11,7 @@
 -record(?schema,
         { mnesia_table :: ekka_mnesia:table()
         , shard        :: ekka_rlog:shard()
-        , config       :: ekka_mnesia:table_config() | '_'
+        , config       :: ekka_mnesia:table_config() | '$2' | '_' %% TODO: fix type
         }).
 
 -define(LOCAL_CONTENT_SHARD, undefined).

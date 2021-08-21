@@ -24,6 +24,8 @@
         , shard_of_table/1
         , table_specs_of_shard/1
         , shards/0
+
+        , converge/2
         ]).
 
 -include("ekka_rlog.hrl").
@@ -135,6 +137,12 @@ shards() ->
     {atomic, Shards} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
     lists:usort(Shards).
 
+%% @doc Ensure that the replicant has the same tables as the upstream
+-spec converge(ekka_rlog:shard(), [{ekka_mnesia:table(), ekka_mnesia:table_config()}]) -> ok.
+converge(_Shard, TableSpecs) ->
+    %% TODO: Check shard
+    lists:foreach(fun ensure_table/1, TableSpecs).
+
 %%================================================================================
 %% Internal functions
 %%================================================================================
@@ -159,3 +167,14 @@ do_add_table(Shard, Table, Config) ->
         _ ->
             error(bad_schema)
     end.
+
+-spec ensure_table({ekka_mnesia:table(), ekka_mnesia:table_config()}) -> ok.
+ensure_table({Name, Config0}) ->
+    Config = lists:map( fun({ram_copies, _})       -> {ram_copies, [node()]};
+                           ({disk_copies, _})      -> {disk_copies, [node()]};
+                           ({disk_only_copies, _}) -> {disk_only_copies, [node()]};
+                           (A)                     -> A
+                        end
+                      , Config0
+                      ),
+    ok = ekka_mnesia:create_table_internal(Name, Config).
