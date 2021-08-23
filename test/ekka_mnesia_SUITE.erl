@@ -29,6 +29,7 @@
 all() -> ekka_ct:all(?MODULE).
 
 init_per_suite(Config) ->
+    snabbkaffe:fix_ct_logging(),
     Config.
 
 end_per_suite(_Config) ->
@@ -50,6 +51,7 @@ t_create_del_table(_) ->
         ekka:start(),
         ok = ekka_mnesia:create_table(kv_tab, [
                     {ram_copies, [node()]},
+                    {rlog_shard, test_shard},
                     {record_name, kv_tab},
                     {attributes, record_info(fields, kv_tab)},
                     {storage_properties, []}]),
@@ -129,7 +131,6 @@ t_remove_from_cluster(_) ->
 %% the stages of startup and online transaction replication, so it can
 %% be used to check if anything is _obviously_ broken.
 t_rlog_smoke_test(_) ->
-    snabbkaffe:fix_ct_logging(),
     Env = [ {ekka, bootstrapper_chunk_config, #{count_limit => 3}}
           | ekka_mnesia_test_util:common_env()
           ],
@@ -255,7 +256,6 @@ t_core_node_competing_writes(_) ->
        end).
 
 t_rlog_clear_table(_) ->
-    snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
     ?check_trace(
        try
@@ -275,7 +275,6 @@ t_rlog_clear_table(_) ->
        end).
 
 t_rlog_dirty_operations(_) ->
-    snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, core, replicant], ekka_mnesia_test_util:common_env()),
     ?check_trace(
        try
@@ -310,6 +309,85 @@ t_rlog_dirty_operations(_) ->
        fun(_, Trace) ->
                ?assert(ekka_rlog_props:replicant_no_restarts(Trace))
        end).
+
+t_local_content(_) ->
+    Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
+    ?check_trace(
+      try
+          Nodes = [N1, N2] = ekka_ct:start_cluster(ekka, Cluster),
+          %% Create the table on all nodes:
+          {[ok, ok], []} = rpc:multicall(Nodes, ekka_mnesia, create_table,
+                                         [local_tab,
+                                          [{local_content, true}]
+                                         ]),
+          %% Perform an invalid r/w transactions on both nodes:
+          [?assertMatch( {aborted, {invalid_transaction, _, _}}
+                       , rpc:call(N, ekka_mnesia, transaction,
+                                  [ekka_mnesia:local_content_shard(),
+                                   fun() ->
+                                           ok = mnesia:write({test_tab, key, val})
+                                   end
+                                  ])
+                       )
+           || N <- Nodes],
+          [?assertMatch( {aborted, {invalid_transaction, _, _}}
+                       , rpc:call(N, ekka_mnesia, transaction,
+                                  [test_shard,
+                                   fun() ->
+                                           ok = mnesia:write({local_tab, key, val})
+                                   end
+                                  ])
+                       )
+           || N <- Nodes],
+          %% Perform r/w transactions on both nodes with different content:
+          ?assertMatch( {atomic, N1}
+                      , rpc:call(N1, ekka_mnesia, transaction,
+                                  [ekka_mnesia:local_content_shard(),
+                                   fun() ->
+                                           mnesia:write({local_tab, key, node()}),
+                                           node()
+                                   end
+                                  ])
+                       ),
+          ?assertMatch( {atomic, N2}
+                      , rpc:call(N2, ekka_mnesia, transaction,
+                                  [ekka_mnesia:local_content_shard(),
+                                   fun() ->
+                                           mnesia:write({local_tab, key, node()}),
+                                           node()
+                                   end
+                                  ])
+                       ),
+          %% Perform a successful r/o transaction:
+          [?assertMatch( {atomic, N}
+                       , rpc:call(N, ekka_mnesia, ro_transaction,
+                                  [ekka_mnesia:local_content_shard(),
+                                   fun() ->
+                                           [key] = mnesia:all_keys(local_tab),
+                                           Node = node(),
+                                           [{local_tab, key, Node}] = mnesia:read(local_tab, key),
+                                           Node
+                                   end
+                                  ])
+                       )
+           || N <- Nodes],
+          %% Perform an invalid r/o transaction, it should abort:
+          [?assertMatch( {aborted, _}
+                       , rpc:call(N, ekka_mnesia, ro_transaction,
+                                  [ekka_mnesia:local_content_shard(),
+                                   fun() ->
+                                           mnesia:write({local_tab, 1, 1})
+                                   end
+                                  ])
+                       )
+           || N <- Nodes],
+          ok
+      after
+          ekka_ct:teardown_cluster(Cluster)
+      end,
+      fun(_, _) ->
+              true
+      end).
 
 %% This testcase verifies verifies various modes of ekka_mnesia:ro_transaction
 t_sum_verify(_) ->
@@ -412,7 +490,6 @@ t_dirty_reads(_) ->
 
 %% Test adding tables to the schema:
 t_rlog_schema(_) ->
-    snabbkaffe:fix_ct_logging(),
     Cluster = ekka_ct:cluster([core, replicant], ekka_mnesia_test_util:common_env()),
     ?check_trace(
        try
@@ -472,7 +549,6 @@ t_rlog_schema(_) ->
        end).
 
 cluster_benchmark(_) ->
-    snabbkaffe:fix_ct_logging(),
     NReplicas = 6,
     Config = #{ trans_size => 10
               , max_time   => 15000

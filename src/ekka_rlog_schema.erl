@@ -18,7 +18,15 @@
 -module(ekka_rlog_schema).
 
 %% API:
--export([init/1, add_table/2, tables_of_shard/1, shard_of_table/1, shards/0]).
+-export([ init/1
+        , add_table/3
+        , tables_of_shard/1
+        , shard_of_table/1
+        , table_specs_of_shard/1
+        , shards/0
+
+        , converge/2
+        ]).
 
 -include("ekka_rlog.hrl").
 -include_lib("snabbkaffe/include/trace.hrl").
@@ -70,9 +78,9 @@
 %%
 %% Currently there is no requirement to implement this, so we can get
 %% away with managing each shard separately
--spec add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
-add_table(Shard, Table) ->
-    case mnesia:transaction(fun do_add_table/2, [Shard, Table], infinity) of
+-spec add_table(ekka_rlog:shard(), ekka_mnesia:table(), list()) -> ok.
+add_table(Shard, Table, Config) ->
+    case mnesia:transaction(fun do_add_table/3, [Shard, Table, Config], infinity) of
         {atomic, ok}   -> ok;
         {aborted, Err} -> error({bad_schema, Shard, Table, Err})
     end.
@@ -88,7 +96,7 @@ init(boot) ->
                                                      {attributes, record_info(fields, ?schema)}
                                                     ]),
     ekka_mnesia:wait_for_tables([?schema]),
-    load_static_config();
+    ok;
 init(copy) ->
     ?tp(debug, rlog_schema_init,
         #{ type => copy
@@ -97,14 +105,20 @@ init(copy) ->
     ekka_mnesia:wait_for_tables([?schema]),
     ok.
 
-
 %% @doc Return the list of tables that belong to the shard.
 -spec tables_of_shard(ekka_rlog:shard()) -> [ekka_mnesia:table()].
 tables_of_shard(Shard) ->
-    %%core = ekka_rlog_config:role(), % assert
-    MS = {#?schema{mnesia_table = '$1', shard = Shard}, [], ['$1']},
-    {atomic, Tables} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
+    {Tables, _} = lists:unzip(table_specs_of_shard(Shard)),
     Tables.
+
+%% @doc Return the list of tables that belong to the shard and their
+%% properties:
+-spec table_specs_of_shard(ekka_rlog:shard()) -> [{ekka_mnesia:table(), ekka_mnesia:table_config()}].
+table_specs_of_shard(Shard) ->
+    %%core = ekka_rlog_config:role(), % assert
+    MS = {#?schema{mnesia_table = '$1', shard = Shard, config = '$2'}, [], [{{'$1', '$2'}}]},
+    {atomic, Tuples} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
+    Tuples.
 
 %% @doc Get the shard of a table
 -spec shard_of_table(ekka_mnesia:table()) -> {ok, ekka_rlog:shard()} | undefined.
@@ -119,24 +133,22 @@ shard_of_table(Table) ->
 %% @doc Return the list of known shards
 -spec shards() -> [ekka_rlog:shard()].
 shards() ->
-    MS = {#?schema{mnesia_table = '_', shard = '$1'}, [], ['$1']},
+    MS = {#?schema{mnesia_table = '_', shard = '$1', config = '_'}, [], ['$1']},
     {atomic, Shards} = mnesia:transaction(fun mnesia:select/2, [?schema, [MS]], infinity),
     lists:usort(Shards).
+
+%% @doc Ensure that the replicant has the same tables as the upstream
+-spec converge(ekka_rlog:shard(), [{ekka_mnesia:table(), ekka_mnesia:table_config()}]) -> ok.
+converge(_Shard, TableSpecs) ->
+    %% TODO: Check shard
+    lists:foreach(fun ensure_table/1, TableSpecs).
 
 %%================================================================================
 %% Internal functions
 %%================================================================================
 
--spec load_static_config() -> ok.
-load_static_config() ->
-    lists:foreach( fun({_App, _Module, Attrs}) ->
-                           [add_table(Shard, Table) || {Shard, Table} <- Attrs]
-                   end
-                 , ekka_boot:all_module_attributes(rlog_shard)
-                 ).
-
--spec do_add_table(ekka_rlog:shard(), ekka_mnesia:table()) -> ok.
-do_add_table(Shard, Table) ->
+-spec do_add_table(ekka_rlog:shard(), ekka_mnesia:table(), list()) -> ok.
+do_add_table(Shard, Table, Config) ->
     case mnesia:wread({?schema, Table}) of
         [] ->
             ?tp(info, "Adding table to a shard",
@@ -146,6 +158,7 @@ do_add_table(Shard, Table) ->
                  }),
             mnesia:write(#?schema{ mnesia_table = Table
                                  , shard = Shard
+                                 , config = Config
                                  }),
             ok;
         [#?schema{shard = Shard}] ->
@@ -154,3 +167,14 @@ do_add_table(Shard, Table) ->
         _ ->
             error(bad_schema)
     end.
+
+-spec ensure_table({ekka_mnesia:table(), ekka_mnesia:table_config()}) -> ok.
+ensure_table({Name, Config0}) ->
+    Config = lists:map( fun({ram_copies, _})       -> {ram_copies, [node()]};
+                           ({disk_copies, _})      -> {disk_copies, [node()]};
+                           ({disk_only_copies, _}) -> {disk_only_copies, [node()]};
+                           (A)                     -> A
+                        end
+                      , Config0
+                      ),
+    ok = ekka_mnesia:create_table_internal(Name, Config).

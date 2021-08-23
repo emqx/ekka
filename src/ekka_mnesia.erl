@@ -17,6 +17,7 @@
 -module(ekka_mnesia).
 
 -include("ekka.hrl").
+-include("ekka_rlog.hrl").
 -include_lib("kernel/include/logger.hrl").
 -include_lib("snabbkaffe/include/trace.hrl").
 
@@ -68,11 +69,14 @@
         , dirty_delete/1
 
         , dirty_delete_object/2
+
+        , local_content_shard/0
         ]).
 
 -export_type([ t_result/1
              , backend/0
              , table/0
+             , table_config/0
              ]).
 
 -deprecated({copy_table, 1, next_major_release}).
@@ -81,7 +85,9 @@
 
 -type backend() :: rlog | mnesia.
 
--type table():: atom().
+-type table() :: atom().
+
+-type table_config() :: list().
 
 %%--------------------------------------------------------------------
 %% Start and init mnesia
@@ -162,17 +168,32 @@ copy_tables() ->
 %% @doc Create mnesia table.
 -spec(create_table(Name:: table(), TabDef :: list()) -> ok | {error, any()}).
 create_table(Name, TabDef) ->
-    case proplists:get_value(rlog_shard, TabDef) of
-        undefined ->
-            %% Perhaps the shard has been declared already?
-            case ekka_rlog_schema:shard_of_table(Name) of
-                {ok, _}   -> ok;
-                undefined -> ?LOG(warning, "Table ~p doesn't belong to any RLOG shard.", [Name])
+    ?tp(debug, ekka_mnesia_create_table,
+        #{ name    => Name
+         , options => TabDef
+         }),
+    MnesiaTabDef = lists:keydelete(rlog_shard, 1, TabDef),
+    case {proplists:get_value(rlog_shard, TabDef, ?LOCAL_CONTENT_SHARD),
+          proplists:get_value(local_content, TabDef, false)} of
+        {?LOCAL_CONTENT_SHARD, true} ->
+            %% Local content table:
+            create_table_internal(Name, MnesiaTabDef);
+        {?LOCAL_CONTENT_SHARD, false} ->
+            ?LOG(critical, "Table ~p doesn't belong to any shard", [Name]),
+            error(badarg);
+        {Shard, false} ->
+            case create_table_internal(Name, MnesiaTabDef) of
+                ok ->
+                    %% It's important to add the table to the shard
+                    %% _after_ we actually create it:
+                    ekka_rlog_schema:add_table(Shard, Name, MnesiaTabDef);
+                Err ->
+                    Err
             end;
-        Shard ->
-            ekka_rlog_schema:add_table(Shard, Name)
-    end,
-    create_table_internal(Name, lists:keydelete(rlog_shard, 1, TabDef)).
+        {_Shard, true} ->
+            ?LOG(critical, "local_content table ~p should belong to ?LOCAL_CONTENT_SHARD.", [Name]),
+            error(badarg)
+    end.
 
 %% @doc Create mnesia table (skip RLOG stuff)
 -spec(create_table_internal(Name:: atom(), TabDef :: list()) -> ok | {error, any()}).
@@ -413,11 +434,16 @@ wait_for_tables(Tables) ->
             wait_for_tables(BadTables)
     end.
 
+local_content_shard() ->
+    ?LOCAL_CONTENT_SHARD.
+
 %%--------------------------------------------------------------------
 %% Transaction API
 %%--------------------------------------------------------------------
 
 -spec ro_transaction(ekka_rlog:shard(), fun(() -> A)) -> t_result(A).
+ro_transaction(?LOCAL_CONTENT_SHARD, Fun) ->
+    mnesia:transaction(fun ekka_rlog_activity:ro_transaction/1, [Fun]);
 ro_transaction(Shard, Fun) ->
     case ekka_rlog:role() of
         core ->

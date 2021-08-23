@@ -79,7 +79,11 @@ probe(Node, Shard) ->
     ekka_rlog_lib:rpc_call(Node, ?MODULE, do_probe, [Shard]) =:= true.
 
 -spec subscribe(ekka_rlog:shard(), ekka_rlog_lib:subscriber(), checkpoint()) ->
-          {ok, _NeedBootstrap :: boolean(), _Agent :: pid(), [ekka_mnesia:table()]}.
+          { ok
+          , _NeedBootstrap :: boolean()
+          , _Agent :: pid()
+          , [{ekka_mnesia:table(), ekka_mnesia:table_config()}]
+          }.
 subscribe(Shard, Subscriber, Checkpoint) ->
     gen_server:call(Shard, {subscribe, Subscriber, Checkpoint}, infinity).
 
@@ -151,8 +155,8 @@ handle_call({subscribe, Subscriber, Checkpoint}, _From, State) ->
     Pid = maybe_start_child(AgentSup, [Subscriber, ReplaySince]),
     monitor(process, Pid),
     ekka_rlog_status:notify_agent_connect(Shard, ekka_rlog_lib:subscriber_node(Subscriber), Pid),
-    Tables = ekka_rlog_schema:tables_of_shard(Shard),
-    {reply, {ok, NeedBootstrap, Pid, Tables}, State};
+    TableSpecs = ekka_rlog_schema:table_specs_of_shard(Shard),
+    {reply, {ok, NeedBootstrap, Pid, TableSpecs}, State};
 handle_call({bootstrap, Subscriber}, _From, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),
     {reply, {ok, Pid}, State};

@@ -293,20 +293,24 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
         #{ node => node()
          }),
     case try_connect(Shard, Checkpoint) of
-        {ok, _BootstrapNeeded = true, Node, ConnPid, Tables} ->
+        {ok, _BootstrapNeeded = true, Node, ConnPid, TableSpecs} ->
             D = #d{ shard            = Shard
                   , agent            = ConnPid
                   , remote_core_node = Node
                   },
+            {Tables, _} = lists:unzip(TableSpecs),
             ekka_rlog_config:load_shard_config(Shard, Tables),
+            ok = ekka_rlog_schema:converge(Shard, TableSpecs),
             {next_state, ?bootstrap, D};
-        {ok, _BootstrapNeeded = false, Node, ConnPid, Tables} ->
+        {ok, _BootstrapNeeded = false, Node, ConnPid, TableSpecs} ->
             D = #d{ shard            = Shard
                   , agent            = ConnPid
                   , remote_core_node = Node
                   , checkpoint       = Checkpoint
                   },
+            {Tables, _} = lists:unzip(TableSpecs),
             ekka_rlog_config:load_shard_config(Shard, Tables),
+            ok = ekka_rlog_schema:converge(Shard, TableSpecs),
             {next_state, ?normal, D};
         {error, Err} ->
             ?tp(debug, "Replicant couldn't connect to the upstream node",
@@ -317,13 +321,23 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
     end.
 
 -spec try_connect(ekka_rlog:shard(), ekka_rlog_server:checkpoint()) ->
-                {ok, boolean(), node(), pid(), [ekka_mnesia:table()]}
+                { ok
+                , boolean()
+                , node()
+                , pid()
+                , [{ekka_mnesia:table(), ekka_mnesia:table_config()}]
+                }
               | {error, term()}.
 try_connect(Shard, Checkpoint) ->
     try_connect(ekka_rlog_lib:shuffle(ekka_rlog:core_nodes()), Shard, Checkpoint).
 
 -spec try_connect([node()], ekka_rlog:shard(), ekka_rlog_server:checkpoint()) ->
-                {ok, boolean(), node(), pid(), [ekka_mnesia:table()]}
+                { ok
+                , boolean()
+                , node()
+                , pid()
+                , [{ekka_mnesia:table(), ekka_mnesia:table_config()}]
+                }
               | {error, term()}.
 try_connect([], _, _) ->
     {error, no_core_available};
@@ -332,9 +346,9 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
         #{ node => Node
          }),
     case ekka_rlog:subscribe(Shard, Node, self(), Checkpoint) of
-        {ok, NeedBootstrap, Agent, Tables} ->
+        {ok, NeedBootstrap, Agent, TableSpecs} ->
             link(Agent),
-            {ok, NeedBootstrap, Node, Agent, Tables};
+            {ok, NeedBootstrap, Node, Agent, TableSpecs};
         Err ->
             ?tp(info, "Failed to connect to the core node",
                 #{ node => Node
