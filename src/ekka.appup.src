@@ -1,6 +1,9 @@
 %% -*-: erlang -*-
-{"0.7.8",
+{"0.7.9",
  [
+  {"0.7.8", [
+    {load_module, ekka_locker, brutal_purge, soft_purge, []}
+  ]},
   {"0.7.7", [
     {load_module, ekka_locker, brutal_purge, soft_purge, []}
   ]},
@@ -11,6 +14,9 @@
   ]}
  ],
  [
+  {"0.7.8", [
+    {load_module, ekka_locker, brutal_purge, soft_purge, []}
+  ]},
   {"0.7.7", [
     {load_module, ekka_locker, brutal_purge, soft_purge, []}
   ]},

@@ -264,7 +264,7 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                   fun(#lock{resource = Resource, owner = Owner}, MonAcc) ->
                       case maps:find(Owner, MonAcc) of
                           {ok, Resources} ->
-                              case lists:member(Resource, Resources) of
+                              case is_member(Resource, Resources) of
                                   true ->
                                       %% force kill it as it might have hung
                                       exit(Owner, kill);
@@ -328,3 +328,9 @@ set_to_list(ResourceSet) when is_list(ResourceSet) ->
     ResourceSet;
 set_to_list(ResourceSet) when is_map(ResourceSet) ->
     maps:keys(ResourceSet).
+
+is_member(Res, Resources) when is_list(Resources) ->
+    lists:member(Res, Resources);
+is_member(Res, Resources) when is_map(Resources) ->
+    maps:is_key(Res, Resources).
+
