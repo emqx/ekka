@@ -194,7 +194,11 @@ server(Options) ->
 ssl_options(Options) ->
     case proplists:get_value(ssl_options, Options, []) of
         [] -> [];
-        SSLOptions -> [{ssl, SSLOptions}]
+        SSLOptions ->
+            case proplists:get_value(enable, SSLOptions, true) of
+                true -> [{ssl, proplists:delete(enable, SSLOptions)}];
+                false -> []
+            end
     end.
 
 config(Key, Options) ->
