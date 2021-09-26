@@ -111,7 +111,7 @@ stop() ->
 stop(Name) ->
     gen_server:call(Name, stop).
 
--spec(acquire(resource()) -> {boolean(), [node()]}).
+-spec(acquire(resource()) -> lock_result()).
 acquire(Resource) ->
     acquire(?SERVER, Resource).
 
@@ -263,14 +263,15 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
     Monitors1 = lists:foldl(
                   fun(#lock{resource = Resource, owner = Owner}, MonAcc) ->
                       case maps:find(Owner, MonAcc) of
-                          {ok, Resources} ->
-                              case lists:member(Resource, Resources) of
-                                  true ->
-                                      %% force kill it as it might have hung
-                                      exit(Owner, kill);
-                                  false ->
-                                      maps:put(Owner, [Resource|Resources], MonAcc)
-                              end;
+                          {ok, ResourceSet} ->
+                                case is_set_elem(Resource, ResourceSet) of
+                                    true ->
+                                        %% force kill it as it might have hung
+                                        logger:error("kill ~p as it has held the lock for too long, resource: ~p", [Owner, Resource]),
+                                        exit(Owner, kill);
+                                    false ->
+                                        maps:put(Owner, set_put(Resource, ResourceSet), MonAcc)
+                                end;
                           error ->
                               _MRef = erlang:monitor(process, Owner),
                               maps:put(Owner, set_put(Resource, #{}), MonAcc)
@@ -328,3 +329,6 @@ set_to_list(ResourceSet) when is_list(ResourceSet) ->
     ResourceSet;
 set_to_list(ResourceSet) when is_map(ResourceSet) ->
     maps:keys(ResourceSet).
+
+is_set_elem(Resource, ResourceSet) when is_map(ResourceSet) ->
+    maps:is_key(Resource, ResourceSet).
