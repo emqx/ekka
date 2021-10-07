@@ -52,10 +52,8 @@ t_autoheal(_Config) ->
         [N3] = rpc:call(N2, ekka, info, [stopped_nodes]),
         [N3] = rpc:call(N3, ekka, info, [running_nodes]),
         [N1,N2] = rpc:call(N3, ekka, info, [stopped_nodes]),
-        true = rpc:cast(N3, net_kernel, connect_node, [N1]),
-        true = rpc:cast(N3, net_kernel, connect_node, [N2]),
         %% Wait for autoheal
-        ok = timer:sleep(6000),
+        ok = timer:sleep(12000),
         [N1,N2,N3] = rpc:call(N1, ekka, info, [running_nodes]),
         [N1,N2,N3] = rpc:call(N2, ekka, info, [running_nodes]),
         [N1,N2,N3] = rpc:call(N3, ekka, info, [running_nodes]),
@@ -83,4 +81,3 @@ init_app_envs(N) ->
                      ]
               }],
     rpc:call(N, application, set_env, [Config]).
-

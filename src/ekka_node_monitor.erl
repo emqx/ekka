@@ -183,7 +183,9 @@ handle_info({autoheal, Msg}, State) ->
 
 handle_info(heartbeat, State) ->
     lists:foreach(fun(Node) ->
-                    cast(Node, {heartbeat, node()})
+                      if Node =/= node() -> cast(Node, {heartbeat, node()});
+                         true            -> ok
+                      end
                   end, ekka_mnesia:cluster_nodes(all)),
     {noreply, ensure_heartbeat(State#state{heartbeat = undefined})};
 
