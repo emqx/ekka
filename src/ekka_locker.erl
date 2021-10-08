@@ -264,7 +264,14 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                   fun(#lock{resource = Resource, owner = Owner}, MonAcc) ->
                       case maps:find(Owner, MonAcc) of
                           {ok, ResourceSet} ->
-                              maps:put(Owner, set_put(Resource, ResourceSet), MonAcc);
+                              case is_set_elem(Resource, ResourceSet) of
+                                  true ->
+                                      %% force kill it as it might have hung
+                                      logger:error("kill ~p as it has held the lock for too long, resource: ~p", [Owner, Resource]),
+                                      exit(Owner, kill);
+                                  false ->
+                                      maps:put(Owner, set_put(Resource, ResourceSet), MonAcc)
+                              end;
                           error ->
                               _MRef = erlang:monitor(process, Owner),
                               maps:put(Owner, set_put(Resource, #{}), MonAcc)
@@ -309,16 +316,11 @@ check_lease(Tab, #lease{expiry = Expiry}, Now) ->
 
 cancel_lease(#lease{timer = TRef}) -> timer:cancel(TRef).
 
-%% TODO: Remove code about list in next version
-set_put(Resource, ResourceSet) when is_list(ResourceSet) ->
-    NewResourceSet = lists:foldl(fun(Resrouce, Acc) ->
-                                     Acc#{Resrouce => nil}
-                                 end, #{}, ResourceSet),
-    set_put(Resource, NewResourceSet);
 set_put(Resource, ResourceSet) when is_map(ResourceSet) ->
     ResourceSet#{Resource => nil}.
 
-set_to_list(ResourceSet) when is_list(ResourceSet) ->
-    ResourceSet;
 set_to_list(ResourceSet) when is_map(ResourceSet) ->
     maps:keys(ResourceSet).
+
+is_set_elem(Resource, ResourceSet) when is_map(ResourceSet) ->
+    maps:is_key(Resource, ResourceSet).
