@@ -27,13 +27,13 @@
 all() -> ekka_ct:all(?MODULE).
 
 init_per_testcase(_TestCase, Config) ->
-    ok = meck:new(ekka_membership, [non_strict, passthrough, no_history]),
+    ok = meck:new(mria_membership, [non_strict, passthrough, no_history]),
     {ok, _Locker} = ekka_locker:start_link(?SERVER),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
     ok = ekka_locker:stop(locker_server),
-    ok = meck:unload(ekka_membership),
+    ok = meck:unload(mria_membership),
     Config.
 
 t_acquire_release_local(_) ->
@@ -45,7 +45,7 @@ t_acquire_release_local(_) ->
 
 t_acquire_release_leader(_) ->
     Node = node(),
-    ok = meck:expect(ekka_membership, leader, fun() -> Node end),
+    ok = meck:expect(mria_membership, leader, fun() -> Node end),
     ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, leader)),
     ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, leader)),
     ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, leader)),
@@ -53,7 +53,7 @@ t_acquire_release_leader(_) ->
 
 t_acquire_release_quorum(_) ->
     Node = node(),
-    ok = meck:expect(ekka_membership, ring, fun(_) -> [#member{node = Node, status = up}] end),
+    ok = meck:expect(mria_membership, ring, fun(_) -> [#member{node = Node, status = up}] end),
     ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, quorum)),
     ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, quorum)),
     ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, quorum)),
@@ -61,9 +61,8 @@ t_acquire_release_quorum(_) ->
 
 t_acquire_release_all(_) ->
     Node = node(),
-    ok = meck:expect(ekka_membership, nodelist, fun(_) -> [Node] end),
+    ok = meck:expect(mria_membership, nodelist, fun(_) -> [Node] end),
     ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, all)),
     ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, all)),
     ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, all)),
     ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, all)).
-

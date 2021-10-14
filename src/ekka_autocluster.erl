@@ -29,7 +29,7 @@
 enabled() ->
     case ekka:env(cluster_discovery) of
         {ok, {manual, _}} -> false;
-        {ok, _Strategy}   -> ekka_rlog:role() =:= core;
+        {ok, _Strategy}   -> mria_config:role() =:= core;
         undefined         -> false
     end.
 
@@ -64,7 +64,7 @@ wait_application_ready(App, Retries) ->
 
 maybe_run_again(App) ->
     %% Check if the node joined cluster?
-    case ekka_mnesia:is_node_in_cluster() of
+    case mria_mnesia:is_node_in_cluster() of
         true  -> ok;
         false -> timer:sleep(5000),
                  run(App)
@@ -124,8 +124,7 @@ strategy_module(Strategy) ->
 discover_and_join(Mod, Options) ->
     case Mod:discover(Options) of
         {ok, Nodes} ->
-            maybe_join([N || N <- Nodes, ekka_node:is_aliving(N) andalso
-                                         ekka_rlog:role(N) =:= core]),
+            maybe_join([N || N <- Nodes, ekka_node:is_aliving(N)]),
             log_error("Register", Mod:register(Options));
         {error, Reason} ->
             ?LOG(error, "Discovery error: ~p", [Reason])
@@ -134,7 +133,7 @@ discover_and_join(Mod, Options) ->
 maybe_join([]) ->
     ignore;
 maybe_join(Nodes) ->
-    case ekka_mnesia:is_node_in_cluster() of
+    case mria_mnesia:is_node_in_cluster() of
         true  -> ignore;
         false -> join_with(find_oldest_node(Nodes))
     end.
@@ -149,13 +148,13 @@ join_with(Node) ->
 find_oldest_node([Node]) ->
     Node;
 find_oldest_node(Nodes) ->
-    case rpc:multicall(Nodes, ekka_membership, local_member, []) of
+    case rpc:multicall(Nodes, mria_membership, local_member, []) of
         {ResL, []} ->
             case [M || M <- ResL, is_record(M, member)] of
                 [] -> ?LOG(error, "Bad members found on nodes ~p: ~p", [Nodes, ResL]),
                       false;
                 Members ->
-                    (ekka_membership:oldest(Members))#member.node
+                    (mria_membership:oldest(Members))#member.node
             end;
         {ResL, BadNodes} ->
             ?LOG(error, "Bad nodes found: ~p, ResL: ", [BadNodes, ResL]), false

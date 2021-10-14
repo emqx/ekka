@@ -127,7 +127,7 @@ acquire(Name, Resource, Type) ->
 acquire(Name, Resource, local, Piggyback) when is_atom(Name) ->
     acquire_lock(Name, lock_obj(Resource), Piggyback);
 acquire(Name, Resource, leader, Piggyback) when is_atom(Name)->
-    Leader = ekka_membership:leader(),
+    Leader = mria_membership:leader(),
     case rpc:call(Leader, ?MODULE, acquire_lock,
                   [Name, lock_obj(Resource), Piggyback]) of
         Err = {badrpc, _Reason} ->
@@ -135,12 +135,12 @@ acquire(Name, Resource, leader, Piggyback) when is_atom(Name)->
         Res -> Res
     end;
 acquire(Name, Resource, quorum, Piggyback) when is_atom(Name) ->
-    Ring = ekka_membership:ring(up),
+    Ring = mria_membership:ring(up),
     Nodes = ekka_ring:find_nodes(Resource, Ring),
     acquire_locks(Nodes, Name, lock_obj(Resource), Piggyback);
 
 acquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
-    acquire_locks(ekka_membership:nodelist(up),
+    acquire_locks(mria_membership:nodelist(up),
                  Name, lock_obj(Resource), Piggyback).
 
 acquire_locks(Nodes, Name, LockObj, Piggyback) ->
@@ -198,18 +198,18 @@ release(Name, Resource) ->
 release(Name, Resource, local) ->
     release_lock(Name, lock_obj(Resource));
 release(Name, Resource, leader) ->
-    Leader = ekka_membership:leader(),
+    Leader = mria_membership:leader(),
     case rpc:call(Leader, ?MODULE, release_lock, [Name, lock_obj(Resource)]) of
         Err = {badrpc, _Reason} ->
             {false, [{Leader, Err}]};
         Res -> Res
     end;
 release(Name, Resource, quorum) ->
-    Ring = ekka_membership:ring(up),
+    Ring = mria_membership:ring(up),
     Nodes = ekka_ring:find_nodes(Resource, Ring),
     release_locks(Nodes, Name, lock_obj(Resource));
 release(Name, Resource, all) ->
-    release_locks(ekka_membership:nodelist(up), Name, lock_obj(Resource)).
+    release_locks(mria_membership:nodelist(up), Name, lock_obj(Resource)).
 
 release_locks(Nodes, Name, LockObj) ->
     {ResL, _BadNodes} = rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),

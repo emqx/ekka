@@ -92,15 +92,6 @@
 -spec(start() -> ok).
 start() ->
     ?tp(info, "Starting ekka", #{}),
-    application:load(ekka),
-    case ekka_mnesia:start() of
-        ok -> ok;
-        {error, {timeout, Tables}} ->
-            logger:error("Mnesia wait_for_tables timeout: ~p", [Tables]),
-            ok;
-        {error, Reason} ->
-            error(Reason)
-    end,
     {ok, _Apps} = application:ensure_all_started(ekka),
     ?tp(info, "Ekka is running", #{}),
     ok.
@@ -133,7 +124,7 @@ info(Key) ->
 -spec(info() -> infos()).
 info() ->
     ClusterInfo = ekka_cluster:info(),
-    Partitions = ekka_node_monitor:partitions(),
+    Partitions = mria_node_monitor:partitions(),
     maps:merge(ClusterInfo, #{members    => members(),
                               partitions => Partitions
                              }).
@@ -203,38 +194,38 @@ is_running(Node, App) ->
 
 %% Cluster members
 -spec(members() -> list(member())).
-members() -> ekka_membership:members().
+members() -> mria_membership:members().
 
 %% Local member
 -spec(local_member() -> member()).
-local_member() -> ekka_membership:local_member().
+local_member() -> mria_membership:local_member().
 
 %% Is node a member?
 -spec(is_member(node()) -> boolean()).
-is_member(Node) -> ekka_membership:is_member(Node).
+is_member(Node) -> mria_membership:is_member(Node).
 
 %% Node list
 -spec(nodelist() -> list(node())).
-nodelist() -> ekka_membership:nodelist().
+nodelist() -> mria_membership:nodelist().
 
 -spec(nodelist(up|down) -> list(node())).
-nodelist(Status) -> ekka_membership:nodelist(Status).
+nodelist(Status) -> mria_membership:nodelist(Status).
 
 %%--------------------------------------------------------------------
 %% Membership Monitor API
 %%--------------------------------------------------------------------
 
 monitor(Type) when ?IS_MON_TYPE(Type) ->
-    ekka_membership:monitor(Type, self(), true).
+    mria_membership:monitor(Type, self(), true).
 
 monitor(Type, Fun) when is_function(Fun), ?IS_MON_TYPE(Type) ->
-    ekka_membership:monitor(Type, Fun, true).
+    mria_membership:monitor(Type, Fun, true).
 
 unmonitor(Type) when ?IS_MON_TYPE(Type) ->
-    ekka_membership:monitor(Type, self(), false).
+    mria_membership:monitor(Type, self(), false).
 
 unmonitor(Type, Fun) when is_function(Fun), ?IS_MON_TYPE(Type) ->
-    ekka_membership:monitor(Type, Fun, false).
+    mria_membership:monitor(Type, Fun, false).
 
 %%--------------------------------------------------------------------
 %% Locker API
