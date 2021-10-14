@@ -40,8 +40,8 @@
         , autocluster/1
         ]).
 
-%% Register callback
--export([ callback/1
+%% Callbacks
+-export([ exec_callback/1
         , callback/2
         ]).
 
@@ -92,12 +92,16 @@
 -spec(start() -> ok).
 start() ->
     ?tp(info, "Starting ekka", #{}),
+    ekka_boot:register_mria_callbacks(),
     {ok, _Apps} = application:ensure_all_started(ekka),
     ?tp(info, "Ekka is running", #{}),
+    ekka_boot:create_tables(),
+    ekka:exec_callback(start),
     ok.
 
 -spec(stop() -> ok).
 stop() ->
+    ekka:exec_callback(stop),
     application:stop(ekka).
 
 %%--------------------------------------------------------------------
@@ -161,12 +165,14 @@ autocluster(App) ->
     end.
 
 %%--------------------------------------------------------------------
-%% Register callback
+%% Callbacks
 %%--------------------------------------------------------------------
-
--spec callback(atom()) -> undefined | {ok, function()}.
-callback(Name) ->
-    env({callback, Name}).
+-spec exec_callback(atom()) -> term().
+exec_callback(Name) ->
+    case env({callback, Name}) of
+      {ok, Fun} -> Fun();
+      undefined -> ok
+    end.
 
 -spec(callback(atom(), function()) -> ok).
 callback(Name, Fun) ->

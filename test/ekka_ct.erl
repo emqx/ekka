@@ -29,7 +29,6 @@ all(Suite) ->
 
 cleanup(Testcase) ->
     ct:pal("Cleaning up after ~p...", [Testcase]),
-    application:stop(ekka),
     mria:stop(),
     mnesia:stop(),
     ok = mnesia:delete_schema([node()]).

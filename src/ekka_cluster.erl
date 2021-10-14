@@ -26,12 +26,6 @@
         , status/1
         ]).
 
-%% RPC call for Cluster Management
--export([ prepare/1
-        , heal/1
-        , reboot/0
-        ]).
-
 -type(info_key() :: running_nodes | stopped_nodes).
 
 -type(infos() :: #{running_nodes := list(node()),
@@ -64,28 +58,3 @@ leave() ->
 -spec(force_leave(node()) -> ok | ignore | {error, term()}).
 force_leave(Node) ->
     mria:force_leave(Node).
-
-%% @doc Heal partitions
--spec(heal(shutdown | reboot) -> ok | {error, term()}).
-heal(shutdown) ->
-    prepare(heal);
-heal(reboot) ->
-    reboot().
-
-%% @doc Prepare to join or leave the cluster.
--spec(prepare(join | leave | heal) -> ok | {error, term()}).
-prepare(Action) ->
-    case ekka:callback(prepare) of
-        {ok, Prepare} -> Prepare(Action);
-        undefined     -> ok
-    end,
-    application:stop(ekka).
-
-%% @doc Reboot after join or leave cluster.
--spec(reboot() -> ok | {error, term()}).
-reboot() ->
-    ekka:start(),
-    case ekka:callback(reboot) of
-        {ok, Reboot} -> Reboot();
-        undefined    -> ok
-    end.

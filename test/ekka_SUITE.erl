@@ -150,9 +150,6 @@ t_cluster_force_leave2(_Config) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
-t_callback(_) ->
-    undefined = ekka:callback(shutdown).
-
 t_autocluster(_) ->
     ekka:autocluster().
 

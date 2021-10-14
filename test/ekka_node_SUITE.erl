@@ -40,5 +40,4 @@ t_is_running_2(_) ->
     ok = ekka:start(),
     true = ekka_node:is_running(ekka),
     true = ekka_node:is_running(node(), ekka),
-    ok = ekka:stop(),
     ok = mria:stop().
