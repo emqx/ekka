@@ -144,7 +144,7 @@ t_cluster_force_leave2(_Config) ->
         ok = rpc:call(N1, ekka, join, [N0]),
         [N0, N1] = ekka:info(running_nodes),
         ok = ekka:force_leave(N1),
-        ok = rpc:call(N1, mria, stop, []),
+        _ = rpc:call(N1, mria, stop, []),
         [N0] = ekka:info(running_nodes)
     after
         ok = ekka_ct:stop_slave(N1)

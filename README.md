@@ -1,7 +1,7 @@
 
 # Ekka
 
-Ekka - Autocluster, Autoheal and a [database](doc/rlog.md) for EMQ X Broker. Ekka helps building a new distribution layer for EMQ X R2.3+.
+Ekka - Autocluster for EMQ X Broker. Ekka helps building a new distribution layer for EMQ X R2.3+.
 
 ```
 ----------             ----------
@@ -342,4 +342,3 @@ Apache License Version 2.0
 ## Author
 
 EMQ X Team.
-

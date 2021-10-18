@@ -91,6 +91,7 @@
 
 -spec(start() -> ok).
 start() ->
+    ok = mria:start(),
     ?tp(info, "Starting ekka", #{}),
     ekka_boot:register_mria_callbacks(),
     {ok, _Apps} = application:ensure_all_started(ekka),
