@@ -28,19 +28,8 @@ start_link() ->
 init([]) ->
     {ok, {{one_for_all, 0, 3600},
           [child(ekka_cluster_sup, supervisor),
-           child(ekka_membership, worker),
-           child(ekka_node_monitor, worker),
-           child(ekka_locker_sup, supervisor),
-           child(ekka_rlog_top_sup, supervisor)
+           child(ekka_locker_sup, supervisor)
           ]}}.
-
-child(Mod, worker) ->
-    #{id       => Mod,
-      start    => {Mod, start_link, []},
-      restart  => permanent,
-      shutdown => 5000,
-      type     => worker,
-      modules  => [Mod]};
 
 child(Mod, supervisor) ->
      #{id       => Mod,

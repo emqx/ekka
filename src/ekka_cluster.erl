@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2021 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -26,12 +26,6 @@
         , status/1
         ]).
 
-%% RPC call for Cluster Management
--export([ prepare/1
-        , heal/1
-        , reboot/0
-        ]).
-
 -type(info_key() :: running_nodes | stopped_nodes).
 
 -type(infos() :: #{running_nodes := list(node()),
@@ -44,87 +38,23 @@
 info(Key) -> maps:get(Key, info()).
 
 -spec(info() -> infos()).
-info() -> ekka_mnesia:cluster_info().
+info() -> mria_mnesia:cluster_info().
 
 %% @doc Cluster status of the node.
-status(Node) -> ekka_mnesia:cluster_status(Node).
+status(Node) ->
+    mria_mnesia:cluster_status(Node).
 
 %% @doc Join the cluster
 -spec(join(node()) -> ok | ignore | {error, term()}).
-join(Node) when Node =:= node() ->
-    ignore;
-join(Node) when is_atom(Node) ->
-    case {ekka_rlog:role(), ekka_mnesia:is_node_in_cluster(Node), ekka_node:is_running(Node, ekka)} of
-        {replicant, _, _} ->
-            ok;
-        {core, false, true} ->
-            case ekka_rlog:role(Node) of
-                core ->
-                    prepare(join),
-                    ok = ekka_mnesia:join_cluster(Node),
-                    reboot();
-                replicant ->
-                    ignore
-            end;
-        {core, false, false} ->
-            {error, {node_down, Node}};
-        {core, true, _} ->
-            {error, {already_in_cluster, Node}}
-    end.
+join(Node) ->
+    mria:join(Node).
 
 %% @doc Leave from the cluster.
 -spec(leave() -> ok | {error, any()}).
 leave() ->
-    case ekka_mnesia:running_nodes() -- [node()] of
-        [_|_] ->
-            prepare(leave), ok = ekka_mnesia:leave_cluster(), reboot();
-        [] ->
-            {error, node_not_in_cluster}
-    end.
+    mria:leave().
 
 %% @doc Force a node leave from cluster.
 -spec(force_leave(node()) -> ok | ignore | {error, term()}).
-force_leave(Node) when Node =:= node() ->
-    ignore;
 force_leave(Node) ->
-    case ekka_mnesia:is_node_in_cluster(Node)
-         andalso rpc:call(Node, ?MODULE, prepare, [leave]) of
-        ok ->
-            case ekka_mnesia:remove_from_cluster(Node) of
-                ok    -> rpc:call(Node, ?MODULE, reboot, []);
-                Error -> Error
-            end;
-        false ->
-            {error, node_not_in_cluster};
-        {badrpc, nodedown} ->
-            ekka_membership:announce({force_leave, Node}),
-            ekka_mnesia:remove_from_cluster(Node);
-        {badrpc, Reason} ->
-            {error, Reason}
-    end.
-
-%% @doc Heal partitions
--spec(heal(shutdown | reboot) -> ok | {error, term()}).
-heal(shutdown) ->
-    prepare(heal), ekka_mnesia:ensure_stopped();
-heal(reboot) ->
-    ekka_mnesia:ensure_started(), reboot().
-
-%% @doc Prepare to join or leave the cluster.
--spec(prepare(join | leave | heal) -> ok | {error, term()}).
-prepare(Action) ->
-    ekka_membership:announce(Action),
-    case ekka:callback(prepare) of
-        {ok, Prepare} -> Prepare(Action);
-        undefined     -> ok
-    end,
-    application:stop(ekka).
-
-%% @doc Reboot after join or leave cluster.
--spec(reboot() -> ok | {error, term()}).
-reboot() ->
-    ekka:start(),
-    case ekka:callback(reboot) of
-        {ok, Reboot} -> Reboot();
-        undefined    -> ok
-    end.
+    mria:force_leave(Node).
