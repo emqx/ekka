@@ -21,11 +21,50 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+init_per_testcase(t_discover, Config) ->
+    meck:new(inet_res, [non_strict, passthrough, no_history, no_link, unstick]),
+    meck:expect(
+        inet_res,
+        lookup,
+        fun (_, _, a) -> [{127, 0, 0, 1}];
+            (_, _, srv) -> [{0,6,8083,"emqx-0.emqx.default.svc.cluster.local"},
+                            {0,6,8084,"emqx-0.emqx.default.svc.cluster.local"},
+                            {0,6,18083,"emqx-0.emqx.default.svc.cluster.local"},
+                            {0,6,8883,"emqx-0.emqx.default.svc.cluster.local"},
+                            {0,6,1883,"emqx-0.emqx.default.svc.cluster.local"},
+                            {0,6,8083,"emqx-1.emqx.default.svc.cluster.local"},
+                            {0,6,8084,"emqx-1.emqx.default.svc.cluster.local"},
+                            {0,6,18083,"emqx-1.emqx.default.svc.cluster.local"},
+                            {0,6,8883,"emqx-1.emqx.default.svc.cluster.local"},
+                            {0,6,1883,"emqx-1.emqx.default.svc.cluster.local"},
+                            {0,6,8083,"emqx-2.emqx.default.svc.cluster.local"},
+                            {0,6,8084,"emqx-2.emqx.default.svc.cluster.local"},
+                            {0,6,18083,"emqx-2.emqx.default.svc.cluster.local"},
+                            {0,6,8883,"emqx-2.emqx.default.svc.cluster.local"},
+                            {0,6,1883,"emqx-2.emqx.default.svc.cluster.local"}
+                           ];
+            (Name, Class, Type) -> meck:passthrough([Name, Class, Type])
+        end),
+    Config;
+init_per_testcase(_, Config) -> Config.
+
+end_per_testcase(t_discover, Config) ->
+    meck:unload(inet_res),
+    Config;
+end_per_testcase(_, Config) -> Config.
+
 all() -> ekka_ct:all(?MODULE).
 
 t_discover(_) ->
-    Options = [{name, "localhost"}, {app, "ekka"}],
-    {ok, ['ekka@127.0.0.1']} = ekka_cluster_dns:discover(Options).
+    Options1 = [{name, "localhost"}, {app, "ekka"}],
+    {ok, ['ekka@127.0.0.1']} = ekka_cluster_dns:discover(Options1),
+
+    Options2 = [{name, "emqx.default.svc.cluster.local"}, {app, "ekka"}, {type, srv}],
+    {ok, ['ekka@emqx-0.emqx.default.svc.cluster.local',
+          'ekka@emqx-1.emqx.default.svc.cluster.local',
+          'ekka@emqx-2.emqx.default.svc.cluster.local'
+         ]} = ekka_cluster_dns:discover(Options2),
+    ok.
 
 t_lock(_) ->
     ignore = ekka_cluster_dns:lock([]).
