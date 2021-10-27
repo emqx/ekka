@@ -30,12 +30,13 @@ discover(Options) ->
     Name = proplists:get_value(name, Options),
     App  = proplists:get_value(app, Options),
     Type = proplists:get_value(type, Options, a),
-    case Type of
-        a -> {ok, [node_name(App, inet:ntoa(IP)) || IP <- inet_res:lookup(Name, in, a)]};
-        srv ->
-            {ok, [node_name(App, Host) || {_, _, _, Host} <- lists:ukeysort(4, inet_res:lookup(Name, in, srv)) ]};
-        _ -> {error, unsupported_types}
-    end.
+    {ok, [node_name(App, Host) || Host <- resolve_hosts(Name, Type)]}.
+
+resolve_hosts(Name, a) ->
+    [inet:ntoa(IP) || IP <- inet_res:lookup(Name, in, a)];
+resolve_hosts(Name, srv) ->
+    Records = inet_res:lookup(Name, in, srv),
+    lists:usort(lists:map(fun({_, _, _, Host}) -> Host end, Records)).
 
 node_name(App, Host) ->
     list_to_atom(lists:concat([App, "@", Host])).
