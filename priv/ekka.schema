@@ -100,7 +100,7 @@
 ]}.
 
 {mapping, "cluster.dns.type", "ekka.cluster_discovery", [
-  {datatype, {enum, [a, srv]}}
+  {datatype, {enum, [a, srv]}},
   {default, a}
 ]}.
 
