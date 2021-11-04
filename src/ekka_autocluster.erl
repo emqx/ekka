@@ -148,7 +148,7 @@ join_with(Node) ->
 find_oldest_node([Node]) ->
     Node;
 find_oldest_node(Nodes) ->
-    case rpc:multicall(Nodes, mria_membership, local_member, []) of
+    case rpc:multicall(Nodes, mria_membership, local_member, [], 30000) of
         {ResL, []} ->
             case [M || M <- ResL, is_record(M, member)] of
                 [] -> ?LOG(error, "Bad members found on nodes ~p: ~p", [Nodes, ResL]),
