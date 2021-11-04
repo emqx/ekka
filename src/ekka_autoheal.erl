@@ -74,7 +74,7 @@ handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{delay = Delay, t
     case ekka_membership:is_all_alive() of
         true ->
             Nodes = ekka_mnesia:cluster_nodes(all),
-            case rpc:multicall(Nodes, ekka_mnesia, cluster_view, []) of
+            case rpc:multicall(Nodes, ekka_mnesia, cluster_view, [], 30000) of
                 {Views, []} ->
                     SplitView = lists:sort(fun compare_view/2, lists:usort(Views)),
                     ekka_node_monitor:cast(coordinator(SplitView), {heal_partition, SplitView});
