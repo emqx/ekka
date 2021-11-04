@@ -86,6 +86,7 @@
 
 %% 15 seconds by default
 -define(LEASE_TIME, 15000).
+-define(MC_TIMEOUT, 30000).
 
 %%--------------------------------------------------------------------
 %% API
@@ -145,11 +146,11 @@ acquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
 
 acquire_locks(Nodes, Name, LockObj, Piggyback) ->
     {ResL, _BadNodes}
-        = rpc:multicall(Nodes, ?MODULE, acquire_lock, [Name, LockObj, Piggyback]),
+        = rpc:multicall(Nodes, ?MODULE, acquire_lock, [Name, LockObj, Piggyback], ?MC_TIMEOUT),
     case merge_results(ResL) of
         Res = {true, _}  -> Res;
         Res = {false, _} ->
-            rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
+            rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj], ?MC_TIMEOUT),
             Res
     end.
 
@@ -212,7 +213,7 @@ release(Name, Resource, all) ->
     release_locks(ekka_membership:nodelist(up), Name, lock_obj(Resource)).
 
 release_locks(Nodes, Name, LockObj) ->
-    {ResL, _BadNodes} = rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj]),
+    {ResL, _BadNodes} = rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj], ?MC_TIMEOUT),
     merge_results(ResL).
 
 release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
@@ -268,7 +269,8 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                                   true ->
                                       %% force kill it as it might have hung
                                       logger:error("kill ~p as it has held the lock for too long, resource: ~p", [Owner, Resource]),
-                                      exit(Owner, kill);
+                                      exit(Owner, kill),
+                                      MonAcc;
                                   false ->
                                       maps:put(Owner, set_put(Resource, ResourceSet), MonAcc)
                               end;
