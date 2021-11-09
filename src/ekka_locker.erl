@@ -268,7 +268,8 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                                     true ->
                                         %% force kill it as it might have hung
                                         logger:error("kill ~p as it has held the lock for too long, resource: ~p", [Owner, Resource]),
-                                        exit(Owner, kill);
+                                        exit(Owner, kill),
+                                        MonAcc;
                                     false ->
                                         maps:put(Owner, set_put(Resource, ResourceSet), MonAcc)
                                 end;
