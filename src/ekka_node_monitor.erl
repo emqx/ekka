@@ -159,7 +159,7 @@ handle_info({mnesia_system_event, {inconsistent_database, Context, Node}},
     {noreply, State#state{partitions = lists:usort([Node | Partitions])}};
 
 handle_info({mnesia_system_event, {mnesia_overload, Details}}, State) ->
-    ?LOG(error, "Mnesia overload: ~p", [Details]),
+    ?LOG(warning, "Mnesia overload: ~p", [Details]),
     {noreply, State};
 
 handle_info({mnesia_system_event, Event}, State) ->
