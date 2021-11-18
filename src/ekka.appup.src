@@ -1,7 +1,11 @@
 %% -*- mode: erlang -*-
-{"0.8.1.4",
-  [{"0.8.1.3",
-    [{load_module,ekka_autocluster,brutal_purge,soft_purge,[]},
+{"0.8.1.5",
+  [{"0.8.1.4",
+    [{load_module,ekka_node_monitor,brutal_purge,soft_purge,[]}
+    ]},
+   {"0.8.1.3",
+    [{load_module,ekka_node_monitor,brutal_purge,soft_purge,[]},
+     {load_module,ekka_autocluster,brutal_purge,soft_purge,[]},
      {load_module,ekka_autoheal,brutal_purge,soft_purge,[]},
      {load_module,ekka_locker,brutal_purge,soft_purge,[]},
      {load_module,ekka_cluster_dns,brutal_purge,soft_purge,[]}
@@ -31,8 +35,12 @@
      {load_module,ekka_locker,brutal_purge,soft_purge,[]},
      {load_module,ekka_httpc,brutal_purge,soft_purge,[]},
      {load_module,ekka_mnesia,brutal_purge,soft_purge,[]}]}],
-  [{"0.8.1.3",
-    [{load_module,ekka_autocluster,brutal_purge,soft_purge,[]},
+  [{"0.8.1.4",
+    [{load_module,ekka_node_monitor,brutal_purge,soft_purge,[]}
+    ]},
+   {"0.8.1.3",
+    [{load_module,ekka_node_monitor,brutal_purge,soft_purge,[]},
+     {load_module,ekka_autocluster,brutal_purge,soft_purge,[]},
      {load_module,ekka_autoheal,brutal_purge,soft_purge,[]},
      {load_module,ekka_locker,brutal_purge,soft_purge,[]},
      {load_module,ekka_cluster_dns,brutal_purge,soft_purge,[]}
