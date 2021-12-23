@@ -29,8 +29,8 @@ t_gen(_) ->
     ?assert(Guid2 > Guid1).
 
 t_new(_) ->
-    {Ts1, _NPid, 0} = ekka_guid:new(),
-    {Ts2, _NPid, 0} = ekka_guid:new(),
+    {Ts1, NPid, 0} = ekka_guid:new(),
+    {Ts2, NPid, 0} = ekka_guid:new(),
     ?assert(Ts2 > Ts1).
 
 t_timestamp(_) ->
@@ -40,4 +40,3 @@ t_timestamp(_) ->
 
 t_to_from_hexstr(_) ->
     ?assertEqual(Guid = ekka_guid:gen(), ekka_guid:from_hexstr(ekka_guid:to_hexstr(Guid))).
-
