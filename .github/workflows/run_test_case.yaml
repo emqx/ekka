@@ -9,10 +9,16 @@ jobs:
         runs-on: ubuntu-latest
 
         container:
-            image: erlang:22.1
+            image: erlang:24.0
 
         steps:
-        - uses: actions/checkout@v1
+        - uses: actions/checkout@v2
+
+        - name: Install prerequisites
+          run: |
+            apt update
+            apt install -y cmake
+
         - name: Check versions
           run: |
             ./git-tag.sh dummy --dryrun
