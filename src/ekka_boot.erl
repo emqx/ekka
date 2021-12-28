@@ -30,7 +30,9 @@ create_tables() ->
 %% @dec Register actions that will be performed during Mria heal
 register_mria_callbacks() ->
     mria_config:register_callback(start, fun ekka:start/0),
-    mria_config:register_callback(stop, fun ekka:stop/0).
+    mria_config:register_callback(stop, fun ekka:stop/0),
+    mria_config:register_callback(core_node_discovery,
+                                  fun ekka_autocluster:core_node_discovery_callback/0).
 
 %% only {F, Args}...
 apply_module_attributes(Name) ->
