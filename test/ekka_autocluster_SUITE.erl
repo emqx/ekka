@@ -53,6 +53,7 @@ all() -> ekka_ct:all(?MODULE).
 %%--------------------------------------------------------------------
 
 init_per_suite(Config) ->
+    application:set_env(gen_rpc, port_discovery, stateless),
     Config.
 
 end_per_suite(_Config) ->
@@ -154,6 +155,41 @@ reboot_ekka_with_mcast_env() ->
     ok = ekka:stop(),
     ok = set_app_env(node(), {mcast, ?MCAST_OPTIONS}),
     ok = ekka:start().
+
+%%--------------------------------------------------------------------
+%% Core node discovery callback
+
+t_core_node_discovery_callback(_Config) ->
+    {ok, _} = start_etcd_server(2379),
+    application:set_env(ekka, test_etcd_nodes, [ "ct@127.0.0.1"
+                                               , "n1@127.0.0.1"
+                                               , "n2@127.0.0.1"
+                                               ]),
+    N1 = ekka_ct:start_slave(ekka, n1, [ {mria, db_backend, rlog}
+                                       ]),
+    N2 = ekka_ct:start_slave(ekka, n2, [ {mria, db_backend, rlog}
+                                       , {mria, node_role, replicant}
+                                       ]),
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = ekka_ct:wait_running(N2),
+        ok = set_app_env(N1, {etcd, ?ETCD_OPTIONS}),
+        ok = set_app_env(N2, {etcd, ?ETCD_OPTIONS}),
+        _ = rpc:call(N1, ekka, autocluster, []),
+        _ = rpc:call(N2, ekka, autocluster, []),
+        ok = wait_for_node(N1),
+        %% filtering the core nodes is done by mria
+        ?assertEqual(
+           ['ct@127.0.0.1', 'n1@127.0.0.1', 'n2@127.0.0.1'],
+           erpc:call(N2, ekka_autocluster, core_node_discovery_callback, [], 5000)
+          ),
+        ok = ekka:force_leave(N1)
+    after
+        ok = stop_etcd_server(2379),
+        application:unset_env(ekka, test_etcd_nodes),
+        ok = ekka_ct:stop_slave(N1),
+        ok = ekka_ct:stop_slave(N2)
+    end.
 
 %%--------------------------------------------------------------------
 %% Helper functions

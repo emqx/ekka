@@ -18,7 +18,11 @@
 
 -include("ekka.hrl").
 
--export([enabled/0 , run/1, unregister_node/0]).
+-export([ enabled/0
+        , run/1
+        , unregister_node/0
+        , core_node_discovery_callback/0
+        ]).
 
 -export([acquire_lock/1, release_lock/1]).
 
@@ -159,6 +163,21 @@ find_oldest_node(Nodes) ->
         {ResL, BadNodes} ->
             ?LOG(error, "Bad nodes found: ~p, ResL: ", [BadNodes, ResL]), false
    end.
+
+%% @doc Core node discovery used by mria by replicant nodes to find
+%% the core ones.
+-spec(core_node_discovery_callback() -> [node()]).
+core_node_discovery_callback() ->
+    with_strategy(
+      fun(Mod, Opts) ->
+              case Mod:discover(Opts) of
+                  {ok, Nodes} ->
+                      Nodes;
+                  {error, Reason} ->
+                      ?LOG(error, "Core node discovery error: ~p", [Reason]),
+                      []
+              end
+      end).
 
 log_error(Format, {error, Reason}) ->
     ?LOG(error, Format ++ " error: ~p", [Reason]);

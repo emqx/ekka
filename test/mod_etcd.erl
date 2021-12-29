@@ -21,11 +21,19 @@
 -export([do/1]).
 
 do(_Req = #mod{method = "GET", request_uri = "/v2/keys/" ++ _Uri}) ->
-    Response = {200, "{\"node\": {\"nodes\": [{\"key\": \"cl/ct@127.0.0.1\"}]}}"},
+    Nodes = application:get_env(ekka, test_etcd_nodes, ["ct@127.0.0.1"]),
+    Body = #{ <<"node">> =>
+                  #{ <<"nodes">> =>
+                         lists:map(fun(N) ->
+                                           #{<<"key">> => list_to_binary("cl/" ++ N)}
+                                   end,
+                                   Nodes)
+                   }
+            },
+    Response = {200, binary_to_list(jiffy:encode(Body))},
     {proceed, [{response, Response}]};
 
 do(_Req = #mod{request_uri = "/v2/keys/" ++ _Uri}) ->
     {proceed, [{response, {200, "{\"errorCode\": 0}"}}]};
 
 do(Req) -> {proceed, Req#mod.data}.
-

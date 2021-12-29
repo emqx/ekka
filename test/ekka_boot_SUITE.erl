@@ -32,3 +32,23 @@ t_apply_module_attributes(_) ->
 t_all_module_attributes(_) ->
     [] = ekka_boot:all_module_attributes(xattr).
 
+t_register_mria_callbacks(_) ->
+    try
+        ok = ekka_boot:register_mria_callbacks(),
+        ?assertEqual(
+           {ok, fun ekka:start/0},
+           mria_config:callback(start)),
+        ?assertEqual(
+           {ok, fun ekka:stop/0},
+           mria_config:callback(stop)),
+        ?assertEqual(
+           {ok, fun ekka_autocluster:core_node_discovery_callback/0},
+           mria_config:callback(core_node_discovery))
+    after
+        lists:foreach(
+          fun mria_config:unregister_callback/1,
+          [ start
+          , stop
+          , core_node_discovery
+          ])
+    end.
