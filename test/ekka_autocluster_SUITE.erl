@@ -178,9 +178,9 @@ t_core_node_discovery_callback(_Config) ->
         _ = rpc:call(N1, ekka, autocluster, []),
         _ = rpc:call(N2, ekka, autocluster, []),
         ok = wait_for_node(N1),
-        %% n2 is not returned as it is a replicant
+        %% filtering the core nodes is done by mria
         ?assertEqual(
-           ['ct@127.0.0.1', 'n1@127.0.0.1'],
+           ['ct@127.0.0.1', 'n1@127.0.0.1', 'n2@127.0.0.1'],
            erpc:call(N2, ekka_autocluster, core_node_discovery_callback, [], 5000)
           ),
         ok = ekka:force_leave(N1)
