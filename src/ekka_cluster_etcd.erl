@@ -334,7 +334,8 @@ init(Options) ->
         [] -> {tcp, []};
         [SSL] -> SSL
     end,
-    {ok, _Pid} = eetcd:open(?MODULE, Hosts, Transport, TransportOpts),
+    {ok, Pid} = eetcd:open(?MODULE, Hosts, Transport, TransportOpts),
+    link(Pid),
     {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, 5),
     {ok, _Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
     {ok, #state{prefix = Prefix, lease_id = ID}}.
