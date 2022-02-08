@@ -269,6 +269,8 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                                   true ->
                                       %% force kill it as it might have hung
                                       logger:error("kill ~p as it has held the lock for too long, resource: ~p", [Owner, Resource]),
+                                      Status = process_info(Owner, [status, message_queue_len, current_stacktrace]),
+                                      logger:error("lock_owner_status:~n~p", [Status]),
                                       exit(Owner, kill),
                                       MonAcc;
                                   false ->
