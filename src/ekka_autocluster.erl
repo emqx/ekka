@@ -17,6 +17,7 @@
 -module(ekka_autocluster).
 
 -include("ekka.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 -export([ enabled/0
         , run/1
@@ -39,6 +40,7 @@ enabled() ->
 
 -spec(run(atom()) -> any()).
 run(App) ->
+    ?tp(ekka_autocluster_run, #{app => App}),
     case acquire_lock(App) of
         ok ->
             spawn(fun() ->
@@ -68,10 +70,18 @@ wait_application_ready(App, Retries) ->
 
 maybe_run_again(App) ->
     %% Check if the node joined cluster?
-    case mria_mnesia:is_node_in_cluster() of
+    InCluster = mria_mnesia:is_node_in_cluster(),
+    Registered = is_node_registered(),
+    ?tp(ekka_maybe_run_app_again,
+        #{ app => App
+         , node_in_cluster => InCluster
+         , node_registered => Registered
+         }),
+    case InCluster andalso Registered of
         true  -> ok;
-        false -> timer:sleep(5000),
-                 run(App)
+        false ->
+            timer:sleep(5000),
+            run(App)
     end.
 
 -spec(discover_and_join() -> any()).
@@ -126,8 +136,10 @@ strategy_module(Strategy) ->
     end.
 
 discover_and_join(Mod, Options) ->
+    ?tp(ekka_autocluster_discover_and_join, #{mod => Mod}),
     case Mod:discover(Options) of
         {ok, Nodes} ->
+            ?tp(ekka_autocluster_discover_and_join_ok, #{mod => Mod, nodes => Nodes}),
             maybe_join([N || N <- Nodes, ekka_node:is_aliving(N)]),
             log_error("Register", Mod:register(Options));
         {error, Reason} ->
@@ -178,6 +190,14 @@ core_node_discovery_callback() ->
                       []
               end
       end).
+
+%%--------------------------------------------------------------------
+%% Internal functions
+%%--------------------------------------------------------------------
+
+is_node_registered() ->
+    Nodes = core_node_discovery_callback(),
+    lists:member(node(), Nodes).
 
 log_error(Format, {error, Reason}) ->
     ?LOG(error, Format ++ " error: ~p", [Reason]);
