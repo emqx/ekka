@@ -78,15 +78,16 @@ maybe_run_again(App) ->
 discover_and_join() ->
     with_strategy(
       fun(Mod, Options) ->
-        case Mod:lock(Options) of
+        try Mod:lock(Options) of
             ok ->
-                discover_and_join(Mod, Options),
-                log_error("Unlock", Mod:unlock(Options));
+                discover_and_join(Mod, Options);
             ignore ->
                 timer:sleep(rand:uniform(3000)),
                 discover_and_join(Mod, Options);
             {error, Reason} ->
                 ?LOG(error, "AutoCluster stopped for lock error: ~p", [Reason])
+        after
+            log_error("Unlock", Mod:unlock(Options))
         end
       end).
 

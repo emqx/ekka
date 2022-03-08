@@ -100,6 +100,16 @@ t_autocluster_via_dns(_Config) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+t_autocluster_dns_lock_failure(_Config) ->
+    N1 = ekka_ct:start_slave(ekka, n1),
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = set_app_env(N1, {dns, ?DNS_OPTIONS}),
+        assert_unlocked(ekka_cluster_dns, N1)
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
+
 %%--------------------------------------------------------------------
 %% Autocluster via 'etcd' strategy
 
@@ -117,6 +127,18 @@ t_autocluster_via_etcd(_Config) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+t_autocluster_etcd_lock_failure(_Config) ->
+    {ok, _} = start_etcd_server(2379),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = set_app_env(N1, {etcd, ?ETCD_OPTIONS}),
+        assert_unlocked(ekka_cluster_etcd, N1)
+    after
+        ok = stop_etcd_server(2379),
+        ok = ekka_ct:stop_slave(N1)
+    end.
+
 %%--------------------------------------------------------------------
 %% Autocluster via 'k8s' strategy
 
@@ -129,6 +151,18 @@ t_autocluster_via_k8s(_Config) ->
         rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
         ok = ekka:force_leave(N1)
+    after
+        ok = stop_k8sapi_server(6000),
+        ok = ekka_ct:stop_slave(N1)
+    end.
+
+t_autocluster_k8s_lock_failure(_Config) ->
+    {ok, _} = start_k8sapi_server(6000),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = set_app_env(N1, {k8s, ?K8S_OPTIONS}),
+        assert_unlocked(ekka_cluster_k8s, N1)
     after
         ok = stop_k8sapi_server(6000),
         ok = ekka_ct:stop_slave(N1)
@@ -155,6 +189,18 @@ reboot_ekka_with_mcast_env() ->
     ok = ekka:stop(),
     ok = set_app_env(node(), {mcast, ?MCAST_OPTIONS}),
     ok = ekka:start().
+
+t_autocluster_mcast_lock_failure(_Config) ->
+    ok = reboot_ekka_with_mcast_env(),
+    ok = timer:sleep(1000),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = set_app_env(N1, {mcast, ?MCAST_OPTIONS}),
+        assert_unlocked(ekka_cluster_mcast, N1)
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
 
 %%--------------------------------------------------------------------
 %% Core node discovery callback
@@ -237,3 +283,24 @@ stop_k8sapi_server(Port) ->
 
 stop_http_server(Port) ->
     inets:stop(httpd, {{127,0,0,1}, Port}).
+
+assert_unlocked(StrategyMod, Node) ->
+    %% simulate a failure like timeout
+    TestPid = self(),
+    ok = rpc:call(Node, meck, new, [StrategyMod, [non_strict, passthrough,
+                                                  no_history, no_link]]),
+    ok = rpc:call(Node, meck, expect, [StrategyMod, lock,
+                                       fun(_Options) -> error(timeout) end]),
+    ok = rpc:call(Node, meck, expect, [StrategyMod, unlock,
+                                       fun(_Options) ->
+                                               TestPid ! unlocked,
+                                               ok
+                                       end]),
+    _ = rpc:call(Node, ekka, autocluster, []),
+    Timeout = 500,
+    receive
+        unlocked -> ok
+    after
+        Timeout -> error(failed_to_unlock)
+    end,
+    ok.
