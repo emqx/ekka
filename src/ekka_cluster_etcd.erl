@@ -19,6 +19,8 @@
 
 -behaviour(gen_server).
 
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
+
 -export([ discover/1
         , lock/1
         , unlock/1
@@ -135,6 +137,7 @@ v2_unlock(Options) ->
     end.
 
 v2_register(Options) ->
+    ?tp(ekka_cluster_etcd_v2_register, #{}),
     case etcd_set_node_key(Options) of
         {ok, _Response} ->
             ensure_node_ttl(Options);
@@ -277,6 +280,7 @@ v3_unlock(_) ->
     end.
 
 v3_register(#state{prefix = Prefix ,lease_id = ID}) ->
+    ?tp(ekka_cluster_etcd_v3_register, #{prefix => Prefix, lease_id => ID}),
     Context = v3_node_context(Prefix, ID),
     case eetcd_kv:put(Context) of
         {ok, _Response} ->

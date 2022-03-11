@@ -20,6 +20,7 @@
 -compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 -define(DNS_OPTIONS, [{name, "localhost"},
                       {app, "ct"}
@@ -236,6 +237,56 @@ t_core_node_discovery_callback(_Config) ->
         ok = ekka_ct:stop_slave(N1),
         ok = ekka_ct:stop_slave(N2)
     end.
+
+%%--------------------------------------------------------------------
+%% Misc tests
+%%--------------------------------------------------------------------
+
+t_run_again_when_not_registered(_Config) ->
+    application:set_env(ekka, test_etcd_nodes, ["n1@127.0.0.1", "ct@127.0.0.1"]),
+    {ok, _} = start_etcd_server(2379),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ?check_trace(
+       #{timetrap => 30_000},
+       try
+           ok = ekka_ct:wait_running(N1),
+           ok = set_app_env(N1, {etcd, ?ETCD_OPTIONS}),
+           ok = rpc:call(N1, meck, new, [ekka_cluster_etcd,
+                                         [non_strict, passthrough,
+                                          no_history, no_link]]),
+           ok = rpc:call(
+                  N1, meck, expect,
+                  [ekka_cluster_etcd, discover,
+                   [{['_'], meck:seq(
+                              [ %% first try; fail
+                                meck:val({ok, []})
+                                %% checking if registered; fail
+                              , meck:val({ok, []})
+                                %% work afterwards
+                              , meck:passthrough()
+                              ])}]]),
+           _ = rpc:call(N1, ekka, autocluster, []),
+           ok = wait_for_node(N1),
+           ok = ekka:force_leave(N1)
+       after
+           ok = stop_etcd_server(2379),
+           application:unset_env(ekka, test_etcd_nodes),
+           ok = ekka_ct:stop_slave(N1)
+       end,
+       fun(Trace) ->
+               ct:pal("trace: ~100p~n", [Trace]),
+               ?assert(
+                  ?strict_causality(
+                     #{ ?snk_kind       := ekka_maybe_run_app_again
+                      , node_registered := false
+                      }
+                    , #{ ?snk_kind       := ekka_maybe_run_app_again
+                       , node_registered := true
+                       }
+                    , Trace
+                    )),
+               ok
+       end).
 
 %%--------------------------------------------------------------------
 %% Helper functions
