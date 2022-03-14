@@ -16,7 +16,7 @@
 
 -module(ekka_ring).
 
--include("ekka.hrl").
+-include_lib("mria/include/mria.hrl").
 
 -export([ find_node/2
         , find_nodes/2
@@ -89,4 +89,3 @@ quorum(Ring) ->
     end.
 
 phash(Key) -> erlang:phash2(Key, ?BASE).
-

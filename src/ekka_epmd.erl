@@ -18,7 +18,7 @@
 
 -module(ekka_epmd).
 
--include("ekka.hrl").
+-include_lib("mria/include/mria.hrl").
 
 %% epmd_module callbacks
 -export([start_link/0]).
@@ -64,4 +64,3 @@ names(_Hostname) ->
     %% Since we don't have epmd, we don't really know what other nodes
     %% there are.
     {error, address}.
-
