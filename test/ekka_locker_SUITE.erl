@@ -19,7 +19,7 @@
 -compile(export_all).
 -compile(nowarn_export_all).
 
--include("ekka.hrl").
+-include_lib("mria/include/mria.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -define(SERVER, locker_server).
