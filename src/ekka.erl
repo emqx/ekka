@@ -16,7 +16,7 @@
 
 -module(ekka).
 
--include("ekka.hrl").
+-include_lib("mria/include/mria.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 %% Start/Stop

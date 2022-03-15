@@ -16,7 +16,7 @@
 
 -module(ekka_autocluster).
 
--include("ekka.hrl").
+-include_lib("mria/include/mria.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 -export([ enabled/0

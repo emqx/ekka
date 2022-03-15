@@ -18,7 +18,7 @@
 
 -module(ekka_epmd).
 
--include("ekka.hrl").
+-include_lib("mria/include/mria.hrl").
 
 %% epmd_module callbacks
 -export([start_link/0]).
