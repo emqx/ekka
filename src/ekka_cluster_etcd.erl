@@ -338,6 +338,13 @@ init(Options) ->
         [] -> {tcp, []};
         [SSL] -> SSL
     end,
+    %% At the time of writing, the etcd connection process does not
+    %% close when this process dies.  So, when this processes is
+    %% restarted by its supervisor, the `eetcd:open' call fails with
+    %% `{error,[{{"localhost",2379},already_started}]}'.  This ensures
+    %% that no connection with this name exists before opening it
+    %% (again).
+    eetcd:close(?MODULE),
     {ok, _Pid} = eetcd:open(?MODULE, Hosts, Transport, TransportOpts),
     {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, 5),
     {ok, _Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
