@@ -96,3 +96,13 @@ vals_to_csv(L) ->
 
 setenv(Node, Env) ->
     [rpc:call(Node, application, set_env, [App, Key, Val]) || {App, Key, Val} <- Env].
+
+is_tcp_server_available(Host, Port) ->
+    Timeout = 15_000,
+    case gen_tcp:connect(Host, Port, [], Timeout) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            true;
+        {error, _} ->
+            false
+    end.

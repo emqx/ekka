@@ -21,7 +21,8 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--define(OPTIONS, [{server, ["http://127.0.0.1:2379"]},
+-define(ETCD_PORT, 2379).
+-define(OPTIONS, [{server, ["http://127.0.0.1:" ++ integer_to_list(?ETCD_PORT)]},
                   {prefix, "emqxcl"},
                   {version, v2},
                   {node_ttl, 60}
@@ -29,14 +30,23 @@
 
 all() -> ekka_ct:all(?MODULE).
 
+init_per_testcase(t_restart_process, Config) ->
+    case ekka_ct:is_tcp_server_available("localhost", ?ETCD_PORT) of
+        true ->
+            application:ensure_all_started(eetcd),
+            Config;
+        false ->
+            {skip, no_etcd}
+    end;
 init_per_testcase(_TestCase, Config) ->
     ok = meck:new(httpc, [non_strict, passthrough, no_history]),
     Config.
 
-end_per_testcase(TestCase, Config) ->
+end_per_testcase(t_restart_process, _Config) ->
+    application:stop(eetcd);
+end_per_testcase(TestCase, _Config) ->
     ok = meck:unload(httpc),
-    ekka_ct:cleanup(TestCase),
-    Config.
+    ekka_ct:cleanup(TestCase).
 
 t_discover(_Config) ->
     Json = <<"{\"node\": {\"nodes\": [{\"key\": \"ekkacl/n1@127.0.0.1\"}]}}">>,
@@ -77,3 +87,33 @@ t_etcd_set_node_key(_) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
     {ok, #{<<"errorCode">> := 0}} = ekka_cluster_etcd:etcd_set_node_key(?OPTIONS).
+
+t_restart_process(_) ->
+    snabbkaffe:fix_ct_logging(),
+    Options = lists:keyreplace(version, 1, ?OPTIONS, {version, v3}),
+    Node = ekka_ct:start_slave(ekka, n1, [{ekka, cluster_discovery, {etcd, Options}}]),
+    try
+        ok = ekka_ct:wait_running(Node),
+        Pid = erpc:call(Node, erlang, whereis, [ekka_cluster_etcd]),
+        SupPid = erpc:call(Node, erlang, whereis, [ekka_sup]),
+        Ref = monitor(process, Pid),
+        SupRef = monitor(process, SupPid),
+        exit(Pid, kill),
+        receive
+            {'DOWN', Ref, process, Pid, _} ->
+                ok
+        after
+            200 -> exit(proc_not_killed)
+        end,
+        receive
+            {'DOWN', SupRef, process, SupPid, _} ->
+                exit(supervisor_died)
+        after
+            200 -> ok
+        end,
+        ok = ekka_ct:wait_running(Node, 2_000),
+        ok
+    after
+        ok = ekka_ct:stop_slave(Node)
+    end,
+    ok.
