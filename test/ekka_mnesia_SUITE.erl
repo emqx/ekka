@@ -101,3 +101,59 @@ t_remove_from_cluster(_) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+t_diagnosis_tab(_)->
+    TestTab = test_tab_1,
+    N1 = ekka_ct:start_slave(node, n1),
+    N2 = ekka_ct:start_slave(node, n2),
+
+    try
+        %% Start ekka on two nodes
+        ok = rpc:call(N1, ekka_mnesia, start, []),
+        ok = rpc:call(N2, ekka_mnesia, start, []),
+        ok = rpc:call(N1, ekka_mnesia, join_cluster, [N2]),
+
+        %% Create a test table
+        {atomic, ok} = rpc:call(N1, mnesia, create_table, [TestTab, [{disc_copies, [N1,N2]}]]),
+        %% Ensure table is ready
+        ?assertEqual(ok, rpc:call(N1, mnesia, wait_for_tables, [[TestTab], 1000])),
+        timer:sleep(100),
+        %% Stop N1
+        ok = ekka_ct:stop_slave(N1),
+        %% Stop N2
+        ok = ekka_ct:stop_slave(N2),
+        ?assertEqual({badrpc, nodedown}, rpc:call(N1, mnesia, wait_for_tables, [[TestTab], 1000])),
+        ?assertEqual({badrpc, nodedown}, rpc:call(N2, mnesia, wait_for_tables, [[TestTab], 1000])),
+
+        %% Start N1, N1 mnesia doesn't know N2 is down
+        N1 = ekka_ct:start_slave(node, n1),
+        ok = rpc:call(N1, mnesia, start, []), %%ekka_mnesia:start/0 will block
+        ?assertEqual( {timeout,[test_tab_1]}
+                    , rpc:call(N1, mnesia, wait_for_tables, [[TestTab], 5000])),
+        ?assertEqual(ok, rpc:call(N1, ekka_mnesia, diagnosis, [[TestTab]])),
+
+        %% Start N2 only, but not mnesia
+        N2 = ekka_ct:start_slave(node, n2),
+        %% Check N1 still waits for the mnesia on N2
+        ?assertEqual( {timeout,[test_tab_1]}
+                    , rpc:call(N1, mnesia, wait_for_tables, [[TestTab], 5000])),
+        ?assertEqual(ok, rpc:call(N1, ekka_mnesia, diagnosis, [[TestTab]])),
+
+        %% Start mnesia on N2.
+        ok = rpc:call(N2, ekka_mnesia, start, []),
+
+        %% Start ekka_mnesia on N1, no blocking
+        ok = rpc:call(N1, ekka_mnesia, start, []),
+
+        %% Check tables are loaded on two
+        ?assertEqual(ok, rpc:call(N1, mnesia, wait_for_tables, [[TestTab], 1000])),
+        ?assertEqual(ok, rpc:call(N2, mnesia, wait_for_tables, [[TestTab], 1000])),
+        ?assertEqual(ok, rpc:call(N1, ekka_mnesia, diagnosis, [[TestTab]])),
+        ?assertEqual(ok, rpc:call(N2, ekka_mnesia, diagnosis, [[TestTab]]))
+
+    after
+        ?assertEqual({atomic, ok}, rpc:call(N2, mnesia, delete_table, [TestTab])),
+
+        ok = ekka_ct:stop_slave(N1),
+        ok = ekka_ct:stop_slave(N2)
+    end,
+    ok.
