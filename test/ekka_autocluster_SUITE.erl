@@ -20,6 +20,7 @@
 -compile(nowarn_export_all).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("common_test/include/ct.hrl").
 
 -define(DNS_OPTIONS, [{name, "localhost"},
                       {app, "ct"}
@@ -60,7 +61,39 @@ init_per_suite(Config) ->
 
 end_per_suite(_Config) ->
     application:stop(ekka),
-    ekka_mnesia:ensure_stopped().
+    ekka_mnesia:ensure_stopped(),
+    ok.
+
+init_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
+    application:set_env(ekka, test_etcd_nodes,
+                        ["n1@127.0.0.1", "ct@127.0.0.1", "n2@127.0.0.1"]),
+    {ok, _} = start_etcd_server(2379),
+    Nodes = [ekka_ct:start_slave(ekka, N) || N <- [n1, n2]],
+    lists:foreach(
+      fun(Node) ->
+              ok = set_app_env(Node, {etcd, ?ETCD_OPTIONS}),
+              ok = setup_cover(Node),
+              ekka:leave()
+      end,
+      Nodes),
+    ok = set_app_env(node(), {etcd, ?ETCD_OPTIONS}),
+    [ {nodes, Nodes}
+    | Config];
+init_per_testcase(_TestCase, Config) ->
+    Config.
+
+end_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
+    [N1, N2] = ?config(nodes, Config),
+    ekka:force_leave(N1),
+    ekka:force_leave(N2),
+    ok = ekka_ct:stop_slave(N1),
+    ok = ekka_ct:stop_slave(N2),
+    ok = stop_etcd_server(2379),
+    application:unset_env(ekka, test_etcd_nodes),
+    catch meck:unload(ekka_node),
+    ok;
+end_per_testcase(_TestCase, _Config) ->
+    ok.
 
 %%--------------------------------------------------------------------
 %% Autocluster via 'static' strategy
@@ -125,6 +158,51 @@ t_autocluster_via_k8s(_Config) ->
         ok = stop_k8sapi_server(6000),
         ok = ekka_ct:stop_slave(N1)
     end.
+
+t_autocluster_retry_when_missing_nodes(Config) ->
+    Nodes = [N1, N2] = ?config(nodes, Config),
+    ThisNode = node(),
+    assert_cluster_nodes_equal([N1], N1),
+    assert_cluster_nodes_equal([N2], N2),
+    assert_cluster_nodes_equal([ThisNode], ThisNode),
+
+    %% Make the two nodes cluster with each other, but fail to
+    %% cluster with master.  Check if autocluster is tried again.
+    ct:pal("testing cluster with failure"),
+    mock_autocluster_failure(Nodes),
+    lists:foreach(
+      fun(Node) ->
+              ok = ekka_ct:wait_running(Node)
+      end,
+      Nodes),
+    rpc:call(N1, ekka, autocluster, []),
+    rpc:call(N2, ekka, autocluster, []),
+    ekka:autocluster(),
+    timer:sleep(10000),
+    lists:foreach(
+      fun(Node) ->
+              {ok, Stats} = rpc:call(Node, cover, analyse,
+                                     [ekka_autocluster, calls, function]),
+              [TimesCalled] = [TimesCalled ||
+                                  {{ekka_autocluster,run,1}, TimesCalled} <- Stats],
+              ?assert(TimesCalled > 1, Stats)
+      end,
+      Nodes),
+    assert_cluster_nodes_equal([N1, N2], N1),
+    assert_cluster_nodes_equal([N1, N2], N2),
+    assert_cluster_nodes_equal([ThisNode], ThisNode),
+    %% Now remove the mock; the cluster should eventually heal
+    %% itself.
+    ok = rpc:call(N1, meck, unload, [ekka_node]),
+    ok = rpc:call(N2, meck, unload, [ekka_node]),
+    meck:unload(ekka_node),
+    ct:pal("testing cluster without failure"),
+    timer:sleep(10000),
+    AllNodes = [ThisNode, N1, N2],
+    assert_cluster_nodes_equal(AllNodes, N1),
+    assert_cluster_nodes_equal(AllNodes, N2),
+    assert_cluster_nodes_equal(AllNodes, ThisNode),
+    ok.
 
 %%--------------------------------------------------------------------
 %% Autocluster via 'mcast' strategy
@@ -195,3 +273,36 @@ stop_k8sapi_server(Port) ->
 stop_http_server(Port) ->
     inets:stop(httpd, {{127,0,0,1}, Port}).
 
+setup_cover(Node) ->
+    SrcPath = proplists:get_value(source, ekka_autocluster:module_info(compile)),
+    CompileOpts = proplists:get_value(options, ekka_autocluster:module_info(compile)),
+    {ok, _Pid} = rpc:call(Node, cover, start, []),
+    {ok, _} = rpc:call(Node, cover, compile_module, [SrcPath, CompileOpts]),
+    ok.
+
+mock_autocluster_failure(Nodes) ->
+    ThisNode = node(),
+    lists:foreach(
+      fun(Node) ->
+              ok = rpc:call(Node, meck, new,
+                            [ekka_node, [no_link, passthrough, no_history, non_strict]]),
+              ok = rpc:call(Node, meck, expect,
+                            [ekka_node, is_aliving,
+                             fun(N) ->
+                                     N =/= ThisNode
+                             end])
+      end,
+      Nodes),
+    ok = meck:new(ekka_node, [no_link, passthrough, no_history, non_strict]),
+    ok = meck:expect(ekka_node, is_aliving,
+                     fun(N) ->
+                             N =:= ThisNode
+                     end),
+    ok.
+
+assert_cluster_nodes_equal(ExpectedNodes0, Node) ->
+    ct:pal("checking cluster nodes on ~p", [Node]),
+    ExpectedNodes = lists:usort(ExpectedNodes0),
+    Results0 = rpc:call(Node, ekka_mnesia, cluster_nodes, [all]),
+    Results = lists:usort(Results0),
+    ?assertEqual(ExpectedNodes, Results).
