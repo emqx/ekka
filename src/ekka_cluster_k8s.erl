@@ -39,7 +39,7 @@
 discover(Options) ->
     Server = get_value(apiserver, Options),
     Service = get_value(service_name, Options),
-    App = get_value(app_name, Options, "ekka"),
+    App = resolve_name(get_value(app_name, Options, undefined)),
     AddrType = get_value(address_type, Options, ip),
     Namespace = get_value(namespace, Options, "default"),
     Suffix = get_value(suffix, Options, ""),
@@ -50,6 +50,12 @@ discover(Options) ->
         {error, Reason} ->
             {error, Reason}
     end.
+
+resolve_name(undefined) ->
+    [Name | _] = string:tokens(atom_to_list(node()), "@"),
+    Name;
+resolve_name(Name) ->
+    Name.
 
 node_name(App, Addr, Service, hostname, Namespace, Suffix) when length(Suffix) > 0 ->
     list_to_atom(lists:concat([App, "@", binary_to_list(Addr), ".", Service, ".", Namespace, ".", Suffix]));

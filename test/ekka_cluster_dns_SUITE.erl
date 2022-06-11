@@ -55,6 +55,7 @@ end_per_testcase(_, Config) -> Config.
 
 all() -> ekka_ct:all(?MODULE).
 
+%% This test case relies on DNS resolution from localhost to 127.0.0.1
 t_discover(_) ->
     Options1 = [{name, "localhost"}, {app, "ekka"}],
     {ok, ['ekka@127.0.0.1']} = ekka_cluster_dns:discover(Options1),
@@ -66,6 +67,7 @@ t_discover(_) ->
          ]} = ekka_cluster_dns:discover(Options2),
 
     Options3 = [{name, "localhost"}],
+    %% below test relies on rebar3 ct is run with '--name ct@127.0.0.1'
     {ok, ['ct@127.0.0.1']} = ekka_cluster_dns:discover(Options3),
     ok.
 
