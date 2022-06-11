@@ -64,6 +64,9 @@ t_discover(_) ->
           'ekka@emqx-1.emqx.default.svc.cluster.local',
           'ekka@emqx-2.emqx.default.svc.cluster.local'
          ]} = ekka_cluster_dns:discover(Options2),
+
+    Options3 = [{name, "localhost"}],
+    {ok, ['ct@127.0.0.1']} = ekka_cluster_dns:discover(Options3),
     ok.
 
 t_lock(_) ->

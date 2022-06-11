@@ -27,19 +27,22 @@
         ]).
 
 discover(Options) ->
-    Name = proplists:get_value(name, Options),
-    App  = proplists:get_value(app, Options),
+    DomainName = proplists:get_value(name, Options),
+    NodeName = proplists:get_value(app, Options, undefined),
     Type = proplists:get_value(type, Options, a),
-    {ok, [node_name(App, Host) || Host <- resolve_hosts(Name, Type)]}.
+    {ok, [node_name(NodeName, Host) || Host <- resolve_hosts(DomainName, Type)]}.
 
-resolve_hosts(Name, a) ->
-    [inet:ntoa(IP) || IP <- inet_res:lookup(Name, in, a)];
-resolve_hosts(Name, srv) ->
-    Records = inet_res:lookup(Name, in, srv),
+resolve_hosts(DomainName, a) ->
+    [inet:ntoa(IP) || IP <- inet_res:lookup(DomainName, in, a)];
+resolve_hosts(DomainName, srv) ->
+    Records = inet_res:lookup(DomainName, in, srv),
     lists:usort(lists:map(fun({_, _, _, Host}) -> Host end, Records)).
 
-node_name(App, Host) ->
-    list_to_atom(lists:concat([App, "@", Host])).
+node_name(undefined, Host) ->
+    [Name | _] = string:tokens(atom_to_list(node()), "@"),
+    node_name(Name, Host);
+node_name(NodeName, Host) ->
+    list_to_atom(lists:concat([NodeName, "@", Host])).
 
 lock(_Options) ->
     ignore.
@@ -52,4 +55,3 @@ register(_Options) ->
 
 unregister(_Options) ->
     ignore.
-
