@@ -1,10 +1,16 @@
 %% -*-: erlang -*-
 
-{<<"0.13.0">>,
+{<<"0.13.1">>,
   [
+    {<<"0.13.0">>, [
+        {load_module,ekka_dist,brutal_purge,soft_purge,[]}
+    ]},
     {<<".*">>, []}
   ],
   [
+    {<<"0.13.0">>, [
+        {load_module,ekka_dist,brutal_purge,soft_purge,[]}
+    ]},
     {<<".*">>, []}
   ]
 }.
