@@ -90,16 +90,23 @@ with_module(Fun) ->
     end.
 
 resolve_proto() ->
-    Default = atom_to_list(application:get_env(ekka, proto_dist, inet_tcp)),
+    Fallback = atom_to_list(application:get_env(ekka, proto_dist, inet_tcp)),
     %% the -proto_dist boot arg is 'ekka'
-    %% and there is a lack of a 'ekka_tls' module
+    %% and there is a lack of a 'ekka_tls' module,
     %% Also when starting remote console etc, there is no application env to
-    %% read from, so we have to find another way to pass the module
-    case os:getenv("EKKA_PROTO_DIST_MOD") of
-        false -> Default;
-        "" -> Default;
-        Mod -> Mod
-    end.
+    %% read from, so we have to find another way to pass the module name (prefix)
+    Mod = case os:getenv("EKKA_PROTO_DIST_MOD") of
+              false -> Fallback;
+              "" -> Fallback;
+              M -> M
+          end,
+    case Mod of
+        "inet_tcp" -> ok;
+        "inet_tls" -> ok;
+        "inet6_tcp" -> ok;
+        Other -> error({unsupported_proto_dist, Other})
+    end,
+    Mod.
 
 %% @doc Figure out dist port from node's name.
 -spec(port(node() | string()) -> inet:port_number()).
