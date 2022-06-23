@@ -31,6 +31,8 @@
 -define(MIN_RAND_PORT, 10000).
 -define(MAX_PORT_LIMIT, 60000).
 
+%% This is not called since OTP 23 if listen/2 is exported.
+%% kept for backward compatibility.
 listen(Name) ->
     listen(Name, undefined).
 
@@ -49,12 +51,19 @@ listen(Name, Host) ->
             ok = application:set_env(kernel, inet_dist_listen_max, ?MAX_PORT_LIMIT)
     end,
     %% Finally run the real function!
-    with_module(fun(M) ->
-                        case Host of
-                            undefined -> M:listen(Name);
-                            _ -> M:listen(Name, Host)
-                        end
-                end).
+    with_module(fun(M) -> do_listen(M, Name, Host, Port) end).
+
+do_listen(M, Name, Host, Port) ->
+    case try_listen(M, Name, Host) of
+        {error, eaddrinuse} when Port > 0 ->
+            {error, "port " ++ integer_to_list(Port) ++ " is in use"};
+        Other ->
+            Other
+    end.
+
+%% The `undefined` in the first clause is from listen/1
+try_listen(M, Name, undefined) -> M:listen(Name);
+try_listen(M, Name, Host) -> M:listen(Name, Host).
 
 select(Node) ->
     with_module(fun(M) -> M:select(Node) end).
