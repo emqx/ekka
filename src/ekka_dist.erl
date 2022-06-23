@@ -17,6 +17,7 @@
 -module(ekka_dist).
 
 -export([listen/1,
+         listen/2,
          select/1,
          accept/1,
          accept_connection/5,
@@ -31,6 +32,9 @@
 -define(MAX_PORT_LIMIT, 60000).
 
 listen(Name) ->
+    listen(Name, undefined).
+
+listen(Name, Host) ->
     %% Here we figure out what port we want to listen on.
     Port = port(Name),
 
@@ -45,7 +49,12 @@ listen(Name) ->
             ok = application:set_env(kernel, inet_dist_listen_max, ?MAX_PORT_LIMIT)
     end,
     %% Finally run the real function!
-    with_module(fun(M) -> M:listen(Name) end).
+    with_module(fun(M) ->
+                        case Host of
+                            undefined -> M:listen(Name);
+                            _ -> M:listen(Name, Host)
+                        end
+                end).
 
 select(Node) ->
     with_module(fun(M) -> M:select(Node) end).
@@ -70,8 +79,27 @@ childspecs() ->
     with_module(fun(M) -> M:childspecs() end).
 
 with_module(Fun) ->
-    Proto = application:get_env(ekka, proto_dist, inet_tcp),
-    Fun(list_to_existing_atom(atom_to_list(Proto) ++ "_dist")).
+    try
+        Proto = resolve_proto(),
+        Module = list_to_atom(Proto ++ "_dist"),
+        Fun(Module)
+    catch
+        C:E->
+            %% this exception is caught by net_kernel
+            error({failed_to_call_ekka_dist_module, C, E})
+    end.
+
+resolve_proto() ->
+    Default = atom_to_list(application:get_env(ekka, proto_dist, inet_tcp)),
+    %% the -proto_dist boot arg is 'ekka'
+    %% and there is a lack of a 'ekka_tls' module
+    %% Also when starting remote console etc, there is no application env to
+    %% read from, so we have to find another way to pass the module
+    case os:getenv("EKKA_PROTO_DIST_MOD") of
+        false -> Default;
+        "" -> Default;
+        Mod -> Mod
+    end.
 
 %% @doc Figure out dist port from node's name.
 -spec(port(node() | string()) -> inet:port_number()).
