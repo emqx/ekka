@@ -18,6 +18,10 @@
 
 -include_lib("stdlib/include/ms_transform.hrl").
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -behaviour(gen_server).
 
 -export([ start_link/0
@@ -267,8 +271,7 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                                 case is_set_elem(Resource, ResourceSet) of
                                     true ->
                                         %% force kill it as it might have hung
-                                        logger:error("kill ~p as it has held the lock for too long, resource: ~p", [Owner, Resource]),
-                                        exit(Owner, kill),
+                                        _ = spawn(fun() -> force_kill_lock_owner(Owner, Resource) end),
                                         MonAcc;
                                     false ->
                                         maps:put(Owner, set_put(Resource, ResourceSet), MonAcc)
@@ -333,3 +336,25 @@ set_to_list(ResourceSet) when is_map(ResourceSet) ->
 
 is_set_elem(Resource, ResourceSet) when is_map(ResourceSet) ->
     maps:is_key(Resource, ResourceSet).
+
+force_kill_lock_owner(Pid, Resource) ->
+    logger:error("kill ~p as it has held the lock for too long, resource: ~p", [Pid, Resource]),
+    Fields = [status, message_queue_len, current_stacktrace],
+    Status = rpc:call(node(Pid), erlang, process_info, [Pid, Fields], 5000),
+    logger:error("lock_owner_status:~n~p", [Status]),
+    _ = exit(Pid, kill),
+    ok.
+
+-ifdef(TEST).
+force_kill_test() ->
+    Pid = spawn(fun() ->
+                        receive
+                            foo ->
+                                ok
+                        end
+                end),
+    ?assert(is_process_alive(Pid)),
+    ok = force_kill_lock_owner(Pid, resource),
+    ?assertNot(is_process_alive(Pid)).
+
+-endif.
