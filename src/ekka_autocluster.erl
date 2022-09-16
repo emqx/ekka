@@ -87,7 +87,9 @@ maybe_run_again(App, JoinResult) ->
          , no_nodes_outside => NoNodesOutside
          }),
     case NodeInCluster andalso Registered andalso NoNodesOutside of
-        true  -> ok;
+        true -> 
+            ?LOG(notice, "discovery and join successfully", []),
+            ok;
         false ->
             ?LOG(warning, "discovery did not succeed; retrying in ~p ms",
                  [?DISCOVER_AND_JOIN_RETRY_INTERVAL]),
@@ -153,6 +155,7 @@ strategy_module(Strategy) ->
 discover_and_join(Mod, Options) ->
     ?tp(ekka_autocluster_discover_and_join, #{mod => Mod}),
     case Mod:discover(Options) of
+        {ok, [Node]} when Node =:= node() -> ok;
         {ok, Nodes} ->
             ?tp(ekka_autocluster_discover_and_join_ok, #{mod => Mod, nodes => Nodes}),
             {AliveNodes, DeadNodes} = lists:partition(
