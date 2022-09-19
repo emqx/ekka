@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -162,6 +162,21 @@ t_autocluster_via_static(_Config) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+
+t_autocluster_singleton(_Config) ->
+    %% Verify that discovery of a single node completes immediately
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ?check_trace(
+       #{timetrap => 10_000},
+       try
+           ok = set_app_env(N1, {static, [{seeds, [N1]}]}),
+           _Pid = rpc:call(N1, ekka_autocluster, run, [ekka]),
+           ?block_until(#{?snk_kind := ekka_autocluster_complete})
+       after
+           ok = ekka_ct:stop_slave(N1)
+       end,
+       []).
+
 %%--------------------------------------------------------------------
 %% Autocluster via 'dns' strategy
 
@@ -268,7 +283,7 @@ t_autocluster_retry_when_missing_nodes(Config) ->
     ok = cover:flush(Nodes),
     {ok, Stats} = cover:analyse(ekka_autocluster, calls, function),
     [TimesCalled] = [TimesCalled ||
-                        {{ekka_autocluster,run,1}, TimesCalled} <- Stats],
+                        {{ekka_autocluster,handle_info,2}, TimesCalled} <- Stats],
     ?assert(TimesCalled > length([ThisNode | Nodes]), Stats),
     assert_cluster_nodes_equal([N1, N2], N1),
     assert_cluster_nodes_equal([N1, N2], N2),
@@ -370,17 +385,9 @@ t_run_again_when_not_registered(Config) ->
        end,
        fun(Trace) ->
                ct:pal("trace: ~100p~n", [Trace]),
-               ?assert(
-                  ?strict_causality(
-                     #{ ?snk_kind       := ekka_maybe_run_app_again
-                      , node_registered := false
-                      }
-                    , #{ ?snk_kind       := ekka_maybe_run_app_again
-                       , node_registered := true
-                       }
-                    , Trace
-                    )),
-               ok
+               ?assertMatch( [_]
+                           , [1 || #{?snk_kind := ekka_maybe_run_app_again, node_registered := true} <- Trace]
+                           )
        end).
 
 %%--------------------------------------------------------------------
@@ -397,13 +404,16 @@ set_app_env(Node, Discovery) ->
 
 wait_for_node(Node) ->
     wait_for_node(Node, 20).
-wait_for_node(Node, 0) ->
-    error({autocluster_timeout, Node});
 wait_for_node(Node, Cnt) ->
     ok = timer:sleep(500),
-    case lists:member(Node, ekka:info(running_nodes)) of
+    Running = ekka:info(running_nodes),
+    case lists:member(Node, Running) of
         true -> timer:sleep(500), ok;
-        false -> wait_for_node(Node, Cnt-1)
+        false ->
+            case Cnt > 0 of
+                true -> wait_for_node(Node, Cnt-1);
+                false -> error({autocluster_timeout, Node, Running})
+            end
     end.
 
 start_etcd_server(Port) ->
@@ -413,13 +423,19 @@ start_k8sapi_server(Port) ->
     start_http_server(Port, mod_k8s_api).
 
 start_http_server(Port, Mod) ->
-    inets:start(httpd, [{port, Port},
-                        {server_name, "etcd"},
-                        {server_root, "."},
-                        {document_root, "."},
-                        {bind_address, "localhost"},
-                        {modules, [Mod]}
-                       ]).
+    Res = inets:start(httpd, [{port, Port},
+                              {server_name, "etcd"},
+                              {server_root, "."},
+                              {document_root, "."},
+                              {bind_address, "localhost"},
+                              {modules, [Mod]}
+                             ]),
+    case Res of
+        {error, {already_started, Pid}} ->
+            {ok, Pid};
+        Err ->
+            Err
+    end.
 
 stop_etcd_server(Port) ->
     stop_http_server(Port).
