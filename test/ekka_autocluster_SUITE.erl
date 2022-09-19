@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 -define(DNS_OPTIONS, [{name, "localhost"},
                       {app, "ct"}
@@ -45,6 +46,8 @@
                         {ttl, 255},
                         {loop, true}
                        ]).
+
+suite() -> [{timetrap, {seconds, 60}}].
 
 all() -> ekka_ct:all(?MODULE).
 
@@ -109,6 +112,22 @@ t_autocluster_via_static(_Config) ->
     after
         ok = ekka_ct:stop_slave(N1)
     end.
+
+
+t_autocluster_singleton(_Config) ->
+    %% Verify that discovery of a single node completes immediately
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ?check_trace(
+       #{timetrap => 10_000},
+       try
+           ok = ekka_ct:wait_running(N1),
+           ok = set_app_env(N1, {static, [{seeds, [N1]}]}),
+           ok = rpc:call(N1, ekka_autocluster, run, [ekka]),
+           ?block_until(#{?snk_kind := ekka_autocluster_complete})
+       after
+           ok = ekka_ct:stop_slave(N1)
+       end,
+       []).
 
 %%--------------------------------------------------------------------
 %% Autocluster via 'dns' strategy
@@ -179,15 +198,11 @@ t_autocluster_retry_when_missing_nodes(Config) ->
     rpc:call(N2, ekka, autocluster, []),
     ekka:autocluster(),
     timer:sleep(10000),
-    lists:foreach(
-      fun(Node) ->
-              {ok, Stats} = rpc:call(Node, cover, analyse,
-                                     [ekka_autocluster, calls, function]),
-              [TimesCalled] = [TimesCalled ||
-                                  {{ekka_autocluster,run,1}, TimesCalled} <- Stats],
-              ?assert(TimesCalled > 1, Stats)
-      end,
-      Nodes),
+    ok = cover:flush(Nodes),
+    {ok, Stats} = cover:analyse(ekka_autocluster, calls, function),
+    [TimesCalled] = [TimesCalled ||
+                        {{ekka_autocluster,handle_info,2}, TimesCalled} <- Stats],
+    ?assert(TimesCalled > length([ThisNode | Nodes]), Stats),
     assert_cluster_nodes_equal([N1, N2], N1),
     assert_cluster_nodes_equal([N1, N2], N2),
     assert_cluster_nodes_equal([ThisNode], ThisNode),
@@ -226,6 +241,53 @@ reboot_ekka_with_mcast_env() ->
     ok = set_app_env(node(), {mcast, ?MCAST_OPTIONS}),
     ok = ekka:start().
 
+t_autocluster_mcast_lock_failure(_Config) ->
+    ok = reboot_ekka_with_mcast_env(),
+    ok = timer:sleep(1000),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = set_app_env(N1, {mcast, ?MCAST_OPTIONS})
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
+
+%%--------------------------------------------------------------------
+%% Misc tests
+%%--------------------------------------------------------------------
+
+t_run_again_when_not_registered(Config) ->
+    [N1] = ?config(nodes, Config),
+    ?check_trace(
+       #{timetrap => 30_000},
+       begin
+           ok = ekka_ct:wait_running(N1),
+           ok = set_app_env(N1, {etcd, ?ETCD_OPTIONS}),
+           ok = rpc:call(N1, meck, new, [ekka_cluster_etcd,
+                                         [non_strict, passthrough,
+                                          no_history, no_link]]),
+           ok = rpc:call(
+                  N1, meck, expect,
+                  [ekka_cluster_etcd, discover,
+                   [{['_'], meck:seq(
+                              [ %% first try; fail
+                                meck:val({ok, []})
+                                %% checking if registered; fail
+                              , meck:val({ok, []})
+                                %% work afterwards
+                              , meck:passthrough()
+                              ])}]]),
+           _ = rpc:call(N1, ekka, autocluster, []),
+           ok = wait_for_node(N1),
+           ok
+       end,
+       fun(Trace) ->
+               ct:pal("trace: ~100p~n", [Trace]),
+               ?assertMatch( [_]
+                           , [1 || #{?snk_kind := ekka_maybe_run_app_again, node_registered := true} <- Trace]
+                           )
+       end).
+
 %%--------------------------------------------------------------------
 %% Helper functions
 %%--------------------------------------------------------------------
@@ -240,13 +302,16 @@ set_app_env(Node, Discovery) ->
 
 wait_for_node(Node) ->
     wait_for_node(Node, 20).
-wait_for_node(Node, 0) ->
-    error({autocluster_timeout, Node});
 wait_for_node(Node, Cnt) ->
     ok = timer:sleep(500),
-    case lists:member(Node, ekka:info(running_nodes)) of
+    Running = ekka:info(running_nodes),
+    case lists:member(Node, Running) of
         true -> timer:sleep(500), ok;
-        false -> wait_for_node(Node, Cnt-1)
+        false ->
+            case Cnt > 0 of
+                true -> wait_for_node(Node, Cnt-1);
+                false -> error({autocluster_timeout, Node, Running})
+            end
     end.
 
 start_etcd_server(Port) ->
@@ -256,13 +321,19 @@ start_k8sapi_server(Port) ->
     start_http_server(Port, mod_k8s_api).
 
 start_http_server(Port, Mod) ->
-    inets:start(httpd, [{port, Port},
-                        {server_name, "etcd"},
-                        {server_root, "."},
-                        {document_root, "."},
-                        {bind_address, "localhost"},
-                        {modules, [Mod]}
-                       ]).
+    Res = inets:start(httpd, [{port, Port},
+                              {server_name, "etcd"},
+                              {server_root, "."},
+                              {document_root, "."},
+                              {bind_address, "localhost"},
+                              {modules, [Mod]}
+                             ]),
+    case Res of
+        {error, {already_started, Pid}} ->
+            {ok, Pid};
+        Err ->
+            Err
+    end.
 
 stop_etcd_server(Port) ->
     stop_http_server(Port).
