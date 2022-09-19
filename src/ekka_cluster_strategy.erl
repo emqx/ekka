@@ -32,7 +32,7 @@
 
 -callback(unregister(options()) -> ok | ignore | {error, term()}).
 
--spec discover(module(), options()) -> {ok, list(node())} | {error, term()}.
+-spec discover(module(), options()) -> {ok, [node()]} | {error, term()}.
 discover(Mod, Options) ->
     Mod:discover(Options).
 

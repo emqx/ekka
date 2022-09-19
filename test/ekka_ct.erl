@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019, 2022 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -26,10 +26,12 @@ all(Suite) ->
                 ]).
 
 start_slave(node, Name) ->
+    ok = slave:stop(list_to_atom(lists:concat([Name, "@", host()]))),
     {ok, Node} = slave:start(host(), Name, ebin_path()),
+    snabbkaffe:forward_trace(Node),
     Node;
 start_slave(ekka, Name) ->
-    {ok, Node} = slave:start(host(), Name, ebin_path()),
+    Node = start_slave(node, Name),
     rpc:call(Node, ekka, start, []),
     Node.
 
@@ -57,4 +59,3 @@ ebin_path() ->
 
 is_lib(Path) ->
     string:prefix(Path, code:lib_dir()) =:= nomatch.
-
