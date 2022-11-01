@@ -88,6 +88,7 @@ init([App]) ->
            }}.
 
 handle_info(loop, S = #s{application = App}) ->
+    ?tp(ekka_autocluster_loop, #{}),
     wait_application_ready(App, 10),
     JoinResult = discover_and_join(),
     case is_discovery_complete(JoinResult) of
