@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -16,9 +16,13 @@
 
 -module(ekka_cluster_strategy).
 
+-export([discover/2, lock/2, unlock/2, register/2, unregister/2]).
+
+-export_type([options/0]).
+
 -type(options() :: proplists:proplist()).
 
--callback(discover(options()) -> {ok, list(node())} | {error, term()}).
+-callback(discover(options()) -> {ok, [node()]} | {error, term()}).
 
 -callback(lock(options()) -> ok | ignore | {error, term()}).
 
@@ -27,3 +31,23 @@
 -callback(register(options()) -> ok | ignore | {error, term()}).
 
 -callback(unregister(options()) -> ok | ignore | {error, term()}).
+
+-spec discover(module(), options()) -> {ok, [node()]} | {error, term()}.
+discover(Mod, Options) ->
+    Mod:discover(Options).
+
+-spec lock(module(), options()) -> ok | ignore | {error, term()}.
+lock(Mod, Options) ->
+    Mod:lock(Options).
+
+-spec unlock(module(), options()) -> ok | ignore | {error, term()}.
+unlock(Mod, Options) ->
+    Mod:unlock(Options).
+
+-spec register(module(), options()) -> ok | ignore | {error, term()}.
+register(Mod, Options) ->
+    Mod:register(Options).
+
+-spec unregister(module(), options()) -> ok | ignore | {error, term()}.
+unregister(Mod, Options) ->
+    Mod:unregister(Options).

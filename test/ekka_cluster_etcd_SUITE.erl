@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -39,19 +39,19 @@ end_per_testcase(_TestCase, Config) ->
 t_discover(_Config) ->
     Json = <<"{\"node\": {\"nodes\": [{\"key\": \"ekkacl/n1@127.0.0.1\"}]}}">>,
     ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) -> {ok, 200, Json} end),
-    {ok, ['n1@127.0.0.1']} = ekka_cluster_etcd:discover(?OPTIONS).
+    {ok, ['n1@127.0.0.1']} = ekka_cluster_strategy:discover(ekka_cluster_etcd, ?OPTIONS).
 
 t_lock(_Config) ->
     ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
-    ok = ekka_cluster_etcd:lock(?OPTIONS).
+    ok = ekka_cluster_strategy:lock(ekka_cluster_etcd, ?OPTIONS).
 
 t_unlock(_) ->
     ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
-    ok = ekka_cluster_etcd:unlock(?OPTIONS).
+    ok = ekka_cluster_strategy:unlock(ekka_cluster_etcd, ?OPTIONS).
 
 t_register(_) ->
     ok = meck:new(ekka_cluster_sup, [non_strict, passthrough, no_history]),
@@ -59,7 +59,7 @@ t_register(_) ->
     ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
-    ok = ekka_cluster_etcd:register(?OPTIONS),
+    ok = ekka_cluster_strategy:register(ekka_cluster_etcd, ?OPTIONS),
     ok = meck:unload(ekka_cluster_sup).
 
 t_unregister(_) ->
@@ -67,7 +67,7 @@ t_unregister(_) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
     ok = meck:expect(ekka_cluster_sup, stop_child, fun(_) -> ok end),
-    ok = ekka_cluster_etcd:unregister(?OPTIONS),
+    ok = ekka_cluster_strategy:unregister(ekka_cluster_etcd, ?OPTIONS),
     ok = meck:unload(ekka_cluster_sup).
 
 t_etcd_set_node_key(_) ->

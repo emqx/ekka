@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
+-include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
 -define(DNS_OPTIONS, [{name, "localhost"},
                       {app, "ct"}
@@ -46,6 +47,8 @@
                         {loop, true}
                        ]).
 
+suite() -> [{timetrap, {seconds, 60}}].
+
 all() -> ekka_ct:all(?MODULE).
 
 %%--------------------------------------------------------------------
@@ -65,6 +68,7 @@ end_per_suite(_Config) ->
     ok.
 
 init_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
+    snabbkaffe:start_trace(),
     application:set_env(ekka, test_etcd_nodes,
                         ["n1@127.0.0.1", "ct@127.0.0.1", "n2@127.0.0.1"]),
     {ok, _} = start_etcd_server(2379),
@@ -80,6 +84,7 @@ init_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
     [ {nodes, Nodes}
     | Config];
 init_per_testcase(_TestCase, Config) ->
+    ok = ekka:start(),
     Config.
 
 end_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
@@ -90,9 +95,10 @@ end_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
     ok = ekka_ct:stop_slave(N2),
     ok = stop_etcd_server(2379),
     application:unset_env(ekka, test_etcd_nodes),
-    catch meck:unload(ekka_node),
-    ok;
+    end_per_testcase(common, Config);
 end_per_testcase(_TestCase, _Config) ->
+    snabbkaffe:stop(),
+    meck:unload(),
     ok.
 
 %%--------------------------------------------------------------------
@@ -109,6 +115,22 @@ t_autocluster_via_static(_Config) ->
     after
         ok = ekka_ct:stop_slave(N1)
     end.
+
+
+t_autocluster_singleton(_Config) ->
+    %% Verify that discovery of a single node completes immediately
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ?check_trace(
+       #{timetrap => 10000},
+       try
+           ok = ekka_ct:wait_running(N1),
+           ok = set_app_env(N1, {static, [{seeds, [N1]}]}),
+           ok = rpc:call(N1, ekka_autocluster, run, [ekka]),
+           ?block_until(#{?snk_kind := ekka_autocluster_complete})
+       after
+           ok = ekka_ct:stop_slave(N1)
+       end,
+       []).
 
 %%--------------------------------------------------------------------
 %% Autocluster via 'dns' strategy
@@ -178,16 +200,11 @@ t_autocluster_retry_when_missing_nodes(Config) ->
     rpc:call(N1, ekka, autocluster, []),
     rpc:call(N2, ekka, autocluster, []),
     ekka:autocluster(),
-    timer:sleep(10000),
-    lists:foreach(
-      fun(Node) ->
-              {ok, Stats} = rpc:call(Node, cover, analyse,
-                                     [ekka_autocluster, calls, function]),
-              [TimesCalled] = [TimesCalled ||
-                                  {{ekka_autocluster,run,1}, TimesCalled} <- Stats],
-              ?assert(TimesCalled > 1, Stats)
-      end,
-      Nodes),
+    [{ok, _} = snabbkaffe:block_until(?match_n_events(2, #{?snk_kind := ekka_autocluster_loop,
+                                                           ?snk_meta := #{node := N}}),
+                                      _Timeout    = 10000,
+                                      _BackInTIme = infinity)
+     || N <- Nodes],
     assert_cluster_nodes_equal([N1, N2], N1),
     assert_cluster_nodes_equal([N1, N2], N2),
     assert_cluster_nodes_equal([ThisNode], ThisNode),
@@ -226,6 +243,18 @@ reboot_ekka_with_mcast_env() ->
     ok = set_app_env(node(), {mcast, ?MCAST_OPTIONS}),
     ok = ekka:start().
 
+t_autocluster_mcast_lock_failure(_Config) ->
+    ok = reboot_ekka_with_mcast_env(),
+    ok = timer:sleep(1000),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = set_app_env(N1, {mcast, ?MCAST_OPTIONS}),
+        assert_unlocked(ekka_cluster_mcast, N1)
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
+
 %%--------------------------------------------------------------------
 %% Helper functions
 %%--------------------------------------------------------------------
@@ -240,13 +269,16 @@ set_app_env(Node, Discovery) ->
 
 wait_for_node(Node) ->
     wait_for_node(Node, 20).
-wait_for_node(Node, 0) ->
-    error({autocluster_timeout, Node});
 wait_for_node(Node, Cnt) ->
     ok = timer:sleep(500),
-    case lists:member(Node, ekka:info(running_nodes)) of
+    Running = ekka:info(running_nodes),
+    case lists:member(Node, Running) of
         true -> timer:sleep(500), ok;
-        false -> wait_for_node(Node, Cnt-1)
+        false ->
+            case Cnt > 0 of
+                true -> wait_for_node(Node, Cnt-1);
+                false -> error({autocluster_timeout, Node, Running})
+            end
     end.
 
 start_etcd_server(Port) ->
@@ -256,13 +288,19 @@ start_k8sapi_server(Port) ->
     start_http_server(Port, mod_k8s_api).
 
 start_http_server(Port, Mod) ->
-    inets:start(httpd, [{port, Port},
-                        {server_name, "etcd"},
-                        {server_root, "."},
-                        {document_root, "."},
-                        {bind_address, "localhost"},
-                        {modules, [Mod]}
-                       ]).
+    Res = inets:start(httpd, [{port, Port},
+                              {server_name, "etcd"},
+                              {server_root, "."},
+                              {document_root, "."},
+                              {bind_address, "localhost"},
+                              {modules, [Mod]}
+                             ]),
+    case Res of
+        {error, {already_started, Pid}} ->
+            {ok, Pid};
+        Err ->
+            Err
+    end.
 
 stop_etcd_server(Port) ->
     stop_http_server(Port).
@@ -306,3 +344,24 @@ assert_cluster_nodes_equal(ExpectedNodes0, Node) ->
     Results0 = rpc:call(Node, ekka_mnesia, cluster_nodes, [all]),
     Results = lists:usort(Results0),
     ?assertEqual(ExpectedNodes, Results).
+
+assert_unlocked(StrategyMod, Node) ->
+    %% simulate a failure like timeout
+    TestPid = self(),
+    ok = rpc:call(Node, meck, new, [StrategyMod, [non_strict, passthrough,
+                                                  no_history, no_link]]),
+    ok = rpc:call(Node, meck, expect, [StrategyMod, lock,
+                                       fun(_Options) -> error(timeout) end]),
+    ok = rpc:call(Node, meck, expect, [StrategyMod, unlock,
+                                       fun(_Options) ->
+                                               TestPid ! unlocked,
+                                               ok
+                                       end]),
+    _ = rpc:call(Node, ekka, autocluster, []),
+    Timeout = 500,
+    receive
+        unlocked -> ok
+    after
+        Timeout -> error(failed_to_unlock)
+    end,
+    ok.

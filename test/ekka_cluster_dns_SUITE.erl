@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -57,24 +57,23 @@ all() -> ekka_ct:all(?MODULE).
 
 t_discover(_) ->
     Options1 = [{name, "localhost"}, {app, "ekka"}],
-    {ok, ['ekka@127.0.0.1']} = ekka_cluster_dns:discover(Options1),
+    {ok, ['ekka@127.0.0.1']} = ekka_cluster_strategy:discover(ekka_cluster_dns, Options1),
 
     Options2 = [{name, "emqx.default.svc.cluster.local"}, {app, "ekka"}, {type, srv}],
     {ok, ['ekka@emqx-0.emqx.default.svc.cluster.local',
           'ekka@emqx-1.emqx.default.svc.cluster.local',
           'ekka@emqx-2.emqx.default.svc.cluster.local'
-         ]} = ekka_cluster_dns:discover(Options2),
+         ]} = ekka_cluster_strategy:discover(ekka_cluster_dns, Options2),
     ok.
 
 t_lock(_) ->
-    ignore = ekka_cluster_dns:lock([]).
+    ignore = ekka_cluster_strategy:lock(ekka_cluster_dns, []).
 
 t_unlock(_) ->
-    ignore = ekka_cluster_dns:unlock([]).
+    ignore = ekka_cluster_strategy:unlock(ekka_cluster_dns, []).
 
 t_register(_) ->
-    ignore = ekka_cluster_dns:register([]).
+    ignore = ekka_cluster_strategy:register(ekka_cluster_dns, []).
 
 t_unregister(_) ->
-    ignore = ekka_cluster_dns:unregister([]).
-
+    ignore = ekka_cluster_strategy:unregister(ekka_cluster_dns, []).
