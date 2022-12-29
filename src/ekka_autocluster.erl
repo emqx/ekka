@@ -67,7 +67,7 @@ run(App) ->
             ignore
     end.
 
--spec unregister_node() -> ok.
+-spec unregister_node() -> ok | ignore.
 unregister_node() ->
     with_strategy(
       fun(Mod, Options) ->
@@ -75,19 +75,27 @@ unregister_node() ->
       end).
 
 %% @doc Core node discovery used by mria by replicant nodes to find
-%% the core ones.
+%% the core nodes.
 -spec core_node_discovery_callback() -> [node()].
 core_node_discovery_callback() ->
-    with_strategy(
-      fun(Mod, Opts) ->
-              case ekka_cluster_strategy:discover(Mod, Opts) of
-                  {ok, Nodes} ->
-                      Nodes;
-                  {error, Reason} ->
-                      ?LOG(error, "Core node discovery error: ~p", [Reason]),
-                      []
-              end
-      end).
+    case ekka:env(cluster_discovery) of
+        {ok, {manual, _}} ->
+            [];
+        {ok, {Strategy, Options}} ->
+            Mod = strategy_module(Strategy),
+            try ekka_cluster_strategy:discover(Mod, Options) of
+                {ok, Nodes} ->
+                    Nodes;
+                {error, Reason} ->
+                    ?LOG(error, "Core node discovery error: ~p", [Reason]),
+                    []
+            catch _:Err:Stack ->
+                    ?LOG(error, "Core node discovery error ~p: ~p", [Err, Stack]),
+                    []
+            end;
+        undefined ->
+            []
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% gen_server callbacks
