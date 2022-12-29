@@ -157,6 +157,7 @@ t_autocluster_via_static(_Config) ->
         ok = set_app_env(N1, {static, [{seeds, [node()]}]}),
         rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
+        ?assertMatch([_|_], rpc:call(N1, ekka_autocluster, core_node_discovery_callback, [])),
         ekka:force_leave(N1)
     after
         ok = ekka_ct:stop_slave(N1)
@@ -171,7 +172,8 @@ t_autocluster_singleton(_Config) ->
        try
            ok = set_app_env(N1, {static, [{seeds, [N1]}]}),
            _Pid = rpc:call(N1, ekka_autocluster, run, [ekka]),
-           ?block_until(#{?snk_kind := ekka_autocluster_complete})
+           ?block_until(#{?snk_kind := ekka_autocluster_complete}),
+           ?assertMatch([_|_], rpc:call(N1, ekka_autocluster, core_node_discovery_callback, []))
        after
            ok = ekka_ct:stop_slave(N1)
        end,
@@ -187,6 +189,7 @@ t_autocluster_via_dns(_Config) ->
         ok = set_app_env(N1, {dns, ?DNS_OPTIONS}),
         rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
+        ?assertMatch([_|_], rpc:call(N1, ekka_autocluster, core_node_discovery_callback, [])),
         ok = ekka:force_leave(N1)
     after
         ok = ekka_ct:stop_slave(N1)
@@ -213,6 +216,7 @@ t_autocluster_via_etcd(_Config) ->
         ok = set_app_env(N1, {etcd, ?ETCD_OPTIONS}),
         _ = rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
+        ?assertMatch([_|_], rpc:call(N1, ekka_autocluster, core_node_discovery_callback, [])),
         ok = ekka:force_leave(N1)
     after
         ok = stop_etcd_server(2379),
@@ -242,6 +246,7 @@ t_autocluster_via_k8s(_Config) ->
         ok = set_app_env(N1, {k8s, ?K8S_OPTIONS}),
         rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
+        ?assertMatch([_|_], rpc:call(N1, ekka_autocluster, core_node_discovery_callback, [])),
         ok = ekka:force_leave(N1)
     after
         ok = stop_k8sapi_server(6000),
@@ -313,6 +318,7 @@ t_autocluster_via_mcast(_Config) ->
         ok = set_app_env(N1, {mcast, ?MCAST_OPTIONS}),
         rpc:call(N1, ekka, autocluster, []),
         ok = wait_for_node(N1),
+        ?assertMatch([_|_], rpc:call(N1, ekka_autocluster, core_node_discovery_callback, [])),
         ok = ekka:force_leave(N1)
     after
         ok = ekka_ct:stop_slave(N1)
