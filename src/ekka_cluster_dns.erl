@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -32,8 +32,8 @@ discover(Options) ->
     Type = proplists:get_value(type, Options, a),
     {ok, [node_name(NodeName, Host) || Host <- resolve_hosts(DomainName, Type)]}.
 
-resolve_hosts(DomainName, a) ->
-    [inet:ntoa(IP) || IP <- inet_res:lookup(DomainName, in, a)];
+resolve_hosts(DomainName, Type) when Type =:= a; Type =:= aaaa ->
+    [inet:ntoa(IP) || IP <- inet_res:lookup(DomainName, in, Type)];
 resolve_hosts(DomainName, srv) ->
     Records = inet_res:lookup(DomainName, in, srv),
     lists:usort(lists:map(fun({_, _, _, Host}) -> Host end, Records)).
