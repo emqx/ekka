@@ -195,6 +195,18 @@ t_autocluster_via_dns(_Config) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+t_autocluster_via_dns_aaaa(_Config) ->
+    N1 = ekka_ct:start_slave(ekka, n1),
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = set_app_env(N1, {dns, [{type, aaaa}|?DNS_OPTIONS]}),
+        ok = rpc:call(N1, ekka, autocluster, []),
+        ?assertMatch(['ct@::1'], rpc:call(N1, ekka_autocluster, core_node_discovery_callback, [])),
+        ekka:force_leave(N1)
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
+
 t_autocluster_dns_lock_failure(_Config) ->
     N1 = ekka_ct:start_slave(ekka, n1),
     try
