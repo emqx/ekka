@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2023 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 
 -compile(export_all).
 -compile(nowarn_export_all).
+-compile(nowarn_deprecated_function). %% Silence the warnings about slave module
 
 -include_lib("mria/include/mria.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -32,6 +33,7 @@ all() -> ekka_ct:all(?MODULE).
 %%--------------------------------------------------------------------
 
 init_per_suite(Config) ->
+    snabbkaffe:fix_ct_logging(),
     application:set_env(gen_rpc, port_discovery, stateless),
     Config.
 
