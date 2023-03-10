@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2023 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -129,7 +129,7 @@ is_discovery_complete(ignore) ->
     is_node_registered();
 is_discovery_complete(JoinResult) ->
     %% Check if the node joined cluster?
-    NodeInCluster = mria_mnesia:is_node_in_cluster(),
+    NodeInCluster = mria:cluster_nodes(all) =/= [node()],
     %% Possibly there are nodes outside the cluster; keep trying if
     %% so.
     NoNodesOutside = JoinResult =:= ok,
@@ -232,7 +232,7 @@ maybe_join([]) ->
     ignore;
 maybe_join(Nodes0) ->
     Nodes = lists:usort(Nodes0),
-    KnownNodes = lists:usort(mria_mnesia:cluster_nodes(all)),
+    KnownNodes = lists:usort(mria:cluster_nodes(all)),
     case Nodes =:= KnownNodes of
         true  ->
             ?LOG(info, "all discovered nodes already in cluster; ignoring", []),

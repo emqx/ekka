@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2023 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -515,6 +515,6 @@ mock_autocluster_failure(Nodes) ->
 assert_cluster_nodes_equal(ExpectedNodes0, Node) ->
     ct:pal("checking cluster nodes on ~p", [Node]),
     ExpectedNodes = lists:usort(ExpectedNodes0),
-    Results0 = rpc:call(Node, mria_mnesia, cluster_nodes, [all]),
+    Results0 = rpc:call(Node, mria, cluster_nodes, [all]),
     Results = lists:usort(Results0),
     ?assertEqual(ExpectedNodes, Results).
