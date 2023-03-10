@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019-2021 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2021, 2023 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -38,11 +38,14 @@
 info(Key) -> maps:get(Key, info()).
 
 -spec(info() -> infos()).
-info() -> mria_mnesia:cluster_info().
+info() ->
+    #{ running_nodes => mria:running_nodes()
+     , stopped_nodes => mria:cluster_nodes(stopped)
+     }.
 
 %% @doc Cluster status of the node.
 status(Node) ->
-    mria_mnesia:cluster_status(Node).
+    mria:cluster_status(Node).
 
 %% @doc Join the cluster
 -spec(join(node()) -> ok | ignore | {error, term()}).
