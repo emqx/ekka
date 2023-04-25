@@ -55,7 +55,8 @@ start_slave(node, Name, Env) ->
     %% Load apps before setting the enviroment variables to avoid
     %% overriding the environment during ekka start:
     {ok, _} = cover:start([Node]),
-    CommonEnv = [{gen_rpc, port_discovery, stateless}],
+    CommonEnv = [{gen_rpc, port_discovery, stateless},
+                 {mria, rlog_rpc_module, rpc}],
     setenv(Node, Env ++ CommonEnv),
     ok = snabbkaffe:forward_trace(Node),
     Node;
