@@ -1,6 +1,6 @@
 %% -*-: erlang -*-
 
-{"0.15.0",
+{"0.15.1",
   [
     {<<"0\\.13\\.[0-1]">>, [
         {load_module,ekka_dist,brutal_purge,soft_purge,[]}
