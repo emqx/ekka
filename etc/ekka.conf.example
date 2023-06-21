@@ -34,17 +34,6 @@ cluster.discovery = manual
 ## Default: 15 Seconds
 cluster.autoheal = 15s
 
-## Autoclean down node. A down node will be removed from the cluster
-## if this value > 0.
-##
-## Value: Duration
-## -h: hour, e.g. '2h' for 2 hours
-## -m: minute, e.g. '5m' for 5 minutes
-## -s: second, e.g. '30s' for 30 seconds
-##
-## Default: 5m
-cluster.autoclean = 5m
-
 ## Specify the erlang distributed protocol for the cluster.
 ##
 ## Value: Enum
@@ -189,4 +178,3 @@ cluster.proto_dist = inet_tcp
 ##
 ## Value: String
 ## cluster.k8s.suffix = pod.cluster.local
-
