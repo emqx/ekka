@@ -266,26 +266,6 @@ Cuttlefish style config:
 cluster.autoheal = on
 ```
 
-## Node down and Autoclean
-
-### Autoclean Design
-
-A down node will be removed from the cluster if autoclean is enabled.
-
-### Enable autoclean
-
-Erlang config:
-
-```
-{cluster_autoclean, 60000},
-```
-
-Cuttlefish style config:
-
-```
-cluster.autoclean = 5m
-```
-
 ## Lock Service
 
 Ekka implements a simple distributed lock service in 0.3 release. The Lock APIs:

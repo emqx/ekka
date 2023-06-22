@@ -21,11 +21,6 @@
   {datatype, atom}
 ]}.
 
-%% @doc Clean down node from the cluster
-{mapping, "cluster.autoclean", "ekka.cluster_autoclean", [
-  {datatype, {duration, ms}}
-]}.
-
 %% @doc Cluster autoheal
 {mapping, "cluster.autoheal", "ekka.cluster_autoheal", [
   {datatype, [flag, {duration, ms}]},
