@@ -208,14 +208,14 @@ discover_and_join(Mod, Options) ->
             log_error("Register", ekka_cluster_strategy:register(Mod, Options)),
             case DeadNodes of
                 [] ->
-                    ?LOG(info, "no discovered nodes outside cluster", []),
+                    ?LOG(info, "all discovered nodes are alive", []),
                     case Res of
                         {error, _} -> error;
                         ok         -> ok;
                         ignore     -> ignore
                     end;
                 [_ | _] ->
-                    ?LOG(warning, "discovered nodes outside cluster: ~p", [DeadNodes]),
+                    ?LOG(info, "discovered nodes are not responding: ~p", [DeadNodes]),
                     error
             end;
         {error, Reason} ->
