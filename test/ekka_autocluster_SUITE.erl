@@ -399,6 +399,8 @@ t_run_again_when_not_registered(Config) ->
                               ])}]]),
            _ = rpc:call(N1, ekka, autocluster, []),
            ok = wait_for_node(N1),
+           %% to avoid flakiness
+           ?block_until(#{?snk_kind := ekka_maybe_run_app_again, node_registered := true}, 5_000),
            ok
        end,
        fun(Trace) ->
