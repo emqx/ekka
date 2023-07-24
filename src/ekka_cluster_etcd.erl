@@ -347,7 +347,8 @@ init(Options) ->
     eetcd:close(?MODULE),
     {ok, _Pid} = eetcd:open(?MODULE, Hosts, Transport, TransportOpts),
     {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, 5),
-    {ok, _Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
+    {ok, Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
+    true = link(Pid2),
     {ok, #state{prefix = Prefix, lease_id = ID}}.
 
 handle_call(Action, _From, State) when is_atom(Action) ->
@@ -367,7 +368,8 @@ handle_info({'EXIT', _From, Reason}, State) ->
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
-terminate(_Reason, _State = #state{}) ->
+terminate(_Reason, _State = #state{lease_id = ID}) ->
+    eetcd_lease:revoke(?MODULE, ID),
     eetcd:close(?MODULE).
 
 code_change(_OldVsn, State = #state{}, _Extra) ->
