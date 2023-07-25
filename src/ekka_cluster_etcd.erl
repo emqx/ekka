@@ -238,7 +238,13 @@ rand_addr(AddrList) ->
 %% v3
 %%--------------------------------------------------------------------
 etcd_v3(Action) ->
-    gen_server:call(?SERVER, Action, 5000).
+    Timeout = case Action of
+                  %% etcd would keep a dangling lock if we don't wait for it
+                  lock -> infinity;
+                  %% sligthly higher than the default eetcd timeout
+                  _ -> 10000
+              end,
+    gen_server:call(?SERVER, Action, Timeout).
 
 v3_discover(#state{prefix = Prefix}) ->
     Context = v3_nodes_context(Prefix),
@@ -257,7 +263,10 @@ v3_discover(#state{prefix = Prefix}) ->
     end.
 
 v3_lock(#state{prefix = Prefix, lease_id = ID}) ->
-    case eetcd_lock:lock(?MODULE, list_to_binary(v3_lock_key(Prefix)), ID) of
+    Context = eetcd:with_timeout(eetcd:new(?MODULE), infinity),
+    Name = list_to_binary(v3_lock_key(Prefix)),
+    Context1 = eetcd_lock:with_lease(eetcd_lock:with_name(Context, Name), ID),
+    case eetcd_lock:lock(Context1) of
         {ok, #{key := LockKey}} ->
             persistent_term:put(ekka_cluster_etcd_lock_key, LockKey),
             ok;
@@ -347,7 +356,8 @@ init(Options) ->
     eetcd:close(?MODULE),
     {ok, _Pid} = eetcd:open(?MODULE, Hosts, Transport, TransportOpts),
     {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, 5),
-    {ok, _Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
+    {ok, Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
+    true = link(Pid2),
     {ok, #state{prefix = Prefix, lease_id = ID}}.
 
 handle_call(Action, _From, State) when is_atom(Action) ->
@@ -367,7 +377,8 @@ handle_info({'EXIT', _From, Reason}, State) ->
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
-terminate(_Reason, _State = #state{}) ->
+terminate(_Reason, _State = #state{lease_id = ID}) ->
+    eetcd_lease:revoke(?MODULE, ID),
     eetcd:close(?MODULE).
 
 code_change(_OldVsn, State = #state{}, _Extra) ->

@@ -248,7 +248,12 @@ join_with(false) ->
 join_with(Node) when Node =:= node() ->
     ignore;
 join_with(Node) ->
-    ekka_cluster:join(Node).
+    Res = ekka_cluster:join(Node),
+    %% Wait for ekka to be restarted after join to avoid noproc error
+    %% that can occur if underlying cluster implementation (e.g. ekka_cluster_etcd)
+    %% uses some processes started under ekka supervision tree
+    _ = wait_application_ready(ekka, 10),
+    Res.
 
 find_oldest_node([Node]) ->
     Node;
