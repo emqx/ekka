@@ -1,6 +1,6 @@
 {application, ekka,
  [{description, "Autocluster for EMQ X Broker"},
-  {vsn, "0.15.9"},
+  {vsn, "0.15.10"},
   {mod, {ekka_app,[]}},
   {registered,
    [ekka_sup,
