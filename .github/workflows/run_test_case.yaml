@@ -28,10 +28,6 @@ jobs:
             apt update
             apt install -y cmake
 
-        - name: Check versions
-          run: |
-            ./git-tag.sh dummy --dryrun
-
         - name: Get deps git refs for cache
           id: deps-refs
           run: |
