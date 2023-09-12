@@ -267,7 +267,7 @@ find_oldest_node(Nodes) ->
                     (mria_membership:oldest(Members))#member.node
             end;
         {ResL, BadNodes} ->
-            ?LOG(error, "Bad nodes found: ~p, ResL: ", [BadNodes, ResL]), false
+            ?LOG(error, "Bad nodes found: ~p, ResL: ~p", [BadNodes, ResL]), false
    end.
 
 is_node_registered() ->
