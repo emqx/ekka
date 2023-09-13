@@ -261,13 +261,17 @@ find_oldest_node(Nodes) ->
     case rpc:multicall(Nodes, mria_membership, local_member, [], 30000) of
         {ResL, []} ->
             case [M || M <- ResL, is_record(M, member)] of
-                [] -> ?LOG(error, "Bad members found on nodes ~p: ~p", [Nodes, ResL]),
-                      false;
+                [] ->
+                    ?LOG(error, "bad_members_found, all_nodes: ~p~n"
+                                "normal_rpc_results:~p", [Nodes, ResL]),
+                    false;
                 Members ->
                     (mria_membership:oldest(Members))#member.node
             end;
         {ResL, BadNodes} ->
-            ?LOG(error, "Bad nodes found: ~p, ResL: ", [BadNodes, ResL]), false
+            ?LOG(error, "bad_nodes_found, failed_nodes: ~p~n"
+                        "normal_rpc_results: ~p", [BadNodes, ResL]),
+            false
    end.
 
 is_node_registered() ->
