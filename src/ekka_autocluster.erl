@@ -77,8 +77,8 @@ maybe_run_again(App, JoinResult) ->
         true  ->
             ok;
         false ->
-            ?LOG(warning, "discovery did not succeed; retrying in ~p ms",
-                 [?DISCOVER_AND_JOIN_RETRY_INTERVAL]),
+            % ?LOG(warning, "discovery did not succeed; retrying in ~p ms",
+                %  [?DISCOVER_AND_JOIN_RETRY_INTERVAL]),
             timer:sleep(?DISCOVER_AND_JOIN_RETRY_INTERVAL),
             run(App)
     end.
@@ -147,7 +147,7 @@ discover_and_join(Mod, Options) ->
             log_error("Register", Mod:register(Options)),
             case DeadNodes of
                 [] ->
-                    ?LOG(info, "no discovered nodes outside cluster", []),
+                    % ?LOG(info, "no discovered nodes outside cluster", []),
                     ok;
                 [_ | _] ->
                     ?LOG(warning, "discovered nodes outside cluster: ~p", [DeadNodes]),
@@ -165,7 +165,7 @@ maybe_join(Nodes0) ->
     KnownNodes = lists:usort(ekka_mnesia:cluster_nodes(all)),
     case Nodes =:= KnownNodes of
         true  ->
-            ?LOG(info, "all discovered nodes already in cluster; ignoring", []),
+            % ?LOG(info, "all discovered nodes already in cluster; ignoring", []),
             ignore;
         false ->
             OldestNode = find_oldest_node(Nodes),
