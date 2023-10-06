@@ -113,6 +113,7 @@ resolve_proto() ->
         "inet_tcp" -> ok;
         "inet_tls" -> ok;
         "inet6_tcp" -> ok;
+        "inet6_tls" -> ok;
         Other -> error({unsupported_proto_dist, Other})
     end,
     Mod.
