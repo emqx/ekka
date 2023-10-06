@@ -47,12 +47,3 @@ coveralls:
 .PHONY: dialyzer
 dialyzer:
 	$(REBAR) dialyzer
-
-CUTTLEFISH_SCRIPT = _build/default/lib/cuttlefish/cuttlefish
-
-$(CUTTLEFISH_SCRIPT):
-	@${REBAR} get-deps
-	@if [ ! -f cuttlefish ]; then make -C _build/default/lib/cuttlefish; fi
-
-app.config: $(CUTTLEFISH_SCRIPT)
-	$(verbose) $(CUTTLEFISH_SCRIPT) -l info -e etc/ -c etc/ekka.conf.example -i priv/ekka.schema -d data/
