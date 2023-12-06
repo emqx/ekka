@@ -59,13 +59,13 @@
         , code_change/3
         ]).
 
--type(resource() :: term()).
+-type resource() :: term().
 
--type(lock_type() :: local | leader | quorum | all).
+-type lock_type() :: local | leader | quorum | all.
 
--type(lock_result() :: {boolean, [node() | {node(), any()}]}).
+-type lock_result() :: {boolean(), [node() | {node(), any()}]}.
 
--type(piggyback() :: mfa() | undefined).
+-type piggyback() :: mfa() | undefined.
 
 -export_type([ resource/0
              , lock_type/0
