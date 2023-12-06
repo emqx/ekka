@@ -53,15 +53,6 @@ stop_child(M) ->
 
 init([]) ->
     Childs = case ekka:env(cluster_discovery) of
-                 {ok, {mcast, Options}} ->
-                     Mcast = #{id       => ekka_cluster_mcast,
-                               start    => {ekka_cluster_mcast, start_link, [Options]},
-                               restart  => permanent,
-                               shutdown => 5000,
-                               type     => worker,
-                               modules  => [ekka_cluster_mcast]
-                              },
-                     [Mcast];
                  {ok, {etcd, Options}} ->
                     case proplists:get_value(version, Options, v3) of
                         v3 ->

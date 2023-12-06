@@ -41,13 +41,6 @@
                       {suffix, ""}
                      ]).
 
--define(MCAST_OPTIONS, [{addr, {239,192,0,1}},
-                        {ports, [5000,5001,5002]},
-                        {iface, {0,0,0,0}},
-                        {ttl, 255},
-                        {loop, true}
-                       ]).
-
 all() -> ekka_ct:all(?MODULE).
 
 %%--------------------------------------------------------------------
@@ -317,41 +310,6 @@ t_autocluster_retry_when_missing_nodes(Config) ->
     assert_cluster_nodes_equal(AllNodes, N2),
     assert_cluster_nodes_equal(AllNodes, ThisNode),
     ok.
-
-%%--------------------------------------------------------------------
-%% Autocluster via 'mcast' strategy
-
-t_autocluster_via_mcast(_Config) ->
-    ok = reboot_ekka_with_mcast_env(),
-    ok = timer:sleep(1000),
-    N1 = ekka_ct:start_slave(ekka, n1),
-    try
-        ok = ekka_ct:wait_running(N1),
-        ok = set_app_env(N1, {mcast, ?MCAST_OPTIONS}),
-        rpc:call(N1, ekka, autocluster, []),
-        ok = wait_for_node(N1),
-        ?assertMatch([_|_], rpc:call(N1, ekka_autocluster, core_node_discovery_callback, [])),
-        ok = ekka:force_leave(N1)
-    after
-        ok = ekka_ct:stop_slave(N1)
-    end.
-
-reboot_ekka_with_mcast_env() ->
-    ok = ekka:stop(),
-    ok = set_app_env(node(), {mcast, ?MCAST_OPTIONS}),
-    ok = ekka:start().
-
-t_autocluster_mcast_lock_failure(_Config) ->
-    ok = reboot_ekka_with_mcast_env(),
-    ok = timer:sleep(1000),
-    N1 = ekka_ct:start_slave(ekka, n1),
-    try
-        ok = ekka_ct:wait_running(N1),
-        ok = set_app_env(N1, {mcast, ?MCAST_OPTIONS}),
-        assert_unlocked(ekka_cluster_mcast, N1)
-    after
-        ok = ekka_ct:stop_slave(N1)
-    end.
 
 %%--------------------------------------------------------------------
 %% Core node discovery callback

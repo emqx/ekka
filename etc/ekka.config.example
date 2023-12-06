@@ -8,15 +8,6 @@
 %%                       {seeds, ['ekka1@127.0.0.1', 'ekka2@127.0.0.1']}
 %%                     ]}},
 
-%% Clustering via IP Multicast
-%% {cluster_discovery, {mcast, [
-%%                       {addr, {239,192,0,1}},
-%%                       {ports, [4369,4370]},
-%%                       {iface, {0,0,0,0}},
-%%                       {ttl, 255},
-%%                       {loop, true}
-%%                     ]}},
-
 %% Clustering via DNS A Record
 %% {cluster_discovery, {dns, [
 %%                        {name, "localhost"},

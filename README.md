@@ -23,7 +23,6 @@ Strategy   | Description
 -----------|--------------------------------------
 manual     | Join cluster manually
 static     | Static node list
-mcast      | IP Multicast
 dns        | DNS A Records
 etcd       | etcd
 k8s        | Kubernetes
@@ -46,54 +45,6 @@ Erlang config:
 {cluster_discovery,
   {static, [
     {seeds, ['ekka1@127.0.0.1', 'ekka2@127.0.0.1']}
-  ]}},
-```
-
-### Cluster using IP Multicast
-
-Cuttlefish style config:
-
-```
-cluster.discovery = mcast
-
-## IP Multicast Address.
-##
-## Value: IP Address
-cluster.mcast.addr = 239.192.0.1
-
-## Multicast Ports.
-##
-## Value: Port List
-cluster.mcast.ports = 4369,4370
-
-## Multicast Iface.
-##
-## Value: Iface Address
-##
-## Default: 0.0.0.0
-cluster.mcast.iface = 0.0.0.0
-
-## Multicast Ttl.
-##
-## Value: 0-255
-cluster.mcast.ttl = 255
-
-## Multicast loop.
-##
-## Value: on | off
-cluster.mcast.loop = on
-```
-
-Erlang config:
-
-```
-{cluster_discovery,
-  {mcast, [
-    {addr, {239,192,0,1}},
-    {ports, [4369,4370]},
-    {iface, {0,0,0,0}},
-    {ttl, 255},
-    {loop, true}
   ]}},
 ```
 
