@@ -112,7 +112,7 @@ start_link(Name, LeaseTime) ->
 stop() ->
     stop(?SERVER).
 
--spec(stop(atom()) -> ok).
+-spec(stop(pid() | atom()) -> ok).
 stop(Name) ->
     gen_server:call(Name, stop).
 
