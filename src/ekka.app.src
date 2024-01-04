@@ -1,5 +1,5 @@
 {application, ekka,
- [{description, "Autocluster for EMQ X Broker"},
+ [{description, "Autocluster for EMQX Broker"},
   {vsn, "git"},
   {mod, {ekka_app,[]}},
   {registered,
@@ -16,6 +16,6 @@
    ]},
   {modules, []},
   {licenses, ["Apache 2.0"]},
-  {maintainers, ["EMQ X Team <contact@emqx.io>"]},
+  {maintainers, ["EMQX Team <contact@emqx.io>"]},
   {links, [{"Github","https://github.com/emqx/ekka"}]}
  ]}.
