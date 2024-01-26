@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2024 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -27,14 +27,14 @@ start_link() ->
 
 init([]) ->
     {ok, {{one_for_all, 0, 3600},
-          [child(ekka_cluster_sup, supervisor),
-           child(ekka_locker_sup, supervisor)
+          [child(ekka_cluster_sup, supervisor, temporary),
+           child(ekka_locker_sup, supervisor, permanent)
           ]}}.
 
-child(Mod, supervisor) ->
+child(Mod, supervisor, Restart) ->
      #{id       => Mod,
        start    => {Mod, start_link, []},
-       restart  => permanent,
+       restart  => Restart,
        shutdown => infinity,
        type     => supervisor,
        modules  => [Mod]}.
