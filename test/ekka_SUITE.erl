@@ -24,7 +24,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
--define(CONTENT_TYPE, "application/x-www-form-urlencoded").
 
 all() -> ekka_ct:all(?MODULE).
 

@@ -52,3 +52,28 @@ t_register_mria_callbacks(_) ->
           , core_node_discovery
           ])
     end.
+
+t_create_tables_on(_) ->
+    _ = application:load(ekka_boot_testapp),
+    _ = application:load(ekka),
+    ok = ekka:start(),
+    try
+        ?assertMatch(Ts when is_integer(Ts), ekka_boot_testapp:booted())
+    after
+        ok = ekka:stop(),
+        ok = application:unload(ekka),
+        ok = application:unload(ekka_boot_testapp)
+    end.
+
+t_create_tables_off(_) ->
+    _ = application:load(ekka_boot_testapp),
+    _ = application:load(ekka),
+    ok = application:set_env(ekka, boot_create_tables, false),
+    ok = ekka:start(),
+    try
+        ?assertEqual(undefined, ekka_boot_testapp:booted())
+    after
+        ok = ekka:stop(),
+        ok = application:unload(ekka),
+        ok = application:unload(ekka_boot_testapp)
+    end.

@@ -96,9 +96,15 @@ start() ->
     ekka_boot:register_mria_callbacks(),
     {ok, _Apps} = application:ensure_all_started(ekka),
     ?tp(info, "Ekka is running", #{}),
-    ekka_boot:create_tables(),
+    maybe_create_tables(),
     ekka:exec_callback(start),
     ok.
+
+maybe_create_tables() ->
+    case env(boot_create_tables, true) of
+        true -> ekka_boot:create_tables();
+        false -> ok
+    end.
 
 -spec(stop() -> ok).
 stop() ->
