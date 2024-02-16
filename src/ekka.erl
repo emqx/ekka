@@ -96,7 +96,11 @@ start() ->
     ekka_boot:register_mria_callbacks(),
     {ok, _Apps} = application:ensure_all_started(ekka),
     ?tp(info, "Ekka is running", #{}),
-    ekka_boot:create_tables(),
+    %% NOTE
+    %% Ekka doesn't run a separate "mnesia boot" phase anymore. Users are
+    %% advised to manage tables explicitly by themselves as part of
+    %% applications' startup routines.
+    %% See also: `ekka_boot:create_tables/0`
     ekka:exec_callback(start),
     ok.
 
