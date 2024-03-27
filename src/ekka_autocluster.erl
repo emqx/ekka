@@ -23,9 +23,11 @@
 
 %% API
 -export([ enabled/0
+        , configured/0
         , run/1
         , unregister_node/0
         , core_node_discovery_callback/0
+        , stop/1
         ]).
 
 %% gen_server callbacks
@@ -49,9 +51,13 @@
 
 -spec enabled() -> boolean().
 enabled() ->
+    configured() andalso mria_config:role() =:= core.
+
+-spec configured() -> boolean().
+configured() ->
     case ekka:env(cluster_discovery) of
         {ok, {manual, _}} -> false;
-        {ok, _Strategy}   -> mria_config:role() =:= core;
+        {ok, _Strategy}   -> true;
         undefined         -> false
     end.
 
@@ -73,6 +79,15 @@ unregister_node() ->
       fun(Mod, Options) ->
           log_error("Unregister", ekka_cluster_strategy:unregister(Mod, Options))
       end).
+
+-spec stop(term()) -> ok.
+stop(Reason) ->
+    try
+        gen_server:stop(?SERVER, {shutdown, Reason}, 5000)
+    catch
+        _:noproc ->
+            ok
+    end.
 
 %% @doc Core node discovery used by mria by replicant nodes to find
 %% the core nodes.
