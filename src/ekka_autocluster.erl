@@ -248,12 +248,16 @@ join_with(false) ->
 join_with(Node) when Node =:= node() ->
     ignore;
 join_with(Node) ->
-    Res = ekka_cluster:join(Node),
-    %% Wait for ekka to be restarted after join to avoid noproc error
-    %% that can occur if underlying cluster implementation (e.g. ekka_cluster_etcd)
-    %% uses some processes started under ekka supervision tree
-    _ = wait_application_ready(ekka, 10),
-    Res.
+    case ekka_cluster:join(Node) of
+        {error, {already_in_cluster, Node}} ->
+            ignore;
+        Res ->
+            %% Wait for ekka to be restarted after join to avoid noproc error
+            %% that can occur if underlying cluster implementation (e.g. ekka_cluster_etcd)
+            %% uses some processes started under ekka supervision tree
+            _ = wait_application_ready(ekka, 10),
+            Res
+    end.
 
 find_oldest_node([Node]) ->
     Node;
