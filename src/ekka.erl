@@ -38,6 +38,9 @@
 %% Autocluster API
 -export([ autocluster/0
         , autocluster/1
+        , autocluster_enabled/0
+        , enable_autocluster/0
+        , disable_autocluster/0
         ]).
 
 %% Callbacks
@@ -168,6 +171,18 @@ autocluster(App) ->
         true  -> ekka_autocluster:run(App);
         false -> ok
     end.
+
+autocluster_enabled() ->
+    env(cluster_enable, true) andalso ekka_autocluster:configured().
+
+disable_autocluster() ->
+    ok = application:set_env(ekka, cluster_enable, false),
+    ok = mria:disable_core_node_discovery(),
+    ok = ekka_autocluster:stop(disabled).
+
+enable_autocluster() ->
+    ok = application:set_env(ekka, cluster_enable, true),
+    ok = mria:enable_core_node_discovery().
 
 %%--------------------------------------------------------------------
 %% Callbacks
