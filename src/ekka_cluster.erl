@@ -24,6 +24,8 @@
         , leave/0
         , force_leave/1
         , status/1
+        , is_singleton/0
+        , is_singleton/1
         ]).
 
 -type(info_key() :: running_nodes | stopped_nodes).
@@ -50,7 +52,12 @@ status(Node) ->
 %% @doc Join the cluster
 -spec(join(node()) -> ok | ignore | {error, term()}).
 join(Node) ->
-    mria:join(Node).
+    case is_singleton() orelse is_singleton(Node) of
+        true ->
+            {error, singleton};
+        false ->
+            mria:join(Node)
+    end.
 
 %% @doc Leave from the cluster.
 -spec(leave() -> ok | {error, any()}).
@@ -61,3 +68,23 @@ leave() ->
 -spec(force_leave(node()) -> ok | ignore | {error, term()}).
 force_leave(Node) ->
     mria:force_leave(Node).
+
+-spec is_singleton() -> boolean().
+is_singleton() ->
+    case ekka:env(cluster_discovery) of
+        {ok, {singleton, _}} ->
+            true;
+        _ ->
+            false
+    end.
+
+-spec is_singleton(node()) -> boolean().
+is_singleton(Node) when Node =:= node() ->
+    is_singleton();
+is_singleton(Node) ->
+    try
+        erpc:call(Node, ?MODULE, is_singleton, [])
+    catch
+        _:_ ->
+            false
+    end.
