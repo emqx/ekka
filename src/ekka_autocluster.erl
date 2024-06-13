@@ -57,6 +57,7 @@ enabled() ->
 configured() ->
     case ekka:env(cluster_discovery) of
         {ok, {manual, _}} -> false;
+        {ok, {singleton, _}} -> false;
         {ok, _Strategy}   -> true;
         undefined         -> false
     end.
@@ -95,6 +96,8 @@ stop(Reason) ->
 core_node_discovery_callback() ->
     case ekka:env(cluster_discovery) of
         {ok, {manual, _}} ->
+            [];
+        {ok, {singleton, _}} ->
             [];
         {ok, {Strategy, Options}} ->
             Mod = strategy_module(Strategy),
@@ -196,6 +199,8 @@ discover_and_join() ->
 with_strategy(Fun) ->
     case ekka:env(cluster_discovery) of
         {ok, {manual, _}} ->
+            ignore;
+        {ok, {singleton, _}} ->
             ignore;
         {ok, {Strategy, Options}} ->
             Fun(strategy_module(Strategy), Options);

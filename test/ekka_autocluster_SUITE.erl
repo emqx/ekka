@@ -41,6 +41,8 @@
                       {suffix, ""}
                      ]).
 
+-define(ON(NODE, BODY), erpc:call(NODE, fun() -> BODY end)).
+
 all() -> ekka_ct:all(?MODULE).
 
 %%--------------------------------------------------------------------
@@ -329,6 +331,31 @@ t_core_node_discovery_callback(Config) ->
        erpc:call(N2, ekka_autocluster, core_node_discovery_callback, [], 5000)
       ),
     ok.
+
+%%--------------------------------------------------------------------
+%% "Autocluster" via 'singleton' strategy
+
+t_singleton(_Config) ->
+    N1 = ekka_ct:start_slave(ekka, n1),
+    N2 = ekka_ct:start_slave(ekka, n2),
+    try
+        ok = ekka_ct:wait_running(N1),
+        ok = ekka_ct:wait_running(N2),
+        ok = set_app_env(N1, {singleton, []}),
+        ok = set_app_env(N2, {static, [{seeds, []}]}),
+        ?ON(N1, ?assertMatch({error, singleton}, ekka:join(N2))),
+        %% Other nodes must not join the singleton.
+        ?ON(N2, ?assertMatch({error, singleton}, ekka:join(N1))),
+        ?ON(N1, ?assertNot(ekka:autocluster_enabled())),
+        ?ON(N1, ?assertNot(ekka_autocluster:configured())),
+        ?ON(N1, ?assertNot(ekka_autocluster:enabled())),
+        ?ON(N1, ?assertEqual(ignore, ekka_autocluster:run(myapp))),
+        ?ON(N1, ?assertEqual(ignore, ekka_autocluster:unregister_node())),
+        ?ON(N1, ?assertEqual([], ekka_autocluster:core_node_discovery_callback())),
+        ok
+    after
+        ok = ekka_ct:stop_slave(N1)
+    end.
 
 %%--------------------------------------------------------------------
 %% Misc tests
