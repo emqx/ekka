@@ -16,6 +16,8 @@
 
 -module(ekka_autoheal_SUITE).
 
+-include_lib("snabbkaffe/include/test_macros.hrl").
+
 -compile(export_all).
 -compile(nowarn_export_all).
 
@@ -41,27 +43,41 @@ t_autoheal(_Config) ->
         %% Create cluster
         ok = rpc:call(N2, ekka, join, [N1]),
         ok = rpc:call(N3, ekka, join, [N1]),
-        %% Simulate netsplit
-        true = rpc:cast(N3, net_kernel, disconnect, [N1]),
-        true = rpc:cast(N3, net_kernel, disconnect, [N2]),
-        ok = timer:sleep(1000),
-        %% SplitView: {[N1,N2], [N3]}
-        [N1,N2] = rpc:call(N1, ekka, info, [running_nodes]),
-        [N3] = rpc:call(N1, ekka, info, [stopped_nodes]),
-        [N1,N2] = rpc:call(N2, ekka, info, [running_nodes]),
-        [N3] = rpc:call(N2, ekka, info, [stopped_nodes]),
-        [N3] = rpc:call(N3, ekka, info, [running_nodes]),
-        [N1,N2] = rpc:call(N3, ekka, info, [stopped_nodes]),
-        %% Wait for autoheal
-        ok = timer:sleep(12000),
-        [N1,N2,N3] = rpc:call(N1, ekka, info, [running_nodes]),
-        [N1,N2,N3] = rpc:call(N2, ekka, info, [running_nodes]),
-        [N1,N2,N3] = rpc:call(N3, ekka, info, [running_nodes]),
-        rpc:call(N1, ekka, leave, []),
-        rpc:call(N2, ekka, leave, []),
-        rpc:call(N3, ekka, leave, [])
+        ?check_trace(
+            begin
+                %% Simulate netsplit
+                true = rpc:cast(N3, net_kernel, disconnect, [N1]),
+                true = rpc:cast(N3, net_kernel, disconnect, [N2]),
+                ok = timer:sleep(1000),
+                %% SplitView: {[N1,N2], [N3]}
+                [N1,N2] = rpc:call(N1, ekka, info, [running_nodes]),
+                [N3] = rpc:call(N1, ekka, info, [stopped_nodes]),
+                [N1,N2] = rpc:call(N2, ekka, info, [running_nodes]),
+                [N3] = rpc:call(N2, ekka, info, [stopped_nodes]),
+                [N3] = rpc:call(N3, ekka, info, [running_nodes]),
+                [N1,N2] = rpc:call(N3, ekka, info, [stopped_nodes]),
+                %% Simulate autoheal crash, to verify autoheal tolerates it.
+                snabbkaffe_nemesis:inject_crash(
+                    ?match_event(#{?snk_kind := start_heal_partition}),
+                    snabbkaffe_nemesis:recover_after(1),
+                    ?MODULE
+                ),
+                %% Wait for autoheal
+                ok = timer:sleep(12000),
+                [N1,N2,N3] = rpc:call(N1, ekka, info, [running_nodes]),
+                [N1,N2,N3] = rpc:call(N2, ekka, info, [running_nodes]),
+                [N1,N2,N3] = rpc:call(N3, ekka, info, [running_nodes]),
+                rpc:call(N1, ekka, leave, []),
+                rpc:call(N2, ekka, leave, []),
+                rpc:call(N3, ekka, leave, [])
+            end,
+            fun(Trace) ->
+                ?assertMatch([_ | _], ?of_kind(snabbkaffe_crash, Trace))
+            end
+        )
     after
-        lists:foreach(fun ekka_ct:stop_slave/1, Nodes)
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
     end.
 
 t_autoheal_asymm(_Config) ->
