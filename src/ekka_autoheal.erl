@@ -16,6 +16,8 @@
 
 -module(ekka_autoheal).
 
+-include_lib("snabbkaffe/include/trace.hrl").
+
 -export([ init/0
         , enabled/0
         , proc/1
@@ -24,7 +26,7 @@
 
 -record(autoheal, {delay, role, proc, timer}).
 
--type(autoheal() :: #autoheal{}).
+-type autoheal() :: #autoheal{}.
 
 -export_type([autoheal/0]).
 
@@ -77,11 +79,18 @@ handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{delay = Delay, t
             case rpc:multicall(Nodes, ekka_mnesia, cluster_view, [], 30000) of
                 {Views, []} ->
                     SplitView = lists:sort(fun compare_view/2, lists:usort(Views)),
-                    ekka_node_monitor:cast(coordinator(SplitView), {heal_partition, SplitView});
+                    case SplitView of
+                        [] -> ignore;
+                        [{_, []}] -> ignore;
+                        _Otherwise ->
+                            Coordinator = coordinator(SplitView),
+                            ekka_node_monitor:cast(Coordinator, {heal_partition, SplitView})
+                    end,
+                    Autoheal#autoheal{timer = undefined};
                 {_Views, BadNodes} ->
-                    ?LOG(critical, "Bad nodes found when autoheal: ~p", [BadNodes])
-            end,
-            Autoheal#autoheal{timer = undefined};
+                    ?LOG(critical, "Bad nodes found when autoheal: ~p", [BadNodes]),
+                    Autoheal#autoheal{timer = ekka_node_monitor:run_after(Delay, {autoheal, Msg})}
+            end;
         false ->
             Autoheal#autoheal{timer = ekka_node_monitor:run_after(Delay, {autoheal, Msg})}
     end;
@@ -91,27 +100,35 @@ handle_msg(Msg = {create_splitview, _Node}, Autoheal) ->
     Autoheal;
 
 handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined}) ->
-    Proc = spawn_link(fun() ->
-                          ?LOG(info, "Healing partition: ~p", [SplitView]),
-                          _ = heal_partition(SplitView)
-                      end),
-    Autoheal#autoheal{role = coordinator, proc = Proc};
+    case SplitView of
+        %% No partitions.
+        [] -> Autoheal;
+        [{_, []}] -> Autoheal;
+        %% Partitions.
+        SplitView ->
+            Proc = spawn_link(fun() ->
+                ?tp(start_heal_partition, #{split_view => SplitView}),
+                heal_partition(SplitView)
+            end),
+            Autoheal#autoheal{role = coordinator, proc = Proc}
+    end;
 
-handle_msg({heal_partition, SplitView}, Autoheal= #autoheal{proc = _Proc}) ->
+handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
     ?LOG(critical, "Unexpected heal_partition msg: ~p", [SplitView]),
     Autoheal;
 
 handle_msg({'EXIT', Pid, normal}, Autoheal = #autoheal{proc = Pid}) ->
     Autoheal#autoheal{proc = undefined};
 handle_msg({'EXIT', Pid, Reason}, Autoheal = #autoheal{proc = Pid}) ->
-    ?LOG(critical, "Autoheal process crashed: ~s", [Reason]),
+    ?LOG(critical, "Autoheal process crashed: ~p", [Reason]),
+    _Retry = ekka_node_monitor:run_after(1000, confirm_partition),
     Autoheal#autoheal{proc = undefined};
 
 handle_msg(Msg, Autoheal) ->
     ?LOG(critical, "Unexpected msg: ~p", [Msg, Autoheal]),
     Autoheal.
 
-compare_view({Running1, _} , {Running2, _}) ->
+compare_view({Running1, _}, {Running2, _}) ->
     Len1 = length(Running1), Len2 = length(Running2),
     if
         Len1 > Len2  -> true;
@@ -122,20 +139,21 @@ compare_view({Running1, _} , {Running2, _}) ->
 coordinator([{Nodes, _} | _]) ->
     ekka_membership:coordinator(Nodes).
 
--spec heal_partition(list()) -> list(node()).
-heal_partition([]) ->
-    [];
-%% All nodes connected.
-heal_partition([{_, []}]) ->
-    [];
-%% Partial partitions happened.
-heal_partition([{Nodes, []}|_]) ->
+heal_partition([{Nodes, []} | _] = SplitView) ->
+    %% Symmetric partition.
+    ?LOG(info, "Healing partition: ~p", [SplitView]),
     reboot_minority(Nodes -- [node()]);
-heal_partition([{Majority, Minority}, {Minority, Majority}]) ->
+heal_partition([{Majority, Minority}, {Minority, Majority}] = SplitView) ->
+    %% Symmetric partition.
+    ?LOG(info, "Healing partition: ~p", [SplitView]),
     reboot_minority(Minority);
-heal_partition(SplitView) ->
-    ?LOG(critical, "Cannot heal the partitions: ~p", [SplitView]),
-    error({unknown_splitview, SplitView}).
+heal_partition([{_Nodes, Stopped} | _Asymmetric] = SplitView) ->
+    %% Asymmetric partitions.
+    %% Start with rebooting known stopped nodes. If this won't be enough, retry mechanism
+    %% in `ekka_node_monitor:handle_info({mnesia_system_event, ...}` should then launch
+    %% new iteration.
+    ?LOG(info, "Trying to heal asymmetric partition: ~p", [SplitView]),
+    reboot_minority(Stopped).
 
 reboot_minority(Minority) ->
     lists:foreach(fun shutdown/1, Minority),
@@ -155,4 +173,3 @@ ensure_cancel_timer(undefined) ->
     ok;
 ensure_cancel_timer(TRef) ->
     catch erlang:cancel_timer(TRef).
-
