@@ -79,13 +79,8 @@ handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{delay = Delay, t
             case rpc:multicall(Nodes, ekka_mnesia, cluster_view, [], 30000) of
                 {Views, []} ->
                     SplitView = lists:sort(fun compare_view/2, lists:usort(Views)),
-                    case SplitView of
-                        [] -> ignore;
-                        [{_, []}] -> ignore;
-                        _Otherwise ->
-                            Coordinator = coordinator(SplitView),
-                            ekka_node_monitor:cast(Coordinator, {heal_partition, SplitView})
-                    end,
+                    Coordinator = coordinator(SplitView),
+                    ekka_node_monitor:cast(Coordinator, {heal_partition, SplitView}),
                     Autoheal#autoheal{timer = undefined};
                 {_Views, BadNodes} ->
                     ?LOG(critical, "Bad nodes found when autoheal: ~p", [BadNodes]),
