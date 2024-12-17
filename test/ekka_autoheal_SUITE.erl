@@ -58,7 +58,7 @@ t_autoheal(_Config) ->
                 [N1,N2] = rpc:call(N3, ekka, info, [stopped_nodes]),
                 %% Simulate autoheal crash, to verify autoheal tolerates it.
                 snabbkaffe_nemesis:inject_crash(
-                    ?match_event(#{?snk_kind := start_heal_partition}),
+                    ?match_event(#{?snk_kind := "Healing cluster partition"}),
                     snabbkaffe_nemesis:recover_after(1),
                     ?MODULE
                 ),
@@ -72,6 +72,10 @@ t_autoheal(_Config) ->
                 rpc:call(N3, ekka, leave, [])
             end,
             fun(Trace) ->
+                ?assertMatch(
+                    [#{need_reboot := [N3]}],
+                    ?of_kind("Healing cluster partition", Trace)
+                ),
                 ?assertMatch([_ | _], ?of_kind(snabbkaffe_crash, Trace))
             end
         )
@@ -87,29 +91,86 @@ t_autoheal_asymm(_Config) ->
         ok = rpc:call(N2, ekka, join, [N1]),
         ok = rpc:call(N3, ekka, join, [N1]),
         ok = rpc:call(N4, ekka, join, [N1]),
-        %% Simulate asymmetric netsplit
-        true = rpc:cast(N3, net_kernel, disconnect, [N1]),
-        true = rpc:cast(N4, net_kernel, disconnect, [N2]),
-        ok = timer:sleep(1000),
-        %% SplitView: [{[N1,N2,N4], [N3]}, {[N1,N2,N3], [N4]},
-        %%             {[N2,N3,N4], [N1]}, {[N1,N3,N4], [N2]}]
-        NodesInfo = [running_nodes, stopped_nodes],
-        [[N1,N2,N4], [N3]] = [rpc:call(N1, ekka, info, [I]) || I <- NodesInfo],
-        [[N1,N2,N3], [N4]] = [rpc:call(N2, ekka, info, [I]) || I <- NodesInfo],
-        [[N2,N3,N4], [N1]] = [rpc:call(N3, ekka, info, [I]) || I <- NodesInfo],
-        [[N1,N3,N4], [N2]] = [rpc:call(N4, ekka, info, [I]) || I <- NodesInfo],
-        %% Wait for autoheal
-        ok = timer:sleep(12000),
-        Nodes = rpc:call(N1, ekka, info, [running_nodes]),
-        Nodes = rpc:call(N2, ekka, info, [running_nodes]),
-        Nodes = rpc:call(N3, ekka, info, [running_nodes]),
-        Nodes = rpc:call(N4, ekka, info, [running_nodes]),
-        rpc:call(N1, ekka, leave, []),
-        rpc:call(N2, ekka, leave, []),
-        rpc:call(N3, ekka, leave, []),
-        rpc:call(N4, ekka, leave, [])
+        ?check_trace(
+            begin
+                %% Simulate asymmetric netsplit
+                true = rpc:cast(N2, net_kernel, disconnect, [N1]),
+                true = rpc:cast(N3, net_kernel, disconnect, [N1]),
+                true = rpc:cast(N4, net_kernel, disconnect, [N2]),
+                ok = timer:sleep(1000),
+                %% Asymmetric split, but it's enough to reboot N1 and N2
+                NodesInfo = [running_nodes, stopped_nodes],
+                [[N1,N4], [N2,N3]] = [rpc:call(N1, ekka, info, [I]) || I <- NodesInfo],
+                [[N2,N3], [N1,N4]] = [rpc:call(N2, ekka, info, [I]) || I <- NodesInfo],
+                [[N2,N3,N4], [N1]] = [rpc:call(N3, ekka, info, [I]) || I <- NodesInfo],
+                [[N1,N3,N4], [N2]] = [rpc:call(N4, ekka, info, [I]) || I <- NodesInfo],
+                %% Wait for autoheal
+                ok = timer:sleep(12000),
+                Nodes = rpc:call(N1, ekka, info, [running_nodes]),
+                Nodes = rpc:call(N2, ekka, info, [running_nodes]),
+                Nodes = rpc:call(N3, ekka, info, [running_nodes]),
+                Nodes = rpc:call(N4, ekka, info, [running_nodes]),
+                rpc:call(N1, ekka, leave, []),
+                rpc:call(N2, ekka, leave, []),
+                rpc:call(N3, ekka, leave, []),
+                rpc:call(N4, ekka, leave, [])
+            end,
+            fun(Trace) ->
+                ?assertMatch(
+                    [#{need_reboot := [N1, N2]}],
+                    ?of_kind("Healing cluster partition", Trace)
+                )
+            end
+        )
     after
-        lists:foreach(fun ekka_ct:stop_slave/1, Nodes)
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
+    end.
+
+t_autoheal_fullsplit(_Config) ->
+    [N1,N2,N3,N4] = Nodes = lists:map(fun start_slave_node/1, [fs1,fs2,fs3,fs4]),
+    try
+        %% Create cluster
+        ok = rpc:call(N2, ekka, join, [N1]),
+        ok = rpc:call(N3, ekka, join, [N1]),
+        ok = rpc:call(N4, ekka, join, [N1]),
+        ?check_trace(
+            begin
+                %% Simulate asymmetric netsplit
+                true = rpc:cast(N1, net_kernel, disconnect, [N2]),
+                true = rpc:cast(N1, net_kernel, disconnect, [N3]),
+                true = rpc:cast(N1, net_kernel, disconnect, [N4]),
+                true = rpc:cast(N2, net_kernel, disconnect, [N3]),
+                true = rpc:cast(N2, net_kernel, disconnect, [N4]),
+                true = rpc:cast(N3, net_kernel, disconnect, [N4]),
+                ok = timer:sleep(1000),
+                %% Full split, all nodes except one need to be rebooted
+                NodesInfo = [running_nodes, stopped_nodes],
+                [[N1], [N2,N3,N4]] = [rpc:call(N1, ekka, info, [I]) || I <- NodesInfo],
+                [[N2], [N1,N3,N4]] = [rpc:call(N2, ekka, info, [I]) || I <- NodesInfo],
+                [[N3], [N1,N2,N4]] = [rpc:call(N3, ekka, info, [I]) || I <- NodesInfo],
+                [[N4], [N1,N2,N3]] = [rpc:call(N4, ekka, info, [I]) || I <- NodesInfo],
+                %% Wait for autoheal
+                ok = timer:sleep(12000),
+                Nodes = rpc:call(N1, ekka, info, [running_nodes]),
+                Nodes = rpc:call(N2, ekka, info, [running_nodes]),
+                Nodes = rpc:call(N3, ekka, info, [running_nodes]),
+                Nodes = rpc:call(N4, ekka, info, [running_nodes]),
+                rpc:call(N1, ekka, leave, []),
+                rpc:call(N2, ekka, leave, []),
+                rpc:call(N3, ekka, leave, []),
+                rpc:call(N4, ekka, leave, [])
+            end,
+            fun(Trace) ->
+                ?assertMatch(
+                    [#{need_reboot := [N2, N3, N4]}],
+                    ?of_kind("Healing cluster partition", Trace)
+                )
+            end
+        )
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
     end.
 
 start_slave_node(Name) ->

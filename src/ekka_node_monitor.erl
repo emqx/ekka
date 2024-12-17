@@ -110,8 +110,9 @@ handle_cast({confirm, TargetNode, Status}, State) ->
 
 handle_cast(Msg = {report_partition, _Node}, State) ->
     {noreply, autoheal_handle_msg(Msg, State)};
-
 handle_cast(Msg = {heal_partition, _SplitView}, State) ->
+    {noreply, autoheal_handle_msg(Msg, State)};
+handle_cast(Msg = {heal_cluster, _, _}, State) ->
     {noreply, autoheal_handle_msg(Msg, State)};
 
 handle_cast(Msg, State) ->

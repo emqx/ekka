@@ -49,8 +49,7 @@ enabled() ->
     end.
 
 proc(undefined) -> undefined;
-proc(#autoheal{proc = Proc}) ->
-    Proc.
+proc(#autoheal{proc = Proc}) -> Proc.
 
 handle_msg(Msg, undefined) ->
     ?LOG(error, "Autoheal not enabled! Unexpected msg: ~p", [Msg]), undefined;
@@ -78,9 +77,19 @@ handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{delay = Delay, t
             Nodes = ekka_mnesia:cluster_nodes(all),
             case rpc:multicall(Nodes, ekka_mnesia, cluster_view, [], 30000) of
                 {Views, []} ->
-                    SplitView = lists:sort(fun compare_view/2, lists:usort(Views)),
-                    Coordinator = coordinator(SplitView),
-                    ekka_node_monitor:cast(Coordinator, {heal_partition, SplitView}),
+                    SplitView = find_split_view(Nodes, Views),
+                    HealPlan = find_heal_plan(SplitView),
+                    case HealPlan of
+                        {Candidates = [_ | _], Minority} ->
+                            %% Non-empty list of candidates, choose a coordinator.
+                            CoordNode = ekka_membership:coordinator(Candidates),
+                            ekka_node_monitor:cast(CoordNode, {heal_cluster, Minority, SplitView});
+                        {[], Cluster} ->
+                            %% It's very unlikely but possible to have empty list of candidates.
+                            ekka_node_monitor:cast(node(), {heal_cluster, Cluster, SplitView});
+                        {} ->
+                            ignore
+                    end,
                     Autoheal#autoheal{timer = undefined};
                 {_Views, BadNodes} ->
                     ?LOG(critical, "Bad nodes found when autoheal: ~p", [BadNodes]),
@@ -95,18 +104,26 @@ handle_msg(Msg = {create_splitview, _Node}, Autoheal) ->
     Autoheal;
 
 handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined}) ->
+    %% NOTE: Backward compatibility.
     case SplitView of
         %% No partitions.
         [] -> Autoheal;
         [{_, []}] -> Autoheal;
         %% Partitions.
         SplitView ->
-            Proc = spawn_link(fun() ->
-                ?tp(start_heal_partition, #{split_view => SplitView}),
-                heal_partition(SplitView)
-            end),
+            Proc = spawn_link(fun() -> heal_partition(SplitView) end),
             Autoheal#autoheal{role = coordinator, proc = Proc}
     end;
+
+handle_msg({heal_cluster, Minority, SplitView}, Autoheal = #autoheal{proc = undefined}) ->
+    Proc = spawn_link(fun() ->
+        ?tp(notice, "Healing cluster partition", #{
+            need_reboot => Minority,
+            split_view => SplitView
+        }),
+        reboot_minority(Minority -- [node()])
+    end),
+    Autoheal#autoheal{role = coordinator, proc = Proc};
 
 handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
     ?LOG(critical, "Unexpected heal_partition msg: ~p", [SplitView]),
@@ -123,16 +140,52 @@ handle_msg(Msg, Autoheal) ->
     ?LOG(critical, "Unexpected msg: ~p", [Msg, Autoheal]),
     Autoheal.
 
-compare_view({Running1, _}, {Running2, _}) ->
-    Len1 = length(Running1), Len2 = length(Running2),
-    if
-        Len1 > Len2  -> true;
-        Len1 == Len2 -> lists:member(node(), Running1);
-        true -> false
+find_split_view(Nodes, Views) ->
+    ClusterView = lists:zipwith(
+        fun(N, {Running, Stopped}) -> {N, Running, Stopped} end,
+        Nodes,
+        Views
+    ),
+    MajorityView = lists:usort(fun compare_node_views/2, ClusterView),
+    find_split_view(MajorityView).
+
+compare_node_views({_N1, Running1, _}, {_N2, Running2, _}) ->
+    Len1 = length(Running1),
+    Len2 = length(Running2),
+    case Len1 of
+        %% Prefer partitions with higher number of surviving nodes.
+        L when L > Len2 -> true;
+        %% If number of nodes is the same, prefer those where current node is a survivor.
+        %% Otherwise, sort by list of running nodes. If lists happen to be the same, this
+        %% view will be excluded by usort.
+        Len2 -> lists:member(node(), Running1) orelse Running1 < Running2;
+        L when L < Len2 -> false
     end.
 
-coordinator([{Nodes, _} | _]) ->
-    ekka_membership:coordinator(Nodes).
+find_split_view([{_Node, _Running, []} | Views]) ->
+    %% Node observes no partitions, ignore.
+    find_split_view(Views);
+find_split_view([View = {_Node, _Running, Partitioned} | Views]) ->
+    %% Node observes some nodes as partitioned from it.
+    %% These nodes need to be rebooted, and as such they should not be part of split view.
+    Rest = lists:foldl(fun(N, Acc) -> lists:keydelete(N, 1, Acc) end, Views, Partitioned),
+    [View | find_split_view(Rest)];
+find_split_view([]) ->
+    [].
+
+find_heal_plan([{_Node, R0, P0} | Rest]) ->
+    %% If we have more than one parition in split view, we need to reboot _all_ of the nodes
+    %% in each view's partition (i.e. ⋃(Partitions)) for better safety. But then we need to
+    %% find candidates to do it, as ⋃(Survivors) ∩ ⋃(Partitions).
+    lists:foldl(
+        fun({_, R, P}, {RAcc, PAcc}) ->
+            {lists:usort((R -- PAcc) ++ (RAcc -- P)), lists:usort(P ++ PAcc)}
+        end,
+        {R0, P0},
+        Rest
+    );
+find_heal_plan([]) ->
+    {}.
 
 heal_partition([{Nodes, []} | _] = SplitView) ->
     %% Symmetric partition.
@@ -141,14 +194,7 @@ heal_partition([{Nodes, []} | _] = SplitView) ->
 heal_partition([{Majority, Minority}, {Minority, Majority}] = SplitView) ->
     %% Symmetric partition.
     ?LOG(info, "Healing partition: ~p", [SplitView]),
-    reboot_minority(Minority);
-heal_partition([{_Nodes, Stopped} | _Asymmetric] = SplitView) ->
-    %% Asymmetric partitions.
-    %% Start with rebooting known stopped nodes. If this won't be enough, retry mechanism
-    %% in `ekka_node_monitor:handle_info({mnesia_system_event, ...}` should then launch
-    %% new iteration.
-    ?LOG(info, "Trying to heal asymmetric partition: ~p", [SplitView]),
-    reboot_minority(Stopped).
+    reboot_minority(Minority).
 
 reboot_minority(Minority) ->
     lists:foreach(fun shutdown/1, Minority),
