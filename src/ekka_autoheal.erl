@@ -82,7 +82,7 @@ handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{delay = Delay, t
                     case HealPlan of
                         {Candidates = [_ | _], Minority} ->
                             %% Non-empty list of candidates, choose a coordinator.
-                            CoordNode = ekka_membership:coordinator(Candidates),
+                            CoordNode = pick_coordinator(Candidates),
                             ekka_node_monitor:cast(CoordNode, {heal_cluster, Minority, SplitView});
                         {[], Cluster} ->
                             %% It's very unlikely but possible to have empty list of candidates.
@@ -146,7 +146,7 @@ find_split_view(Nodes, Views) ->
         Nodes,
         Views
     ),
-    MajorityView = lists:usort(fun compare_node_views/2, ClusterView),
+    MajorityView = lists:sort(fun compare_node_views/2, ClusterView),
     find_split_view(MajorityView).
 
 compare_node_views({_N1, Running1, _}, {_N2, Running2, _}) ->
@@ -155,10 +155,8 @@ compare_node_views({_N1, Running1, _}, {_N2, Running2, _}) ->
     case Len1 of
         %% Prefer partitions with higher number of surviving nodes.
         L when L > Len2 -> true;
-        %% If number of nodes is the same, prefer those where current node is a survivor.
-        %% Otherwise, sort by list of running nodes. If lists happen to be the same, this
-        %% view will be excluded by usort.
-        Len2 -> lists:member(node(), Running1) orelse Running1 < Running2;
+        %% If number of nodes is the same, sort by list of running nodes.
+        Len2 -> Running1 < Running2;
         L when L < Len2 -> false
     end.
 
@@ -183,6 +181,12 @@ find_heal_plan([{_Node, R0, P0} | Rest]) ->
     {ordsets:subtract(URunning, UPartitions), UPartitions};
 find_heal_plan([]) ->
     {}.
+
+pick_coordinator(Candidates) ->
+    case lists:member(node(), Candidates) of
+        true -> node();
+        false -> ekka_membership:coordinator(Candidates)
+    end.
 
 heal_partition([{Nodes, []} | _] = SplitView) ->
     %% Symmetric partition.
