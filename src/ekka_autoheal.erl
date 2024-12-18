@@ -176,14 +176,11 @@ find_split_view([]) ->
 find_heal_plan([{_Node, R0, P0} | Rest]) ->
     %% If we have more than one parition in split view, we need to reboot _all_ of the nodes
     %% in each view's partition (i.e. ⋃(Partitions)) for better safety. But then we need to
-    %% find candidates to do it, as ⋃(Survivors) ∩ ⋃(Partitions).
-    lists:foldl(
-        fun({_, R, P}, {RAcc, PAcc}) ->
-            {lists:usort((R -- PAcc) ++ (RAcc -- P)), lists:usort(P ++ PAcc)}
-        end,
-        {R0, P0},
-        Rest
-    );
+    %% find candidates to do it, as ⋃(Running) ∖ ⋃(Partitions).
+    {_Nodes, Rs, Ps} = lists:unzip3(Rest),
+    URunning = ordsets:union(lists:map(fun ordsets:from_list/1, [R0 | Rs])),
+    UPartitions = ordsets:union(lists:map(fun ordsets:from_list/1, [P0 | Ps])),
+    {ordsets:subtract(URunning, UPartitions), UPartitions};
 find_heal_plan([]) ->
     {}.
 
