@@ -110,8 +110,9 @@ handle_cast({confirm, TargetNode, Status}, State) ->
 
 handle_cast(Msg = {report_partition, _Node}, State) ->
     {noreply, autoheal_handle_msg(Msg, State)};
-
 handle_cast(Msg = {heal_partition, _SplitView}, State) ->
+    {noreply, autoheal_handle_msg(Msg, State)};
+handle_cast(Msg = {heal_cluster, _, _}, State) ->
     {noreply, autoheal_handle_msg(Msg, State)};
 
 handle_cast(Msg, State) ->
@@ -141,6 +142,12 @@ handle_info({mnesia_system_event, {mnesia_up, Node}},
     case lists:member(Node, Partitions) of
         false -> ok;
         true -> ekka_membership:partition_healed(Node)
+    end,
+    %% If there was an anymmetric cluster partition, we might need more
+    %% autoheal iterations to completely bring the cluster back to normal.
+    case ekka_autoheal:enabled() of
+        {true, _} -> run_after(3000, confirm_partition);
+        false -> ignore
     end,
     {noreply, State#state{partitions = lists:delete(Node, Partitions)}};
 

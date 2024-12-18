@@ -9,10 +9,10 @@ jobs:
         runs-on: ubuntu-latest
 
         container:
-            image: erlang:22.1
+            image: erlang:24
 
         steps:
-        - uses: actions/checkout@v1
+        - uses: actions/checkout@v4
         - name: Run tests
           run: |
             make eunit
@@ -23,12 +23,12 @@ jobs:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           run: |
               make coveralls
-        - uses: actions/upload-artifact@v1
+        - uses: actions/upload-artifact@v4
           if: always()
           with:
             name: logs
             path: _build/test/logs
-        - uses: actions/upload-artifact@v1
+        - uses: actions/upload-artifact@v4
           with:
             name: cover
             path: _build/test/cover
