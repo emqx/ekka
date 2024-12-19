@@ -26,7 +26,7 @@
         ]).
 
 discover(Options) ->
-    {ok, proplists:get_value(seeds, Options, [])}.
+    {ok, proplists:get_value(seeds, Options, [node()])}.
 
 lock(_Options) ->
     ignore.

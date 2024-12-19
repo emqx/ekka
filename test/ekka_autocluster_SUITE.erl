@@ -147,6 +147,26 @@ t_autocluster_via_dns(_Config) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+t_autocluster_via_dns_laggy(_Config) ->
+    N1 = ekka_ct:start_slave(ekka, n1),
+    ?check_trace(
+      #{timetrap => 15000},
+      try
+          ok = ekka_ct:wait_running(N1),
+          ok = set_app_env(N1, {dns, [{name, "thishostnameshouldnotexist"},
+                                      {app, "ct"}
+                                     ]}),
+          {ok, {ok, #{}}} = ?wait_async_action(
+            rpc:call(N1, ekka, autocluster, []),
+            #{?snk_kind := ekka_maybe_run_app_again}),
+          ok = set_app_env(N1, {dns, ?DNS_OPTIONS}),
+          ok = wait_for_node(N1),
+          ok = ekka:force_leave(N1)
+      after
+          ok = ekka_ct:stop_slave(N1)
+      end,
+      []).
+
 %%--------------------------------------------------------------------
 %% Autocluster via 'etcd' strategy
 
