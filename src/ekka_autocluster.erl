@@ -173,6 +173,9 @@ strategy_module(Strategy) ->
 discover_and_join(Mod, Options) ->
     ?tp(ekka_autocluster_discover_and_join, #{mod => Mod}),
     try ekka_cluster_strategy:discover(Mod, Options) of
+        {ok, []} ->
+            ?LOG(info, "Discovery result is empty", []),
+            error;
         {ok, Nodes} ->
             {AliveNodes, DeadNodes} = lists:partition(
                                         fun ekka_node:is_aliving/1,
@@ -202,8 +205,6 @@ discover_and_join(Mod, Options) ->
     end.
 
 -spec maybe_join([node()]) -> ignore | ok | {error, _}.
-maybe_join([]) ->
-    ignore;
 maybe_join(Nodes0) ->
     Nodes = lists:usort(Nodes0),
     KnownNodes = lists:usort(ekka_mnesia:cluster_nodes(all)),
@@ -212,16 +213,13 @@ maybe_join(Nodes0) ->
             ?LOG(info, "all discovered nodes already in cluster; ignoring", []),
             ignore;
         false ->
-            OldestNode = find_oldest_node(Nodes),
-            ?LOG(info, "joining with ~p", [OldestNode]),
-            join_with(OldestNode)
+            join_with(find_oldest_node(Nodes -- [node()]))
     end.
 
 join_with(false) ->
-    ignore;
-join_with(Node) when Node =:= node() ->
-    ignore;
+    {error, no_member};
 join_with(Node) ->
+    ?LOG(info, "joining with ~p", [Node]),
     ekka_cluster:join(Node).
 
 find_oldest_node([Node]) ->
@@ -241,4 +239,5 @@ find_oldest_node(Nodes) ->
 
 log_error(Format, {error, Reason}) ->
     ?LOG(error, Format ++ " error: ~p", [Reason]);
-log_error(_Format, _Ok) -> ok.
+log_error(_Format, _Ok) ->
+    ok.
