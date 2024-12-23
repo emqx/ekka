@@ -99,9 +99,9 @@ parse_response({ok, {{_, Code, _}, _Headers, Body}}) ->
 parse_response({ok, {Code, Body}}) ->
     parse_response({ok, Code, Body});
 parse_response({ok, 200, Body}) ->
-    {ok, jiffy:decode(iolist_to_binary(Body), [return_maps])};
+    {ok, jsone:decode(iolist_to_binary(Body))};
 parse_response({ok, 201, Body}) ->
-    {ok, jiffy:decode(iolist_to_binary(Body), [return_maps])};
+    {ok, jsone:decode(iolist_to_binary(Body))};
 parse_response({ok, 204, _Body}) ->
     {ok, []};
 parse_response({ok, Code, Body}) ->

@@ -30,7 +30,7 @@ do(_Req = #mod{method = "GET", request_uri = "/v2/keys/" ++ _Uri}) ->
                                    Nodes)
                    }
             },
-    Response = {200, binary_to_list(jiffy:encode(Body))},
+    Response = {200, binary_to_list(jsone:encode(Body))},
     {proceed, [{response, Response}]};
 do(_Req = #mod{request_uri = "/v2/keys/" ++ _Uri}) ->
     {proceed, [{response, {200, "{\"errorCode\": 0}"}}]};
