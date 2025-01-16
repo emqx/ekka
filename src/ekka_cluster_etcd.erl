@@ -343,9 +343,9 @@ init(Options) ->
     Servers = proplists:get_value(server, Options, []),
     Prefix = proplists:get_value(prefix, Options),
     Hosts = [remove_scheme(Server) || Server <- Servers],
-    {Transport, TransportOpts} = case ssl_options(Options) of
-        [] -> {tcp, []};
-        [SSL] -> SSL
+    TransportOpts = case ssl_options(Options) of
+        [] -> [{transport, tcp}];
+        [{ssl, TLSOpts}] -> [{transport, tls}, {tls_opts, TLSOpts}]
     end,
     %% At the time of writing, the etcd connection process does not
     %% close when this process dies.  So, when this processes is
@@ -354,7 +354,7 @@ init(Options) ->
     %% that no connection with this name exists before opening it
     %% (again).
     eetcd:close(?MODULE),
-    {ok, _Pid} = eetcd:open(?MODULE, Hosts, Transport, TransportOpts),
+    {ok, _Pid} = eetcd:open(?MODULE, Hosts, TransportOpts),
     {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, 5),
     {ok, Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
     true = link(Pid2),
