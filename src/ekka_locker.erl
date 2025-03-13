@@ -133,6 +133,7 @@ acquire(Name, Resource, local, Piggyback) when is_atom(Name) ->
     acquire_lock(Name, lock_obj(Resource), Piggyback);
 acquire(Name, Resource, leader, Piggyback) when is_atom(Name)->
     Leader = mria_membership:leader(),
+    %% @FIXME: 1) the target Nodes are dynamic which may make subsequent release call to different nodes, causing deadlock
     case rpc:call(Leader, ?MODULE, acquire_lock,
                   [Name, lock_obj(Resource), Piggyback]) of
         Err = {badrpc, _Reason} ->
@@ -142,6 +143,8 @@ acquire(Name, Resource, leader, Piggyback) when is_atom(Name)->
 acquire(Name, Resource, quorum, Piggyback) when is_atom(Name) ->
     Ring = mria_membership:ring(up),
     Nodes = ekka_ring:find_nodes(Resource, Ring),
+    %% @FIXME: 1) the target Nodes are dynamic which may make subsequent release call to different nodes, causing deadlock
+    %% @TODO: this is used by EMQX 5.8.4 by default, maybe use mnesia:transaction/1 with limited retries is cheaper?
     acquire_locks(Nodes, Name, lock_obj(Resource), Piggyback);
 
 acquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
@@ -151,9 +154,13 @@ acquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
 acquire_locks(Nodes, Name, LockObj, Piggyback) ->
     {ResL, _BadNodes}
         = rpc:multicall(Nodes, ?MODULE, acquire_lock, [Name, LockObj, Piggyback], ?MC_TIMEOUT),
+    %% @FIXME: it ignores _BadNodes, leaving inconsistent lock within the cluster.
+    %%         e.g. lock is acquired on all nodes but with different owners
     case merge_results(ResL) of
         Res = {true, _}  -> Res;
         Res = {false, _} ->
+            %% @FIXME 1) it doesn't check the return value of release_lock, may leave lock on the unrechable node
+            %% @FIXME 2) it should only release_lock on the nodes that have acquired the lock or timeoutd nodes
             rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj], ?MC_TIMEOUT),
             Res
     end.
@@ -169,10 +176,15 @@ acquire_lock(Name, LockObj = #lock{resource = Resource, owner = Owner}) ->
             true;
         [1, 1] -> %% has already been locked, either by self or by others
             case ets:lookup(Name, Resource) of
+                %% @FIXME: risk for nested lock, it is unsafe to check the owner
+                %%         as unlock may remove the outer lock
+                %%         better to return lock obj to distinguish
                 [#lock{owner = Owner}] -> true;
-                _Other -> false
+                _Other ->
+                    false
             end
     catch
+        %% @FIXME: this hides the error when table doesn't exist, then why do we need this lock?
         error:badarg ->
             %% While remote node is booting, this might fail because
             %% the ETS table has not been created at that moment
@@ -212,15 +224,23 @@ release(Name, Resource, leader) ->
 release(Name, Resource, quorum) ->
     Ring = mria_membership:ring(up),
     Nodes = ekka_ring:find_nodes(Resource, Ring),
+    %% @FIXME: 1) the target Nodes are dynamic that we may release the lock on
+    %%            different nodes than acquired nodes. this may cause unreleased lock
+    %%            then deadlock cluster until check_lease.
+    %%         note, Here it creates another lock obj using different timestamp.
     release_locks(Nodes, Name, lock_obj(Resource));
 release(Name, Resource, all) ->
     release_locks(mria_membership:nodelist(up), Name, lock_obj(Resource)).
 
 release_locks(Nodes, Name, LockObj) ->
+    %% @FIXME: it ignores _BadNodes, leaving inconsistent lock within the cluster
     {ResL, _BadNodes} = rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj], ?MC_TIMEOUT),
     merge_results(ResL).
 
 release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
+    %% @FIXME: it releases the lock which is not the same lock, although the owner is the same
+    %%         It is buggy in nested lock scenario that onter lock is released here
+    %%         but outer still think it holds the lock
     Res = try ets:lookup(Name, Resource) of
               [Lock = #lock{owner = Owner}] ->
                   ets:delete_object(Name, Lock);
@@ -231,6 +251,7 @@ release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
           end,
     {Res, [node()]}.
 
+%% @FIXME 1: it doesn't handle the '{badrpc, _}' in ResL,  may crash
 merge_results(ResL) ->
     merge_results(ResL, [], []).
 merge_results([], Succ, []) ->
@@ -249,6 +270,8 @@ merge_results([{false, Res}|ResL], Succ, Failed) ->
 init([Name, LeaseTime]) ->
     Tab = ets:new(Name, [public, set, named_table, {keypos, 2},
                          {read_concurrency, true}, {write_concurrency, true}]),
+    %% @TODO: 1. this makes possible to have multiple check_lease event in the mailbox
+    %%         then the interval isn't assured.
     TRef = timer:send_interval(LeaseTime * 2, check_lease),
     Lease = #lease{expiry = LeaseTime, timer = TRef},
     {ok, #state{locks = Tab, lease = Lease, monitors = #{}}}.
@@ -272,21 +295,35 @@ handle_info(check_lease, State = #state{locks = Tab, lease = Lease, monitors = M
                               case is_set_elem(Resource, ResourceSet) of
                                   true ->
                                       %% force kill it as it might have hung
+                                      %% @FIXME: kill the process leaves the lock in the cluster, leaving deadlock until the 'EXIT' signal is handled on *ALL* nodes.
+                                      %% the problem is the other nodes they are EMQX 'core' nodes while the process is most likely on the 'replicant' node.
+                                      %% if replicant is unreachable, or EXIT was sent lately the lock will stuck.
+                                      %% if we assume better network connectivity among core nodes, we should tell them to remove the lock now.
                                       _ = spawn(fun() -> force_kill_lock_owner(Owner, Resource) end),
                                       MonAcc;
                                   false ->
+                                      %%% @FIXME: If it is monitored, while resource is not in the set, that means we have other stuck lock,
+                                      %%%         we should kill the owner process. Or this is dead code for EMQX
                                       maps:put(Owner, set_put(Resource, ResourceSet), MonAcc)
                               end;
                           error ->
+                              %% @FIXME:  1. monitor remote process isn't cheap.
+                              %%          2. worth to check if the owner is already dead after monitor using the 'MRef' with timeout 0.
+                              %%             and remove the lock ASAP if dead otherwise have to wait for the next check_lease event.
                               _MRef = erlang:monitor(process, Owner),
                               maps:put(Owner, set_put(Resource, #{}), MonAcc)
                       end
+                      %% @TODO: We could do batch remove from monitor map here
                   end, Monitors, check_lease(Tab, Lease, erlang:system_time(millisecond))),
+    %% @TODO: why it always hibernate? we just did a ets:select, heap may be quite large
     {noreply, State#state{monitors = Monitors1}, hibernate};
 
+
+%% @FIXME: this only handles for monitored process, for already dead process, it doesn't release the lock until 2x check_lease.
 handle_info({'DOWN', _MRef, process, DownPid, _Reason},
             State = #state{locks = Tab, monitors = Monitors}) ->
     case maps:find(DownPid, Monitors) of
+        %%% If the owner process is down, we release all the locks.
         {ok, ResourceSet} ->
             lists:foreach(
               fun(Resource) ->
@@ -333,6 +370,8 @@ is_set_elem(Resource, ResourceSet) when is_map(ResourceSet) ->
 force_kill_lock_owner(Pid, Resource) ->
     logger:error("kill ~p as it has held the lock for too long, resource: ~p", [Pid, Resource]),
     Fields = [status, message_queue_len, current_stacktrace],
+    %% @TODO: it could be merged into a single rpc call with 'kill', if remote pid doesn't exist, no need to kill it.
+    %% @TODO: bring back the current stack trace may be heavy lift and it hurts local node, we prefer to print on remote node.
     Status = rpc:call(node(Pid), erlang, process_info, [Pid, Fields], 5000),
     logger:error("lock_owner_status:~n~p", [Status]),
     _ = exit(Pid, kill),
