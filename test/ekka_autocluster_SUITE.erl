@@ -246,7 +246,7 @@ t_autocluster_etcd_lock_failure(_Config) ->
 %% Autocluster via 'k8s' strategy
 
 t_autocluster_via_k8s(_Config) ->
-    {ok, _} = start_k8sapi_server(6000),
+    {ok, _} = start_k8sapi_server(6000, []),
     N1 = ekka_ct:start_slave(ekka, n1),
     try
         ok = ekka_ct:wait_running(N1),
@@ -260,8 +260,25 @@ t_autocluster_via_k8s(_Config) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+t_autocluster_via_k8s_ipv6(_Config) ->
+    {ok, _} = start_k8sapi_server(6000, [{bind_address, any}, {ipfamily, inet6}]),
+    N1 = ekka_ct:start_slave(ekka, n1),
+    try
+        K8SOptions = lists:keystore(apiserver, 1, ?K8S_OPTIONS,
+                                    {apiserver, "http://[::1]:6000"}),
+        ok = ekka_ct:wait_running(N1),
+        ok = set_app_env(N1, {k8s, K8SOptions}),
+        rpc:call(N1, ekka, autocluster, []),
+        ok = wait_for_node(N1),
+        ?assertMatch([_|_], rpc:call(N1, ekka_autocluster, core_node_discovery_callback, [])),
+        ok = ekka:force_leave(N1)
+    after
+        ok = stop_http_server(any, 6000),
+        ok = ekka_ct:stop_slave(N1)
+    end.
+
 t_autocluster_k8s_lock_failure(_Config) ->
-    {ok, _} = start_k8sapi_server(6000),
+    {ok, _} = start_k8sapi_server(6000, []),
     N1 = ekka_ct:start_slave(ekka, n1),
     try
         ok = ekka_ct:wait_running(N1),
@@ -422,20 +439,21 @@ wait_for_node(Node, Cnt) ->
     end.
 
 start_etcd_server(Port) ->
-    start_http_server(Port, mod_etcd).
+    start_http_server(Port, mod_etcd, [{server_name, "etcd"}]).
 
-start_k8sapi_server(Port) ->
-    start_http_server(Port, mod_k8s_api).
+start_k8sapi_server(Port, Overrides) ->
+    start_http_server(Port, mod_k8s_api, [{server_name, "k8s"} | Overrides]).
 
-start_http_server(Port, Mod) ->
-    Res = inets:start(httpd, [{port, Port},
-                              {server_name, "etcd"},
-                              {server_root, "."},
-                              {document_root, "."},
-                              {bind_address, "localhost"},
-                              {modules, [Mod]}
-                             ]),
-    case Res of
+start_http_server(Port, Mod, Overrides) ->
+    Service = lists:foldl(
+        fun(Opt = {N, _}, Acc) -> lists:keystore(N, 1, Acc, Opt) end,
+        [{port, Port},
+         {server_root, "."},
+         {document_root, "."},
+         {bind_address, "localhost"},
+         {modules, [Mod]}],
+        Overrides),
+    case inets:start(httpd, Service) of
         {error, {already_started, Pid}} ->
             {ok, Pid};
         Err ->
@@ -443,13 +461,13 @@ start_http_server(Port, Mod) ->
     end.
 
 stop_etcd_server(Port) ->
-    stop_http_server(Port).
+    stop_http_server({127,0,0,1}, Port).
 
 stop_k8sapi_server(Port) ->
-    stop_http_server(Port).
+    stop_http_server({127,0,0,1}, Port).
 
-stop_http_server(Port) ->
-    inets:stop(httpd, {{127,0,0,1}, Port}).
+stop_http_server(Host, Port) ->
+    inets:stop(httpd, {Host, Port}).
 
 assert_unlocked(StrategyMod, Node) ->
     %% simulate a failure like timeout
