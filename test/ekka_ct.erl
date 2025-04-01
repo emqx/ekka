@@ -108,3 +108,34 @@ is_tcp_server_available(Host, Port) ->
         {error, _} ->
             false
     end.
+
+%% @doc Return non-scope-local IPv6 addresses for a host, assigned to any
+%% non-loopback network interface.
+host_ipv6_addrs() ->
+    case inet:getifaddrs() of
+        {ok, IfAddrs} ->
+            Addrs = lists:flatmap(
+                fun({_IfName, Props}) ->
+                    Flags = proplists:get_value(flags, Props, []),
+                    Up = lists:member(up, Flags),
+                    Running = lists:member(running, Flags),
+                    Loopback = lists:member(loopback, Flags),
+                    case Up andalso Running andalso not Loopback of
+                        true  -> iface_ipv6_addrs(Props);
+                        false -> []
+                    end
+                end,
+                IfAddrs
+            ),
+            {ok, Addrs};
+        Error ->
+            Error
+    end.
+
+%% @doc Return all non-scope-local IPv6 addresses for a network interface.
+iface_ipv6_addrs(Props) ->
+    [
+        Addr
+     || {addr, Addr = {O1, _, _, _, _, _, _, _}} <- Props,
+        O1 =/= 16#FE80
+    ].

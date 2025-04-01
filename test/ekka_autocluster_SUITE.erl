@@ -187,7 +187,7 @@ t_autocluster_via_k8s(_Config) ->
     end.
 
 t_autocluster_via_k8s_ipv6('init', Config) ->
-    case ekka_httpc:host_ipv6_addrs() of
+    case ekka_ct:host_ipv6_addrs() of
         {ok, [_ | _]} -> Config;
         {ok, []} -> {skip, "No IPv6 capability detected"}
     end;
@@ -196,7 +196,7 @@ t_autocluster_via_k8s_ipv6('end', _Config) ->
 
 t_autocluster_via_k8s_ipv6(_Config) ->
     {ok, _} = start_k8sapi_server(6000, [{bind_address, any}, {ipfamily, inet6}]),
-    N1 = ekka_ct:start_slave(ekka, n1),
+    N1 = ekka_ct:start_slave(ekka, n1, [{ekka, httpc_options, [{ipfamily, inet6fb4}]}]),
     try
         K8SOptions = lists:keystore(apiserver, 1, ?K8S_OPTIONS,
                                     {apiserver, "http://[::1]:6000"}),

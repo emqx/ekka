@@ -83,50 +83,7 @@ httpc_request(Method, Req, HttpOpts) ->
     httpc:request(Method, Req, HttpOpts, [], ?PROFILE).
 
 httpc_profile_opts() ->
-    %% NOTE
-    %% If host has at least one non-scope-local non-loopback IPv6 address,
-    %% consider it IPv6-capable. This check skips resolver (because it can
-    %% introduce non-trivial delay in the startup sequence), and thus is
-    %% imprecise.
-    case host_ipv6_addrs() of
-        {ok, [_ | _]} ->
-            [{ipfamily, inet6fb4}];
-        _Otherwise ->
-            []
-    end.
-
-%% @doc Return non-scope-local IPv6 addresses for a host, assigned to any
-%% non-loopback network interface.
-host_ipv6_addrs() ->
-    case inet:getifaddrs() of
-        {ok, IfAddrs} ->
-            Addrs = lists:flatmap(
-                fun({_IfName, Props}) ->
-                    Flags = proplists:get_value(flags, Props, []),
-                    Up = lists:member(up, Flags),
-                    Running = lists:member(running, Flags),
-                    Loopback = lists:member(loopback, Flags),
-                    case Up andalso Running andalso not Loopback of
-                        true ->
-                            iface_ipv6_addrs(Props);
-                        false ->
-                            []
-                    end
-                end,
-                IfAddrs
-            ),
-            {ok, Addrs};
-        Error ->
-            Error
-    end.
-
-%% @doc Return all non-scope-local IPv6 addresses for a network interface.
-iface_ipv6_addrs(Props) ->
-    [
-        Addr
-     || {addr, Addr = {O1, _, _, _, _, _, _, _}} <- Props,
-        O1 =/= 16#FE80
-    ].
+    ekka:env(httpc_options, []).
 
 -spec build_url(string(), string()) -> string().
 build_url(Addr, Path) ->

@@ -2,6 +2,11 @@
  [{description, "Autocluster for EMQX Broker"},
   {vsn, "git"},
   {mod, {ekka_app,[]}},
+  {env, [
+    %% HTTP CLient profile config. See `httpc:set_options/2`.
+    %% Example:
+    %% {httpc_options, [{ipfamily, inet6fb4}]}
+  ]},
   {registered,
    [ekka_sup,
     ekka_cluster_sup
