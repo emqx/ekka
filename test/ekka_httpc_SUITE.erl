@@ -32,29 +32,29 @@ end_per_testcase(_TestCase, Config) ->
     Config.
 
 t_get(_) ->
-    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _, _Profile) ->
                                              {ok, {{"HTTP/1.1", 204, "OK"}, [], <<"[]">>}}
                                      end),
     {ok, []} = ekka_httpc:get("localhost", "nodes", [{name, <<"node1">>}]),
-    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _, _Profile) ->
                                              {ok, {{"HTTP/1.1", 200, "OK"}, [], <<"{\"key\": \"value\"}">>}}
                                      end),
     {ok, #{<<"key">> := <<"value">>}} = ekka_httpc:get("localhost", "nodes", [{name, <<"node1">>}]).
 
 t_post(_) ->
-    ok = meck:expect(httpc, request, fun(post, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(post, _Req, _Opts, _, _Profile) ->
                                              {ok, {201, <<"{\"code\": 0}">>}}
                                      end),
     {ok, #{<<"code">> := 0}} = ekka_httpc:post("localhost", "path", [{name, <<"x">>}]).
 
 t_put(_) ->
-    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _, _Profile) ->
                                              {ok, {200, <<"{\"code\": 0}">>}}
                                      end),
     {ok, #{<<"code">> := 0}} = ekka_httpc:put("localhost", "path", [{name, <<"x">>}]).
 
 t_delete(_) ->
-    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _, _Profile) ->
                                              {ok, {200, <<"{\"code\": 0}">>}}
                                      end),
     {ok, #{<<"code">> := 0}} = ekka_httpc:delete("localhost", "path", [{name, <<"x">>}]).

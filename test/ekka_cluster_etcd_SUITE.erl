@@ -50,17 +50,17 @@ end_per_testcase(TestCase, _Config) ->
 
 t_discover(_Config) ->
     Json = <<"{\"node\": {\"nodes\": [{\"key\": \"ekkacl/n1@127.0.0.1\"}]}}">>,
-    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) -> {ok, 200, Json} end),
+    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _, _Profile) -> {ok, 200, Json} end),
     {ok, ['n1@127.0.0.1']} = ekka_cluster_strategy:discover(ekka_cluster_etcd, ?OPTIONS).
 
 t_lock(_Config) ->
-    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _, _Profile) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
     ok = ekka_cluster_strategy:lock(ekka_cluster_etcd, ?OPTIONS).
 
 t_unlock(_) ->
-    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _, _Profile) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
     ok = ekka_cluster_strategy:unlock(ekka_cluster_etcd, ?OPTIONS).
@@ -68,14 +68,14 @@ t_unlock(_) ->
 t_register(_) ->
     ok = meck:new(ekka_cluster_sup, [non_strict, passthrough, no_history]),
     ok = meck:expect(ekka_cluster_sup, start_child, fun(_, _) -> {ok, self()} end),
-    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _, _Profile) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
     ok = ekka_cluster_strategy:register(ekka_cluster_etcd, ?OPTIONS),
     ok = meck:unload(ekka_cluster_sup).
 
 t_unregister(_) ->
-    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _, _Profile) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
     ok = meck:expect(ekka_cluster_sup, stop_child, fun(_) -> ok end),
@@ -83,7 +83,7 @@ t_unregister(_) ->
     ok = meck:unload(ekka_cluster_sup).
 
 t_etcd_set_node_key(_) ->
-    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _, _Profile) ->
                                              {ok, 200, <<"{\"errorCode\": 0}">>}
                                      end),
     {ok, #{<<"errorCode">> := 0}} = ekka_cluster_etcd:etcd_set_node_key(?OPTIONS).

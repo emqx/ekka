@@ -33,7 +33,7 @@ all() -> ekka_ct:all(?MODULE).
 t_discover(_) ->
     ok = meck:new(httpc, [non_strict, passthrough, no_history]),
     Json = <<"{\"subsets\": [{\"addresses\": [{\"ip\": \"192.168.10.10\"}]}]}">>,
-    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) ->
+    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _, _Profile) ->
                                              {ok, {{"HTTP/1.1", 200, "OK"}, [], Json}}
                                      end),
     {ok, ['ekka@192.168.10.10']} = ekka_cluster_strategy:discover(ekka_cluster_k8s, [{app_name, "ekka"} | ?OPTIONS]),
