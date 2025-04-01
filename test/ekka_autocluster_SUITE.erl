@@ -56,91 +56,17 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
-init_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
+init_per_testcase(TestCase, Config) ->
     _ = inets:start(),
     ok = application:set_env(ekka, cluster_name, ekka),
     ok = application:set_env(ekka, cluster_enable, true),
     ok = ekka:start(),
-    application:set_env(ekka, test_etcd_nodes,
-                        ["n1@127.0.0.1", "ct@127.0.0.1", "n2@127.0.0.1"]),
-    {ok, _} = start_etcd_server(2379),
-    Nodes = [ekka_ct:start_slave(ekka, N) || N <- [n1, n2]],
-    lists:foreach(
-      fun(Node) ->
-              ok = set_app_env(Node, {etcd, ?ETCD_OPTIONS}),
-              ok = setup_cover(Node),
-              ekka:leave()
-      end,
-      Nodes),
-    ok = set_app_env(node(), {etcd, ?ETCD_OPTIONS}),
-    [ {nodes, Nodes}
-    | Config];
-init_per_testcase(t_core_node_discovery_callback, Config) ->
-    _ = inets:start(),
-    ok = application:set_env(ekka, cluster_name, ekka),
-    ok = application:set_env(ekka, cluster_enable, true),
-    ok = ekka:start(),
-    {ok, _} = start_etcd_server(2379),
-    application:set_env(ekka, test_etcd_nodes, [ "ct@127.0.0.1"
-                                               , "n1@127.0.0.1"
-                                               , "n2@127.0.0.1"
-                                               ]),
-    N1 = ekka_ct:start_slave(ekka, n1, [ {mria, db_backend, rlog}
-                                       ]),
-    N2 = ekka_ct:start_slave(ekka, n2, [ {mria, db_backend, rlog}
-                                       , {mria, node_role, replicant}
-                                       ]),
-    [ {nodes, [N1, N2]}
-    | Config];
-init_per_testcase(t_run_again_when_not_registered, Config) ->
-    _ = inets:start(),
-    ok = application:set_env(ekka, cluster_name, ekka),
-    ok = application:set_env(ekka, cluster_enable, true),
-    ok = ekka:start(),
-    {ok, _} = start_etcd_server(2379),
-    application:set_env(ekka, test_etcd_nodes, [ "ct@127.0.0.1"
-                                               , "n1@127.0.0.1"
-                                               ]),
-    N1 = ekka_ct:start_slave(ekka, n1, [ {mria, db_backend, rlog}
-                                       ]),
-    [ {nodes, [N1]}
-    | Config];
-init_per_testcase(_TestCase, Config) ->
-    _ = inets:start(),
-    ok = application:set_env(ekka, cluster_name, ekka),
-    ok = application:set_env(ekka, cluster_enable, true),
-    ok = ekka:start(),
-    Config.
+    try ?MODULE:TestCase('init', Config)
+    catch error:undef -> Config end.
 
-end_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
-    [N1, N2] = ?config(nodes, Config),
-    ekka:force_leave(N1),
-    ekka:force_leave(N2),
-    ok = ekka_ct:stop_slave(N1),
-    ok = ekka_ct:stop_slave(N2),
-    ok = stop_etcd_server(2379),
-    application:unset_env(ekka, test_etcd_nodes),
-    catch meck:unload(ekka_node),
-    ok;
-end_per_testcase(t_core_node_discovery_callback, Config) ->
-    [N1, N2] = ?config(nodes, Config),
-    ekka:force_leave(N1),
-    ekka:force_leave(N2),
-    ok = ekka_ct:stop_slave(N1),
-    ok = ekka_ct:stop_slave(N2),
-    ok = stop_etcd_server(2379),
-    application:unset_env(ekka, test_etcd_nodes),
-    ok;
-end_per_testcase(t_run_again_when_not_registered, Config) ->
-    [N1] = ?config(nodes, Config),
-    ekka:force_leave(N1),
-    ok = ekka_ct:stop_slave(N1),
-    ok = stop_etcd_server(2379),
-    application:unset_env(ekka, test_etcd_nodes),
-    ok;
-end_per_testcase(TestCase, _Config) ->
-    ekka_ct:cleanup(TestCase),
-    ok.
+end_per_testcase(TestCase, Config) ->
+    catch ?MODULE:TestCase('end', Config),
+    ekka_ct:cleanup(TestCase).
 
 %%--------------------------------------------------------------------
 %% Autocluster via 'static' strategy
@@ -260,6 +186,14 @@ t_autocluster_via_k8s(_Config) ->
         ok = ekka_ct:stop_slave(N1)
     end.
 
+t_autocluster_via_k8s_ipv6('init', Config) ->
+    case ekka_httpc:host_ipv6_addrs() of
+        {ok, [_ | _]} -> Config;
+        {ok, []} -> {skip, "No IPv6 capability detected"}
+    end;
+t_autocluster_via_k8s_ipv6('end', _Config) ->
+    ok.
+
 t_autocluster_via_k8s_ipv6(_Config) ->
     {ok, _} = start_k8sapi_server(6000, [{bind_address, any}, {ipfamily, inet6}]),
     N1 = ekka_ct:start_slave(ekka, n1),
@@ -288,6 +222,30 @@ t_autocluster_k8s_lock_failure(_Config) ->
         ok = stop_k8sapi_server(6000),
         ok = ekka_ct:stop_slave(N1)
     end.
+
+t_autocluster_retry_when_missing_nodes('init', Config) ->
+    application:set_env(ekka, test_etcd_nodes,
+                        ["n1@127.0.0.1", "ct@127.0.0.1", "n2@127.0.0.1"]),
+    {ok, _} = start_etcd_server(2379),
+    Nodes = [ekka_ct:start_slave(ekka, N) || N <- [n1, n2]],
+    lists:foreach(
+      fun(Node) ->
+              ok = set_app_env(Node, {etcd, ?ETCD_OPTIONS}),
+              ok = setup_cover(Node),
+              ekka:leave()
+      end,
+      Nodes),
+    ok = set_app_env(node(), {etcd, ?ETCD_OPTIONS}),
+    [{nodes, Nodes} | Config];
+t_autocluster_retry_when_missing_nodes('end', Config) ->
+    [N1, N2] = ?config(nodes, Config),
+    ekka:force_leave(N1),
+    ekka:force_leave(N2),
+    ok = ekka_ct:stop_slave(N1),
+    ok = ekka_ct:stop_slave(N2),
+    ok = stop_etcd_server(2379),
+    application:unset_env(ekka, test_etcd_nodes),
+    catch meck:unload(ekka_node).
 
 t_autocluster_retry_when_missing_nodes(Config) ->
     Nodes = [N1, N2] = ?config(nodes, Config),
@@ -333,6 +291,27 @@ t_autocluster_retry_when_missing_nodes(Config) ->
 %%--------------------------------------------------------------------
 %% Core node discovery callback
 
+t_core_node_discovery_callback('init', Config) ->
+    {ok, _} = start_etcd_server(2379),
+    application:set_env(ekka, test_etcd_nodes, [ "ct@127.0.0.1"
+                                               , "n1@127.0.0.1"
+                                               , "n2@127.0.0.1"
+                                               ]),
+    N1 = ekka_ct:start_slave(ekka, n1, [ {mria, db_backend, rlog}
+                                       ]),
+    N2 = ekka_ct:start_slave(ekka, n2, [ {mria, db_backend, rlog}
+                                       , {mria, node_role, replicant}
+                                       ]),
+    [{nodes, [N1, N2]} | Config];
+t_core_node_discovery_callback('end', Config) ->
+    [N1, N2] = ?config(nodes, Config),
+    ekka:force_leave(N1),
+    ekka:force_leave(N2),
+    ok = ekka_ct:stop_slave(N1),
+    ok = ekka_ct:stop_slave(N2),
+    ok = stop_etcd_server(2379),
+    application:unset_env(ekka, test_etcd_nodes).
+
 t_core_node_discovery_callback(Config) ->
     [N1, N2] = ?config(nodes, Config),
     ok = ekka_ct:wait_running(N1),
@@ -377,6 +356,21 @@ t_singleton(_Config) ->
 %%--------------------------------------------------------------------
 %% Misc tests
 %%--------------------------------------------------------------------
+
+t_run_again_when_not_registered('init', Config) ->
+    {ok, _} = start_etcd_server(2379),
+    application:set_env(ekka, test_etcd_nodes, [ "ct@127.0.0.1"
+                                               , "n1@127.0.0.1"
+                                               ]),
+    N1 = ekka_ct:start_slave(ekka, n1, [ {mria, db_backend, rlog}
+                                       ]),
+    [{nodes, [N1]} | Config];
+t_run_again_when_not_registered('end', Config) ->
+    [N1] = ?config(nodes, Config),
+    ekka:force_leave(N1),
+    ok = ekka_ct:stop_slave(N1),
+    ok = stop_etcd_server(2379),
+    application:unset_env(ekka, test_etcd_nodes).
 
 t_run_again_when_not_registered(Config) ->
     [N1] = ?config(nodes, Config),
