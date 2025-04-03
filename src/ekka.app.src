@@ -10,6 +10,7 @@
    [kernel,
     stdlib,
     inets,
+    hackney,
     eetcd,
     jsone,
     snabbkaffe,
