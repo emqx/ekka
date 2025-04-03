@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2022, 2025 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -39,53 +39,55 @@ init_per_testcase(t_restart_process, Config) ->
             {skip, no_etcd}
     end;
 init_per_testcase(_TestCase, Config) ->
-    ok = meck:new(httpc, [non_strict, passthrough, no_history]),
+    ok = meck:new(ekka_httpc, [non_strict, no_history]),
     Config.
 
 end_per_testcase(t_restart_process, _Config) ->
     application:stop(eetcd);
 end_per_testcase(TestCase, _Config) ->
-    ok = meck:unload(httpc),
+    ok = meck:unload(ekka_httpc),
     ekka_ct:cleanup(TestCase).
 
 t_discover(_Config) ->
     Json = <<"{\"node\": {\"nodes\": [{\"key\": \"ekkacl/n1@127.0.0.1\"}]}}">>,
-    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) -> {ok, 200, Json} end),
+    ok = meck:expect(ekka_httpc, get, fun(_Server, _Path, _Params, _Opts) ->
+                                              {ok, jsone:decode(Json)}
+                                      end),
     {ok, ['n1@127.0.0.1']} = ekka_cluster_strategy:discover(ekka_cluster_etcd, ?OPTIONS).
 
 t_lock(_Config) ->
-    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
-                                             {ok, 200, <<"{\"errorCode\": 0}">>}
-                                     end),
+    ok = meck:expect(ekka_httpc, put, fun(_Server, _Path, _Params, _Opts) ->
+                                              {ok, jsone:decode(<<"{\"errorCode\": 0}">>)}
+                                      end),
     ok = ekka_cluster_strategy:lock(ekka_cluster_etcd, ?OPTIONS).
 
 t_unlock(_) ->
-    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
-                                             {ok, 200, <<"{\"errorCode\": 0}">>}
-                                     end),
+    ok = meck:expect(ekka_httpc, delete, fun(_Server, _Path, _Params, _Opts) ->
+                                                 {ok, jsone:decode(<<"{\"errorCode\": 0}">>)}
+                                         end),
     ok = ekka_cluster_strategy:unlock(ekka_cluster_etcd, ?OPTIONS).
 
 t_register(_) ->
     ok = meck:new(ekka_cluster_sup, [non_strict, passthrough, no_history]),
     ok = meck:expect(ekka_cluster_sup, start_child, fun(_, _) -> {ok, self()} end),
-    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
-                                             {ok, 200, <<"{\"errorCode\": 0}">>}
-                                     end),
+    ok = meck:expect(ekka_httpc, put, fun(_Server, _Path, _Params, _Opts) ->
+                                              {ok, jsone:decode(<<"{\"errorCode\": 0}">>)}
+                                      end),
     ok = ekka_cluster_strategy:register(ekka_cluster_etcd, ?OPTIONS),
     ok = meck:unload(ekka_cluster_sup).
 
 t_unregister(_) ->
-    ok = meck:expect(httpc, request, fun(delete, _Req, _Opts, _) ->
-                                             {ok, 200, <<"{\"errorCode\": 0}">>}
-                                     end),
+    ok = meck:expect(ekka_httpc, delete, fun(_Server, _Path, _Params, _Opts) ->
+                                                 {ok, jsone:decode(<<"{\"errorCode\": 0}">>)}
+                                         end),
     ok = meck:expect(ekka_cluster_sup, stop_child, fun(_) -> ok end),
     ok = ekka_cluster_strategy:unregister(ekka_cluster_etcd, ?OPTIONS),
     ok = meck:unload(ekka_cluster_sup).
 
 t_etcd_set_node_key(_) ->
-    ok = meck:expect(httpc, request, fun(put, _Req, _Opts, _) ->
-                                             {ok, 200, <<"{\"errorCode\": 0}">>}
-                                     end),
+    ok = meck:expect(ekka_httpc, put, fun(_Server, _Path, _Params, _Opts) ->
+                                              {ok, jsone:decode(<<"{\"errorCode\": 0}">>)}
+                                      end),
     {ok, #{<<"errorCode">> := 0}} = ekka_cluster_etcd:etcd_set_node_key(?OPTIONS).
 
 t_restart_process(_) ->
