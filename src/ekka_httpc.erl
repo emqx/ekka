@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2025 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -39,36 +39,40 @@ get(Addr, Path, Params, Headers) ->
     get(Addr, Path, Params, Headers, []).
 
 get(Addr, Path, Params, Headers, HttpOpts) ->
-    Req = {build_url(Addr, Path, Params), Headers},
-    parse_response(httpc:request(get, Req, [{autoredirect, true} | HttpOpts], [])).
+    URL = build_url(Addr, Path, Params),
+    parse_response(hackney:request(get, URL, Headers, <<>>, [with_body | HttpOpts])).
 
 post(Addr, Path, Params) ->
     post(Addr, Path, Params, []).
 
 post(Addr, Path, Params, HttpOpts) ->
-    Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", build_query(Params)},
-    parse_response(httpc:request(post, Req, [{autoredirect, true} | HttpOpts], [])).
+    URL = build_url(Addr, Path),
+    Body = build_query(Params),
+    Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
+    parse_response(hackney:request(post, URL, Headers, Body, [with_body | HttpOpts])).
 
 put(Addr, Path, Params) ->
     put(Addr, Path, Params, []).
 
 put(Addr, Path, Params, HttpOpts) ->
-    Req = {build_url(Addr, Path), [], "application/x-www-form-urlencoded", build_query(Params)},
-    parse_response(httpc:request(put, Req, [{autoredirect, true} | HttpOpts], [])).
+    URL = build_url(Addr, Path),
+    Body = build_query(Params),
+    Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
+    parse_response(hackney:request(put, URL, Headers, Body, [with_body | HttpOpts])).
 
 delete(Addr, Path, Params) ->
     delete(Addr, Path, Params, []).
 
 delete(Addr, Path, Params, HttpOpts) ->
-    Req = {build_url(Addr, Path, Params), []},
-    parse_response(httpc:request(delete, Req, HttpOpts, [])).
+    URL = build_url(Addr, Path, Params),
+    parse_response(hackney:request(delete, URL, [], <<>>, HttpOpts)).
 
--spec(build_url(string(), string()) -> string()).
+-spec(build_url(string(), string()) -> binary()).
 build_url(Addr, Path) ->
-    lists:concat([Addr, "/", Path]).
+    iolist_to_binary([Addr, "/", Path]).
 
 build_url(Addr, Path, Params) ->
-    lists:concat([build_url(Addr, Path), "?", build_query(Params)]).
+    iolist_to_binary([build_url(Addr, Path), "?", build_query(Params)]).
 
 -if(?OTP_RELEASE >= 23).
 build_query(Params) when is_list(Params) ->
@@ -94,18 +98,17 @@ urlencode(B) when is_binary(B) ->
     urlencode(binary_to_list(B)).
 -endif.
 
-parse_response({ok, {{_, Code, _}, _Headers, Body}}) ->
-    parse_response({ok, Code, Body});
-parse_response({ok, {Code, Body}}) ->
-    parse_response({ok, Code, Body});
-parse_response({ok, 200, Body}) ->
-    {ok, jsone:decode(iolist_to_binary(Body))};
-parse_response({ok, 201, Body}) ->
-    {ok, jsone:decode(iolist_to_binary(Body))};
-parse_response({ok, 204, _Body}) ->
+parse_response({ok, Status, RespHeaders, Body}) when Status =:= 200;
+                                                     Status =:= 201 ->
+    case hackney_headers:parse(<<"content-type">>, RespHeaders) of
+        {<<"application">>, <<"json">>, _} ->
+            {ok, jsone:decode(Body)};
+        CC ->
+            {error, {unexpected_content_type, CC}}
+    end;
+parse_response({ok, 204, _RespHeaders, _}) ->
     {ok, []};
-parse_response({ok, Code, Body}) ->
-    {error, {Code, Body}};
+parse_response({ok, Status, _RespHeaders, Body}) ->
+    {error, {Status, Body}};
 parse_response({error, Reason}) ->
     {error, Reason}.
-
