@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2025 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -31,15 +31,15 @@
 all() -> ekka_ct:all(?MODULE).
 
 t_discover(_) ->
-    ok = meck:new(httpc, [non_strict, passthrough, no_history]),
+    ok = meck:new(ekka_httpc, [non_strict, no_history]),
     Json = <<"{\"subsets\": [{\"addresses\": [{\"ip\": \"192.168.10.10\"}]}]}">>,
-    ok = meck:expect(httpc, request, fun(get, _Req, _Opts, _) ->
-                                             {ok, {{"HTTP/1.1", 200, "OK"}, [], Json}}
-                                     end),
+    ok = meck:expect(ekka_httpc, get, fun(_Server, _Path, _Params, _Headers, _Opts) ->
+                                              {ok, jsone:decode(Json)}
+                                      end),
     {ok, ['ekka@192.168.10.10']} = ekka_cluster_strategy:discover(ekka_cluster_k8s, [{app_name, "ekka"} | ?OPTIONS]),
     %% below test relies on rebar3 ct is run with '--name ct@127.0.0.1'
     {ok, ['ct@192.168.10.10']} = ekka_cluster_strategy:discover(ekka_cluster_k8s, ?OPTIONS),
-    ok = meck:unload(httpc).
+    ok = meck:unload(ekka_httpc).
 
 t_lock(_) ->
     ignore = ekka_cluster_static:lock([]).

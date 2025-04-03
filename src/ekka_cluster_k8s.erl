@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2025 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -83,7 +83,7 @@ unregister(_Options) ->
 %%--------------------------------------------------------------------
 
 k8s_service_get(Server, Service, Namespace) ->
-    Headers = [{"Authorization", "Bearer " ++ token()}],
+    Headers = [{<<"Authorization">>, iolist_to_binary(["Bearer ", token()])}],
     HttpOpts = case filelib:is_file(cert_path()) of
                    true  -> [{ssl, [{cacertfile, cert_path()}]}];
                    false -> [{ssl, [{verify, verify_none}]}]
@@ -97,7 +97,7 @@ service_path(Service, Namespace) ->
 %     binary_to_list(trim(read_file("namespace", <<"default">>))).
 
 token() ->
-    binary_to_list(trim(read_file("token", <<"">>))).
+    trim(read_file("token", <<"">>)).
 
 cert_path() -> ?SERVICE_ACCOUNT_PATH ++ "/ca.crt".
 
@@ -125,4 +125,3 @@ extract_host(hostname, Addr) ->
 
 extract_host(dns, Addr) ->
     binary:replace(maps:get(<<"ip">>, Addr), <<".">>, <<"-">>, [global]).
-
