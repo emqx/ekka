@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019, 2025 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2019-2025 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ t_get(Config) ->
     ?assertMatch({error, {501, _}}, ekka_httpc:get(Server, "something", [])).
 
 %% Run request towards an IPv6 listener that does not exist. Check
-%% that IP address was parsed corretly.
+%% that IP address was parsed correctly.
 t_get_ipv6(_) ->
     ?assertMatch(
        {error, econnrefused},

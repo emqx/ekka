@@ -31,15 +31,15 @@
 all() -> ekka_ct:all(?MODULE).
 
 t_discover(_) ->
-    ok = meck:new(httpc, [non_strict, passthrough, no_history]),
+    ok = meck:new(ekka_httpc, [non_strict, no_history]),
     Json = <<"{\"subsets\": [{\"addresses\": [{\"ip\": \"192.168.10.10\"}]}]}">>,
-    ok = meck:expect(hackney, request, fun(get, _Url, _, _Headers, _Opts) ->
-                                               {ok, 200, [], Json}
-                                       end),
+    ok = meck:expect(ekka_httpc, get, fun(_Server, _Path, _Params, _Headers, _Opts) ->
+                                              {ok, jsone:decode(Json)}
+                                      end),
     {ok, ['ekka@192.168.10.10']} = ekka_cluster_strategy:discover(ekka_cluster_k8s, [{app_name, "ekka"} | ?OPTIONS]),
     %% below test relies on rebar3 ct is run with '--name ct@127.0.0.1'
     {ok, ['ct@192.168.10.10']} = ekka_cluster_strategy:discover(ekka_cluster_k8s, ?OPTIONS),
-    ok = meck:unload(httpc).
+    ok = meck:unload(ekka_httpc).
 
 t_lock(_) ->
     ignore = ekka_cluster_static:lock([]).
