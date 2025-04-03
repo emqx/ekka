@@ -40,7 +40,7 @@ get(Addr, Path, Params, Headers) ->
 
 get(Addr, Path, Params, Headers, HttpOpts) ->
     URL = build_url(Addr, Path, Params),
-    parse_response(hackney:request(get, URL, Headers, <<>>, [with_body | HttpOpts])).
+    parse_response(hackney:request(get, URL, Headers, <<>>, HttpOpts)).
 
 post(Addr, Path, Params) ->
     post(Addr, Path, Params, []).
@@ -49,7 +49,7 @@ post(Addr, Path, Params, HttpOpts) ->
     URL = build_url(Addr, Path),
     Body = build_query(Params),
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
-    parse_response(hackney:request(post, URL, Headers, Body, [with_body | HttpOpts])).
+    parse_response(hackney:request(post, URL, Headers, Body, HttpOpts)).
 
 put(Addr, Path, Params) ->
     put(Addr, Path, Params, []).
@@ -58,7 +58,7 @@ put(Addr, Path, Params, HttpOpts) ->
     URL = build_url(Addr, Path),
     Body = build_query(Params),
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
-    parse_response(hackney:request(put, URL, Headers, Body, [with_body | HttpOpts])).
+    parse_response(hackney:request(put, URL, Headers, Body, HttpOpts)).
 
 delete(Addr, Path, Params) ->
     delete(Addr, Path, Params, []).
@@ -98,13 +98,19 @@ urlencode(B) when is_binary(B) ->
     urlencode(binary_to_list(B)).
 -endif.
 
-parse_response({ok, Status, RespHeaders, Body}) when Status =:= 200;
+parse_response({ok, Status, _RespHeaders, Ref}) when Status =:= 200;
                                                      Status =:= 201 ->
-    case hackney_headers:parse(<<"content-type">>, RespHeaders) of
-        {<<"application">>, <<"json">>, _} ->
+    case hackney:body(Ref) of
+        {ok, Body} ->
+            %% case hackney_headers:parse(<<"content-type">>, RespHeaders) of
+            %%     {<<"application">>, <<"json">>, _} ->
+            %%         {ok, jsone:decode(Body)};
+            %%     CC ->
+            %%         {error, {unexpected_content_type, CC}}
+            %% end;
             {ok, jsone:decode(Body)};
-        CC ->
-            {error, {unexpected_content_type, CC}}
+        Err ->
+            {error, {get_body, Err}}
     end;
 parse_response({ok, 204, _RespHeaders, _}) ->
     {ok, []};
