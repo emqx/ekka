@@ -231,6 +231,8 @@ release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
           end,
     {Res, [node()]}.
 
+merge_results([]) ->
+    {false, []};
 merge_results(ResL) ->
     merge_results(ResL, [], []).
 merge_results([], Succ, []) ->
