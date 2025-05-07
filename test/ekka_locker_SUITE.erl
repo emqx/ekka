@@ -66,3 +66,27 @@ t_acquire_release_all(_) ->
     ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, all)),
     ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, all)),
     ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, all)).
+
+t_acquire_should_fail_with_empty_nodelist(_) ->
+    ok = meck:expect(mria_membership, nodelist, fun(_) -> [] end),
+    ?assertEqual([], ets:tab2list(?SERVER)),
+    ?assertEqual({false, []}, ekka_locker:acquire(?SERVER, resource, all)),
+    ?assertEqual([], ets:tab2list(?SERVER)).
+
+t_acquire_should_fail_when_all_nodes_down(_) ->
+    Node = 'node@nowhere',
+    ok = meck:expect(mria_membership, nodelist, fun(_) -> [Node] end),
+    ?assertEqual([], ets:tab2list(?SERVER)),
+    ?assertEqual({false, []}, ekka_locker:acquire(?SERVER, resource, all)),
+    ?assertEqual([], ets:tab2list(?SERVER)).
+
+t_acquire_should_fail_when_rpc_fails(_) ->
+    ok = meck:expect(mria_membership, nodelist, fun(_) -> [node()] end),
+    meck:new(erpc, [unstick, passthrough]),
+    %% meck erpc timeout
+    ok = meck:expect(erpc, multicall, fun(Nodes, M, F, A, _Timeout) ->
+                                              meck:passthrough([Nodes, M, F, A, 0])
+                                      end),
+    ?assertEqual([], ets:tab2list(?SERVER)),
+    ?assertEqual({false, []}, ekka_locker:acquire(?SERVER, resource, all)),
+    ok = meck:unload(erpc).

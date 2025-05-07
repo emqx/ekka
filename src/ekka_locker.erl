@@ -231,6 +231,8 @@ release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
           end,
     {Res, [node()]}.
 
+merge_results([]) ->
+    {false, []};
 merge_results(ResL) ->
     merge_results(ResL, [], []).
 merge_results([], Succ, []) ->
@@ -240,6 +242,8 @@ merge_results([], _, Failed) ->
 merge_results([{true, Res}|ResL], Succ, Failed) ->
     merge_results(ResL, [Res|Succ], Failed);
 merge_results([{false, Res}|ResL], Succ, Failed) ->
+    merge_results(ResL, Succ, [Res|Failed]);
+merge_results([{badrpc, _} = Res | ResL], Succ, Failed) ->
     merge_results(ResL, Succ, [Res|Failed]).
 
 %%--------------------------------------------------------------------
