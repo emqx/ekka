@@ -85,8 +85,8 @@ unregister(_Options) ->
 k8s_service_get(Server, Service, Namespace) ->
     Headers = [{<<"Authorization">>, iolist_to_binary(["Bearer ", token()])}],
     HttpOpts = case filelib:is_file(cert_path()) of
-                   true  -> [{ssl, [{cacertfile, cert_path()}]}];
-                   false -> [{ssl, [{verify, verify_none}]}]
+                   true  -> [{ssl_options, [{cacertfile, cert_path()}]}];
+                   false -> [{ssl_options, [{verify, verify_none}]}]
                end,
     ekka_httpc:get(Server, service_path(Service, Namespace), [], Headers, HttpOpts).
 
