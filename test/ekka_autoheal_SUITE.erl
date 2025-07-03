@@ -117,7 +117,7 @@ t_autoheal_asymm(_Config) ->
             end,
             fun(Trace) ->
                 ?assertMatch(
-                    [#{need_reboot := [N1, N2]}],
+                    [#{need_reboot := [N1, N2, N3, N4]}],
                     ?of_kind("Healing cluster partition", Trace)
                 )
             end

@@ -163,11 +163,16 @@ compare_node_views({_N1, Running1, _}, {_N2, Running2, _}) ->
 find_split_view([{_Node, _Running, []} | Views]) ->
     %% Node observes no partitions, ignore.
     find_split_view(Views);
-find_split_view([View = {_Node, _Running, Partitioned} | Views]) ->
+find_split_view([{Node, Running, Partitioned} | Views]) ->
     %% Node observes some nodes as partitioned from it.
     %% These nodes need to be rebooted, and as such they should not be part of split view.
-    Rest = lists:foldl(fun(N, Acc) -> lists:keydelete(N, 1, Acc) end, Views, Partitioned),
-    [View | find_split_view(Rest)];
+    PViews = [PV || PV = {PN, _, _} <- Views, lists:member(PN, Partitioned)],
+    %% Taints are nodes that are connected to the partitioned nodes, that should also be rebooted
+    %% to avoid overlapping partitions.
+    Taints = lists:append([PRunning || {_, PRunning, _} <- PViews]),
+    ViewTainted = {Node, Running -- Taints, lists:usort(Partitioned ++ Taints)},
+    % io:format("ViewTainted: ~p~n", [ViewTainted]),
+    [ViewTainted | find_split_view(Views -- PViews)];
 find_split_view([]) ->
     [].
 
