@@ -206,6 +206,9 @@ reboot_minority(Minority) ->
     lists:foreach(fun shutdown/1, Minority),
     timer:sleep(rand:uniform(1000) + 100),
     lists:foreach(fun reboot/1, Minority),
+    lists:foreach(fun(Node) ->
+        ekka_node_monitor:cast(Node, {partition_healed, Minority})
+    end, ekka_mnesia:running_nodes()),
     Minority.
 
 shutdown(Node) ->

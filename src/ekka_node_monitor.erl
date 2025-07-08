@@ -136,20 +136,15 @@ handle_info({suspect, Node}, State) ->
     end,
     {noreply, State};
 
-handle_info({mnesia_system_event, {mnesia_up, Node}},
-            State = #state{partitions = Partitions}) ->
+handle_info({mnesia_system_event, {mnesia_up, Node}}, State) ->
     ekka_membership:mnesia_up(Node),
-    case lists:member(Node, Partitions) of
-        false -> ok;
-        true -> ekka_membership:partition_healed(Node)
-    end,
     %% If there was an anymmetric cluster partition, we might need more
     %% autoheal iterations to completely bring the cluster back to normal.
     case ekka_autoheal:enabled() of
         {true, _} -> run_after(3000, confirm_partition);
         false -> ignore
     end,
-    {noreply, State#state{partitions = lists:delete(Node, Partitions)}};
+    {noreply, State};
 
 handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
     ekka_membership:mnesia_down(Node),
@@ -195,6 +190,11 @@ handle_info(heartbeat, State) ->
                       end
                   end, ekka_mnesia:cluster_nodes(all)),
     {noreply, ensure_heartbeat(State#state{heartbeat = undefined})};
+
+handle_info({partition_healed, Nodes}, State = #state{partitions = Partitions}) ->
+    ?LOG(info, "Partition healed: ~p", [Nodes]),
+    lists:foreach(fun ekka_membership:partition_healed/1, Nodes),
+    {noreply, State#state{partitions = Partitions -- Nodes}};
 
 handle_info(Msg = {'EXIT', Pid, _Reason}, State = #state{autoheal = Autoheal}) ->
     case ekka_autoheal:proc(Autoheal) of
