@@ -1,7 +1,7 @@
 
 # Ekka
 
-Ekka - Autocluster for EMQX Broker. Ekka helps building a new distribution layer for EMQ X R2.3+.
+Ekka - Autocluster for EMQX Broker. Ekka helps building a new distribution layer for EMQX R2.3+.
 
 ```
 ----------             ----------
