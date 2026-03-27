@@ -92,9 +92,6 @@
 start() ->
     case ekka_mnesia:start() of
         ok -> ok;
-        {error, {timeout, Tables}} ->
-            logger:error("Mnesia wait_for_tables timeout: ~p", [Tables]),
-            ok;
         {error, Reason} ->
             error(Reason)
     end,
