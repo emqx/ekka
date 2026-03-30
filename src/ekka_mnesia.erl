@@ -310,7 +310,95 @@ wait_for(stop) ->
 
 wait_for(tables) ->
     Tables = mnesia:system_info(local_tables),
-    do_wait_for_tables(Tables).
+    case do_wait_for_tables(Tables) of
+        {error, _} = Error ->
+            Error;
+        ok ->
+            case mnesia:system_info(db_nodes) -- [node()] of
+                [] -> ok;
+                _OtherDBNodes ->
+                    case ekka:env(skip_table_load_check, false) of
+                        true ->
+                            logger:warning("Skipping table load origin check because "
+                                           "'skip_table_load_check' is set to true. "
+                                           "This may hide data inconsistency issues, "
+                                           "please unset this option after the node is up."),
+                            ok;
+                        false ->
+                            %% Make sure we have loaded tables from a remote node,
+                            %% or force-loaded from local copies by the user.
+                            case check_tables_load_from(Tables) of
+                                ok -> ok;
+                                {error, _} = Error -> Error
+                            end
+                    end
+            end
+    end.
+
+check_tables_load_from([]) ->
+    ok;
+check_tables_load_from([schema | Rest]) ->
+    check_tables_load_from(Rest);
+check_tables_load_from([Tab | Rest]) ->
+    LoadFrom = mnesia_lib:val({Tab, load_node}),
+    LoadReason = mnesia_lib:val({Tab, load_reason}),
+    case mnesia:table_info(Tab, local_content) of
+        true ->
+            check_tables_load_from(Rest);
+        false ->
+            Self = node(),
+            RemoteActiveReplicas = mnesia:table_info(Tab, active_replicas) -- [Self],
+            RemoteReplicas = get_remote_replicas(Tab),
+            case {LoadFrom, RemoteReplicas, RemoteActiveReplicas} of
+                {Self, [], _} ->
+                    %% we have no remote replica
+                    check_tables_load_from(Rest);
+                {Self, [_ | _], []} ->
+                    %% we have one or more remote replicas but we are loaded from local,
+                    %% maybe force loaded by the user, as we have no active replicas other than current node.
+                    logger:warning(
+                        "Mnesia loaded table ~p from local copy while remote replicas ~p "
+                        "exist but none are active (load_reason=~p). "
+                        "If you have intentionally force-loaded this table (e.g. after removing "
+                        "remote nodes from the cluster), this warning can be safely ignored. "
+                        "Otherwise, please check the network connectivity between cluster nodes, "
+                        "ensure remote nodes are reachable, and restart EMQX.",
+                        [Tab, RemoteReplicas, LoadReason]),
+                    check_tables_load_from(Rest);
+                {Self, [_ | _], [_ | _]} ->
+                    %% prevent the current node from starting as the table is loaded from local and there
+                    %% are other active replicas in the cluster
+                    logger:error(
+                        "Mnesia loaded table ~p from local copy while remote active replicas ~p "
+                        "are available (load_reason=~p). "
+                        "This is likely caused by a network partition or misconfiguration. "
+                        "The node refuses to start to prevent data inconsistency. "
+                        "Please fix the network connectivity between cluster nodes and restart EMQX.",
+                        [Tab, RemoteActiveReplicas, LoadReason]),
+                    {error, {tab_loaded_from_local_copy, Tab, LoadReason}};
+                {Self, unknown, _} ->
+                    logger:error(
+                        "Mnesia loaded table ~p from local copy but this table only resides "
+                        "on remote nodes (load_reason=~p). "
+                        "This is likely caused by a network partition during startup. "
+                        "Please fix the network connectivity between cluster nodes and restart EMQX.",
+                        [Tab, LoadReason]),
+                    {error, {tab_loaded_from_local_copy, Tab, LoadReason}};
+                {_, _, _} ->
+                    check_tables_load_from(Rest)
+            end
+    end.
+
+get_remote_replicas(Tab) ->
+    case mnesia:table_info(Tab, storage_type) of
+        unknown ->
+            unknown;
+        _ ->
+            RamCopies = mnesia:table_info(Tab, ram_copies),
+            DiscCopies = mnesia:table_info(Tab, disc_copies),
+            DiscOnlyCopies = mnesia:table_info(Tab, disc_only_copies),
+            lists:usort((RamCopies ++ DiscCopies ++ DiscOnlyCopies) -- [node()])
+    end.
 
 do_wait_for_tables(Tables) ->
     case mnesia:wait_for_tables(Tables, 30000) of
