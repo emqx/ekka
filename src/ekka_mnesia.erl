@@ -366,16 +366,22 @@ check_tables_load_from([Tab | Rest]) ->
                         [Tab, RemoteReplicas, LoadReason]),
                     check_tables_load_from(Rest);
                 {Self, [_ | _], [_ | _]} ->
-                    %% prevent the current node from starting as the table is loaded from local and there
-                    %% are other active replicas in the cluster
-                    logger:error(
-                        "Mnesia loaded table ~p from local copy while remote active replicas ~p "
-                        "are available (load_reason=~p). "
-                        "This is likely caused by a network partition or misconfiguration. "
-                        "The node refuses to start to prevent data inconsistency. "
-                        "Please fix the network connectivity between cluster nodes and restart EMQX.",
-                        [Tab, RemoteActiveReplicas, LoadReason]),
-                    {error, {tab_loaded_from_local_copy, Tab, LoadReason}};
+                    case any_started_in_remote_nodes(emqx, RemoteActiveReplicas) of
+                        true ->
+                            %% prevent the current node from starting as the table is loaded from local and there
+                            %% are other active replicas in the cluster
+                            logger:error(
+                                "Mnesia loaded table ~p from local copy while remote active replicas ~p "
+                                "are available (load_reason=~p). "
+                                "This is likely caused by a network partition or misconfiguration. "
+                                "The node refuses to start to prevent data inconsistency. "
+                                "Please fix the network connectivity between cluster nodes and restart EMQX.",
+                                [Tab, RemoteActiveReplicas, LoadReason]);
+                        false ->
+                            %% If all the remote emqx are not started(e.g: they are waiting for the tables copy from the current node)
+                            %% we should allow the current node to start as the table is loaded from local and there
+                            check_tables_load_from(Rest)
+                    end;
                 {Self, unknown, _} ->
                     logger:error(
                         "Mnesia loaded table ~p from local copy but this table only resides "
@@ -388,6 +394,18 @@ check_tables_load_from([Tab | Rest]) ->
                     check_tables_load_from(Rest)
             end
     end.
+
+any_started_in_remote_nodes(App, Nodes) ->
+    Result = erpc:multicall(Nodes, application, which_applications, [], 5000),
+    lists:any(
+        fun
+            ({ok, Applications}) ->
+                lists:keymember(App, 1, Applications);
+            ({error, _}) ->
+                false
+        end,
+        Result
+    ).
 
 get_remote_replicas(Tab) ->
     case mnesia:table_info(Tab, storage_type) of
