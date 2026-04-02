@@ -327,7 +327,8 @@ wait_for(tables) ->
                         false ->
                             %% Make sure we have loaded tables from a remote node,
                             %% or force-loaded from local copies by the user.
-                            case check_tables_load_from(Tables) of
+                            RemoteActiveReplicas = get_remote_active_replicas(),
+                            case check_tables_load_from(Tables, RemoteActiveReplicas) of
                                 ok -> ok;
                                 {error, _} = Error -> Error
                             end
@@ -335,24 +336,23 @@ wait_for(tables) ->
             end
     end.
 
-check_tables_load_from([]) ->
+check_tables_load_from([], _) ->
     ok;
-check_tables_load_from([schema | Rest]) ->
-    check_tables_load_from(Rest);
-check_tables_load_from([Tab | Rest]) ->
+check_tables_load_from([schema | Rest], RemoteActiveReplicas) ->
+    check_tables_load_from(Rest, RemoteActiveReplicas);
+check_tables_load_from([Tab | Rest], RemoteActiveReplicas) ->
     LoadFrom = mnesia_lib:val({Tab, load_node}),
     LoadReason = mnesia_lib:val({Tab, load_reason}),
     case mnesia:table_info(Tab, local_content) of
         true ->
-            check_tables_load_from(Rest);
+            check_tables_load_from(Rest, RemoteActiveReplicas);
         false ->
             Self = node(),
-            RemoteActiveReplicas = mnesia:table_info(Tab, active_replicas) -- [Self],
             RemoteReplicas = get_remote_replicas(Tab),
             case {LoadFrom, RemoteReplicas, RemoteActiveReplicas} of
                 {Self, [], _} ->
                     %% we have no remote replica
-                    check_tables_load_from(Rest);
+                    check_tables_load_from(Rest, RemoteActiveReplicas);
                 {Self, [_ | _], []} ->
                     %% we have one or more remote replicas but we are loaded from local,
                     %% maybe force loaded by the user, as we have no active replicas other than current node.
@@ -364,7 +364,7 @@ check_tables_load_from([Tab | Rest]) ->
                         "Otherwise, please check the network connectivity between cluster nodes, "
                         "ensure remote nodes are reachable, and restart EMQX.",
                         [Tab, RemoteReplicas, LoadReason]),
-                    check_tables_load_from(Rest);
+                    check_tables_load_from(Rest, RemoteActiveReplicas);
                 {Self, [_ | _], [_ | _]} ->
                     %% prevent the current node from starting as the table is loaded from local and there
                     %% are other active replicas in the cluster
@@ -385,9 +385,33 @@ check_tables_load_from([Tab | Rest]) ->
                         [Tab, LoadReason]),
                     {error, {tab_loaded_from_local_copy, Tab, LoadReason}};
                 {_, _, _} ->
-                    check_tables_load_from(Rest)
+                    check_tables_load_from(Rest, RemoteActiveReplicas)
             end
     end.
+
+%% @doc Get the remote nodes that are running emqx.
+%%
+%% Q: Why not use mnesia:table_info(Tab, active_replicas) -- [Self]?
+%% A: Because it will cause a deadlock when all other nodes are restarting and waiting for
+%% this node to start.
+get_remote_active_replicas() ->
+    RunningNodes = ekka_mnesia:running_nodes() -- [node()],
+    Result = erpc:multicall(RunningNodes, application, which_applications, [], 5000),
+    Zip = lists:zip(RunningNodes, Result),
+    lists:filtermap(
+        fun
+            ({Node, {ok, Applications}}) ->
+                case lists:keymember(emqx, 1, Applications) of
+                    true ->
+                        {true, Node};
+                    false ->
+                        false
+                end;
+            ({_, {error, _}}) ->
+                false
+        end,
+        Zip
+    ).
 
 get_remote_replicas(Tab) ->
     case mnesia:table_info(Tab, storage_type) of
