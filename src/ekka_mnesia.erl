@@ -392,7 +392,7 @@ check_tables_load_from([Tab | Rest], RemoteActiveReplicas) ->
 %% @doc Get the remote nodes that are running emqx.
 %%
 %% Q: Why not use mnesia:table_info(Tab, active_replicas) -- [Self]?
-%% A: Because it will casue a deadlock when all other nodes are restarting and waiting for
+%% A: Because it will cause a deadlock when all other nodes are restarting and waiting for
 %% this node to start.
 get_remote_active_replicas() ->
     RunningNodes = ekka_mnesia:running_nodes() -- [node()],
