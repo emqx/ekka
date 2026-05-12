@@ -141,11 +141,7 @@ t_diagnosis_tab(_)->
         %% Start mnesia on N2.
         ok = rpc:call(N2, ekka_mnesia, start, []),
 
-        %% Restart mnesia on N1 so it loads the table from N2
-        %% instead of keeping the stale local copy.
-        %% (check_tables_load_from rejects locally-loaded tables
-        %% when remote active replicas exist.)
-        stopped = rpc:call(N1, mnesia, stop, []),
+        %% Start ekka_mnesia on N1, no blocking
         ok = rpc:call(N1, ekka_mnesia, start, []),
 
         %% Check tables are loaded on two
