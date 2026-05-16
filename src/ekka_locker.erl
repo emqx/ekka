@@ -149,12 +149,11 @@ acquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
                  Name, lock_obj(Resource), Piggyback).
 
 acquire_locks(Nodes, Name, LockObj, Piggyback) ->
-    {ResL, _BadNodes}
-        = rpc:multicall(Nodes, ?MODULE, acquire_lock, [Name, LockObj, Piggyback], ?MC_TIMEOUT),
+    {ResL, _BadRes} = multicall(Nodes, {?MODULE, acquire_lock, [Name, LockObj, Piggyback]}, ?MC_TIMEOUT),
     case merge_results(ResL) of
         Res = {true, _}  -> Res;
         Res = {false, _} ->
-            rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj], ?MC_TIMEOUT),
+            _ = multicall(Nodes, {?MODULE, release_lock, [Name, LockObj]}, ?MC_TIMEOUT),
             Res
     end.
 
@@ -217,7 +216,7 @@ release(Name, Resource, all) ->
     release_locks(ekka_membership:nodelist(up), Name, lock_obj(Resource)).
 
 release_locks(Nodes, Name, LockObj) ->
-    {ResL, _BadNodes} = rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj], ?MC_TIMEOUT),
+    {ResL, _BadRes} = multicall(Nodes, {?MODULE, release_lock, [Name, LockObj]}, ?MC_TIMEOUT),
     merge_results(ResL).
 
 release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
@@ -314,6 +313,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
+
+multicall(Nodes, {M, F, A}, Timeout) ->
+    Results = erpc:multicall(Nodes, M, F, A, Timeout),
+    {OkResults, BadResults} = lists:partition(fun is_ok/1, Results),
+    {[R || {ok, R} <- OkResults], BadResults}.
+
+is_ok({ok, _}) -> true;
+is_ok(_) -> false.
 
 check_lease(Tab, #lease{expiry = Expiry}, Now) ->
     Spec = ets:fun2ms(fun({_, _, _, _, T} = Resource) when (Now - T) > Expiry -> Resource end),
