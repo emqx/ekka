@@ -32,10 +32,6 @@
         , reboot/0
         ]).
 
--ifdef(TEST).
--export([rejoin_peers_loop/3]).
--endif.
-
 -type(info_key() :: running_nodes | stopped_nodes).
 
 -type(infos() :: #{running_nodes := list(node()),
@@ -109,38 +105,7 @@ heal(shutdown_and_reboot) ->
     prepare(heal),
     ekka_mnesia:ensure_stopped(),
     ekka_mnesia:ensure_started(),
-    reboot(),
-    rejoin_peers_after_heal().
-
-%% After reboot, mnesia starts from the local disk schema with an
-%% empty running_db_nodes. If the autoheal rpc ack was lost (Mode A),
-%% the leader sees {badrpc,nodedown} and the cluster enters split brain.
-%% The legacy design depended on mnesia re-emitting inconsistent_database
-%% when the network recovers, re-triggering autoheal. In practice that
-%% second round fails because both nodes lose membership state on reboot
-%% and deadlock on leader election ("I am not leader, but received
-%% partition report from ...").
-%%
-%% So the victim proactively rejoins. We re-announce extra_db_nodes for
-%% every peer in the known cluster schema. Stops as soon as every peer
-%% is either reachable and merged, or definitively unreachable (errors
-%% will be retried by future autoheal rounds over clean network).
-rejoin_peers_after_heal() ->
-    Peers = ekka_mnesia:cluster_nodes(all) -- [node()],
-    rejoin_peers_loop(Peers, 100, 1000).
-
-rejoin_peers_loop(_Peers, 0, _Sleep) ->
-    {error, rejoin_timeout};
-rejoin_peers_loop(Peers, Retries, Sleep) ->
-    Missing = [N || N <- Peers,
-                    not lists:member(N, ekka_mnesia:cluster_nodes(running))],
-    case Missing of
-        [] -> ok;
-        _  ->
-            [ekka_mnesia:connect(N) || N <- Missing],
-            timer:sleep(Sleep),
-            rejoin_peers_loop(Peers, Retries - 1, Sleep)
-    end.
+    reboot().
 
 %% @doc Prepare to join or leave the cluster.
 -spec(prepare(join | leave | heal) -> ok | {error, term()}).

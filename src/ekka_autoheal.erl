@@ -122,7 +122,7 @@ handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined}) 
 
 handle_msg({heal_cluster, Minority, SplitView}, Autoheal = #autoheal{proc = undefined}) ->
     Proc = spawn_link(fun() ->
-        ?tp(notice, "Healing cluster partition", #{
+        ?tp(critical, "Healing cluster partition", #{
             need_reboot => Minority,
             split_view => SplitView
         }),
