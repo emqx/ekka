@@ -90,6 +90,7 @@ force_leave(Node) ->
                 Error -> Error
             end;
         false ->
+            ekka_membership:announce({force_leave, Node}),
             {error, node_not_in_cluster};
         {badrpc, nodedown} ->
             ekka_membership:announce({force_leave, Node}),
