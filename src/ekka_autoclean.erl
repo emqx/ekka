@@ -42,7 +42,10 @@ check(State = #autoclean{expiry = Expiry}) ->
 
 maybe_clean(#member{node = Node, ltime = LTime}, Expiry) ->
     case expired(LTime, Expiry) of
-        true  -> ekka_cluster:force_leave(Node);
+        true ->
+            logger:critical("Node ~p has been down for ~p seconds, force leaving cluster",
+                            [Node, Expiry div 1000]),
+            ekka_cluster:force_leave(Node);
         false -> ok
     end.
 

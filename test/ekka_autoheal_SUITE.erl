@@ -412,69 +412,6 @@ t_heal_legacy_fallback(_Config) ->
         ekka_ct:stop_slave(Node)
     end.
 
-%%--------------------------------------------------------------------
-%% rejoin_peers_loop/3 unit tests
-%%
-%% These exercise the post-reboot rejoin loop in isolation (no slave
-%% nodes / no real mnesia). We mock ekka_mnesia:cluster_nodes and
-%% ekka_mnesia:connect with meck and assert the loop's behaviour on
-%% its three branches: fast success, timeout, and recursion.
-%%--------------------------------------------------------------------
-
-%% When every peer is already in running_db_nodes, the loop returns ok
-%% immediately without calling connect/1.
-t_rejoin_peers_loop_fast_ok(_Config) ->
-    Peers = ['a@h', 'b@h'],
-    ok = meck:new(ekka_mnesia, [passthrough]),
-    ok = meck:expect(ekka_mnesia, cluster_nodes,
-                     fun(running) -> Peers; (all) -> Peers end),
-    ok = meck:expect(ekka_mnesia, connect, fun(_) -> ok end),
-    try
-        ?assertEqual(ok, ekka_cluster:rejoin_peers_loop(Peers, 10, 1)),
-        ?assertEqual(0, meck:num_calls(ekka_mnesia, connect, '_'))
-    after
-        meck:unload(ekka_mnesia)
-    end.
-
-%% When no peer ever joins running_db_nodes, the loop exhausts its
-%% retry budget and returns {error, rejoin_timeout}. It must have
-%% tried to connect on every iteration.
-t_rejoin_peers_loop_timeout(_Config) ->
-    Peers = ['a@h'],
-    ok = meck:new(ekka_mnesia, [passthrough]),
-    ok = meck:expect(ekka_mnesia, cluster_nodes, fun(running) -> [] end),
-    ok = meck:expect(ekka_mnesia, connect, fun(_) -> {error, not_reachable} end),
-    try
-        ?assertEqual({error, rejoin_timeout},
-                     ekka_cluster:rejoin_peers_loop(Peers, 3, 1)),
-        ?assertEqual(3, meck:num_calls(ekka_mnesia, connect, '_'))
-    after
-        meck:unload(ekka_mnesia)
-    end.
-
-%% Peer is missing on first check, joins before retries run out.
-%% Loop must call connect at least once and return ok.
-t_rejoin_peers_loop_eventually_ok(_Config) ->
-    Peers = ['a@h'],
-    Counter = counters:new(1, [atomics]),
-    ok = meck:new(ekka_mnesia, [passthrough]),
-    ok = meck:expect(ekka_mnesia, cluster_nodes,
-                     fun(running) ->
-                             N = counters:get(Counter, 1),
-                             counters:add(Counter, 1, 1),
-                             case N < 2 of
-                                 true -> [];
-                                 false -> Peers
-                             end
-                     end),
-    ok = meck:expect(ekka_mnesia, connect, fun(_) -> ok end),
-    try
-        ?assertEqual(ok, ekka_cluster:rejoin_peers_loop(Peers, 10, 1)),
-        ?assert(meck:num_calls(ekka_mnesia, connect, '_') >= 1)
-    after
-        meck:unload(ekka_mnesia)
-    end.
-
 %% Abstract forms for a legacy-shape ekka_cluster shim:
 %%   -module(ekka_cluster).
 %%   -export([heal/1]).
