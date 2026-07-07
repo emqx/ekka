@@ -59,6 +59,7 @@ init_per_suite(Config) ->
     _ = inets:start(),
     ok = application:set_env(ekka, cluster_name, ekka),
     ok = application:set_env(ekka, cluster_enable, true),
+    ok = application:set_env(ekka, cluster_discovery, {manual, []}),
     ok = ekka:start(),
     Config.
 
@@ -68,6 +69,7 @@ end_per_suite(_Config) ->
     ok.
 
 init_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
+    ok = reboot_ekka_with_env({manual, []}),
     snabbkaffe:start_trace(),
     application:set_env(ekka, test_etcd_nodes,
                         ["n1@127.0.0.1", "ct@127.0.0.1", "n2@127.0.0.1"]),
@@ -84,7 +86,7 @@ init_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
     [ {nodes, Nodes}
     | Config];
 init_per_testcase(_TestCase, Config) ->
-    ok = ekka:start(),
+    ok = reboot_ekka_with_env({manual, []}),
     Config.
 
 end_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
@@ -93,10 +95,12 @@ end_per_testcase(t_autocluster_retry_when_missing_nodes, Config) ->
     ekka:force_leave(N2),
     ok = ekka_ct:stop_slave(N1),
     ok = ekka_ct:stop_slave(N2),
+    ok = reboot_ekka_with_env({manual, []}),
     ok = stop_etcd_server(2379),
     application:unset_env(ekka, test_etcd_nodes),
     end_per_testcase(common, Config);
 end_per_testcase(_TestCase, _Config) ->
+    ok = stop_local_autocluster(),
     snabbkaffe:stop(),
     meck:unload(),
     ok.
@@ -259,9 +263,7 @@ t_autocluster_via_mcast(_Config) ->
     end.
 
 reboot_ekka_with_mcast_env() ->
-    ok = ekka:stop(),
-    ok = set_app_env(node(), {mcast, ?MCAST_OPTIONS}),
-    ok = ekka:start().
+    reboot_ekka_with_env({mcast, ?MCAST_OPTIONS}).
 
 t_autocluster_mcast_lock_failure(_Config) ->
     ok = reboot_ekka_with_mcast_env(),
@@ -307,12 +309,32 @@ start_etcd_server(Port) ->
 start_k8sapi_server(Port) ->
     start_http_server(Port, mod_k8s_api).
 
+reboot_ekka_with_env(Discovery) ->
+    ok = stop_local_autocluster(),
+    ok = stop_local_ekka(),
+    ok = set_app_env(node(), Discovery),
+    ok = ekka:start().
+
+stop_local_autocluster() ->
+    case whereis(ekka_autocluster) of
+        undefined -> ok;
+        _Pid ->
+            _ = catch gen_server:stop(ekka_autocluster, normal, 1000),
+            ok
+    end.
+
+stop_local_ekka() ->
+    case lists:keymember(ekka, 1, application:which_applications()) of
+        true -> ekka:stop();
+        false -> ok
+    end.
+
 start_http_server(Port, Mod) ->
     Res = inets:start(httpd, [{port, Port},
                               {server_name, "etcd"},
                               {server_root, "."},
                               {document_root, "."},
-                              {bind_address, "localhost"},
+                              {bind_address, "127.0.0.1"},
                               {modules, [Mod]}
                              ]),
     case Res of
