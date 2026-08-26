@@ -40,9 +40,30 @@
 
 -define(SERVER, ?MODULE).
 
+%% TTL of the etcd v3 lease that the node key is attached to. The
+%% keepalive process refreshes the lease; if the node dies, etcd
+%% deletes the node key when the lease expires.
+-define(LEASE_TTL_SECONDS, 5).
+
+%% Reconnect backoff: 1s, 2s, 4s, ... capped at 30s.
+-define(RECONNECT_BASE_MS, 1000).
+-define(RECONNECT_MAX_MS, 30000).
+-define(RECONNECT, reconnect).
+
+%% Whether the node key should exist in etcd; used to restore the key
+%% after a reconnect or a process restart (the old lease expired and
+%% etcd deleted the key). Kept in a persistent_term so that it
+%% survives a restart of this process.
+-define(REGISTERED_KEY, ekka_cluster_etcd_registered).
+
 -record(state, {
     prefix,
-    lease_id
+    %% undefined when the connection to etcd is down
+    lease_id :: pos_integer() | undefined,
+    keepalive_pid :: pid() | undefined,
+    hosts = [] :: list(),
+    open_opts = [] :: list(),
+    retries = 0 :: non_neg_integer()
 }).
 
 %% TTL callback
@@ -343,27 +364,24 @@ init(Options) ->
     Servers = proplists:get_value(server, Options, []),
     Prefix = proplists:get_value(prefix, Options),
     Hosts = [remove_scheme(Server) || Server <- Servers],
-    TransportOpts = case ssl_options(Options) of
+    OpenOpts = case ssl_options(Options) of
         [] -> [{transport, tcp}];
         [{ssl, TLSOpts}] -> [{transport, tls}, {tls_opts, TLSOpts}]
     end,
-    %% At the time of writing, the etcd connection process does not
-    %% close when this process dies.  So, when this processes is
-    %% restarted by its supervisor, the `eetcd:open' call fails with
-    %% `{error,[{{"localhost",2379},already_started}]}'.  This ensures
-    %% that no connection with this name exists before opening it
-    %% (again).
-    eetcd:close(?MODULE),
-    {ok, _Pid} = eetcd:open(?MODULE, Hosts, TransportOpts),
-    {ok, #{'ID' := ID}} = eetcd_lease:grant(?MODULE, 5),
-    {ok, Pid2} = eetcd_lease:keep_alive(?MODULE, ID),
-    true = link(Pid2),
-    {ok, #state{prefix = Prefix, lease_id = ID}}.
+    State = #state{prefix = Prefix, hosts = Hosts, open_opts = OpenOpts},
+    case connect(State) of
+        {ok, State1} ->
+            %% restore the node key if the previous incarnation of this
+            %% process had registered it
+            {ok, ensure_registered(State1)};
+        {error, Reason} ->
+            ?LOG(warning, "failed to connect to etcd server(s) ~p: ~p",
+                 [Hosts, Reason]),
+            {ok, schedule_reconnect(State)}
+    end.
 
 handle_call(Action, _From, State) when is_atom(Action) ->
-    Function = list_to_atom("v3_" ++ atom_to_list(Action)),
-    Reply = erlang:apply(?MODULE, Function, [State]),
-    {reply, Reply, State};
+    {reply, handle_action(Action, State), State};
 
 handle_call(_Request, _From, State = #state{}) ->
     {reply, ok, State}.
@@ -371,18 +389,147 @@ handle_call(_Request, _From, State = #state{}) ->
 handle_cast(_Request, State = #state{}) ->
     {noreply, State}.
 
+handle_info(?RECONNECT, State = #state{lease_id = ID}) when ID =/= undefined ->
+    %% stale timer message; already connected
+    {noreply, State};
+
+handle_info(?RECONNECT, State) ->
+    case connect(State) of
+        {ok, State1} ->
+            ?LOG(info, "reconnected to etcd", []),
+            ?tp(ekka_cluster_etcd_reconnected, #{}),
+            {noreply, ensure_registered(State1)};
+        {error, Reason} ->
+            ?tp(ekka_cluster_etcd_reconnect_failed, #{reason => Reason}),
+            ?LOG(warning, "failed to connect to etcd: ~p", [Reason]),
+            {noreply, schedule_reconnect(State)}
+    end;
+
+handle_info({'EXIT', Pid, Reason}, State = #state{keepalive_pid = Pid}) ->
+    %% The lease keepalive process halts when the connection to etcd is
+    %% lost. Disconnect and reconnect with backoff instead of stopping:
+    %% a stop would make the supervisor restart this process, and with
+    %% etcd still down the restarts would exhaust the supervisor's
+    %% restart intensity, killing cluster discovery for good.
+    ?tp(ekka_cluster_etcd_keepalive_halted, #{reason => Reason}),
+    ?LOG(warning, "etcd lease keepalive halted: ~p", [Reason]),
+    {noreply, schedule_reconnect(disconnect(State))};
+
 handle_info({'EXIT', _From, Reason}, State) ->
+    %% exit signal from a process other than the lease keepalive
     {stop, Reason, State};
+
+handle_info(#{event := 'KeepAliveHalted'}, State) ->
+    %% informational message from eetcd_lease; the 'EXIT' of the linked
+    %% keepalive process drives the reconnect
+    {noreply, State};
 
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
-terminate(_Reason, _State = #state{lease_id = ID}) ->
-    eetcd_lease:revoke(?MODULE, ID),
-    eetcd:close(?MODULE).
+terminate(_Reason, #state{lease_id = undefined}) ->
+    _ = eetcd:close(?MODULE),
+    ok;
+terminate(_Reason, #state{lease_id = ID}) ->
+    _ = eetcd_lease:revoke(?MODULE, ID),
+    _ = eetcd:close(?MODULE),
+    ok.
 
 code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
+
+handle_action(Action, #state{lease_id = undefined}) ->
+    %% No connection to etcd. Callers (ekka_autocluster, mria core node
+    %% discovery) log the error and retry on their own timers.
+    note_registered(Action, error),
+    {error, etcd_disconnected};
+handle_action(Action, State) ->
+    Function = list_to_atom("v3_" ++ atom_to_list(Action)),
+    Reply = erlang:apply(?MODULE, Function, [State]),
+    note_registered(Action, Reply),
+    Reply.
+
+%% Track whether the node key should exist in etcd, so that a
+%% reconnect or a process restart can restore it after the old lease
+%% expired.
+note_registered(register, ok) ->
+    persistent_term:put(?REGISTERED_KEY, true);
+note_registered(unregister, _) ->
+    persistent_term:put(?REGISTERED_KEY, false);
+note_registered(_Action, _Reply) ->
+    ok.
+
+is_registered() ->
+    persistent_term:get(?REGISTERED_KEY, false).
+
+connect(State = #state{hosts = Hosts, open_opts = OpenOpts}) ->
+    %% At the time of writing, the etcd connection process does not
+    %% close when this process dies.  So, when this processes is
+    %% restarted by its supervisor, the `eetcd:open' call fails with
+    %% `{error,[{{"localhost",2379},already_started}]}'.  This ensures
+    %% that no connection with this name exists before opening it
+    %% (again).
+    _ = eetcd:close(?MODULE),
+    case eetcd:open(?MODULE, Hosts, OpenOpts) of
+        {ok, _Pid} ->
+            grant_lease(State);
+        {error, Reason} ->
+            {error, {failed_to_connect, Reason}}
+    end.
+
+grant_lease(State) ->
+    case eetcd_lease:grant(?MODULE, ?LEASE_TTL_SECONDS) of
+        {ok, #{'ID' := ID}} ->
+            start_keepalive(State#state{lease_id = ID});
+        {error, Reason} ->
+            _ = eetcd:close(?MODULE),
+            {error, {failed_to_grant_lease, Reason}}
+    end.
+
+start_keepalive(State = #state{lease_id = ID}) ->
+    case eetcd_lease:keep_alive(?MODULE, ID) of
+        {ok, Pid} ->
+            true = link(Pid),
+            {ok, State#state{keepalive_pid = Pid, retries = 0}};
+        {error, Reason} ->
+            _ = eetcd:close(?MODULE),
+            {error, {failed_to_start_keepalive, Reason}}
+    end.
+
+%% The node key was attached to the expired lease, so etcd deleted it
+%% during the disconnect. ekka_autocluster stops itself once discovery
+%% completes, so nothing else re-creates the key: re-register it here.
+ensure_registered(State) ->
+    case is_registered() andalso v3_register(State) of
+        false ->
+            State;
+        ok ->
+            ?tp(ekka_cluster_etcd_reregistered, #{}),
+            State;
+        {error, Reason} ->
+            ?LOG(warning, "failed to re-register node in etcd: ~p", [Reason]),
+            schedule_reconnect(disconnect(State))
+    end.
+
+disconnect(State = #state{keepalive_pid = Pid}) ->
+    case is_pid(Pid) of
+        true ->
+            unlink(Pid),
+            %% flush an already-delivered exit signal, if any
+            receive {'EXIT', Pid, _} -> ok after 0 -> ok end;
+        false ->
+            ok
+    end,
+    _ = eetcd:close(?MODULE),
+    State#state{lease_id = undefined, keepalive_pid = undefined}.
+
+schedule_reconnect(State = #state{retries = Retries}) ->
+    Delay = reconnect_delay(Retries),
+    _ = erlang:send_after(Delay, self(), ?RECONNECT),
+    State#state{retries = Retries + 1}.
+
+reconnect_delay(Retries) ->
+    min(?RECONNECT_MAX_MS, ?RECONNECT_BASE_MS bsl min(Retries, 6)).
 
 remove_scheme("http://" ++ Url) ->
     Url;
