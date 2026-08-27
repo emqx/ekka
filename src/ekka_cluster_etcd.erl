@@ -52,9 +52,9 @@
 
 %% Whether the node key should exist in etcd; used to restore the key
 %% after a reconnect or a process restart (the old lease expired and
-%% etcd deleted the key). Kept in a persistent_term so that it
-%% survives a restart of this process.
--define(REGISTERED_KEY, ekka_cluster_etcd_registered).
+%% etcd deleted the key). Kept in the application environment so that
+%% it survives a restart of this process.
+-define(REGISTERED_KEY, etcd_node_registered).
 
 -record(state, {
     prefix,
@@ -444,7 +444,7 @@ handle_action(Action, #state{lease_id = undefined}) ->
     note_registered(Action, error),
     {error, etcd_disconnected};
 handle_action(Action, State) ->
-    Function = list_to_atom("v3_" ++ atom_to_list(Action)),
+    Function = list_to_existing_atom("v3_" ++ atom_to_list(Action)),
     Reply = erlang:apply(?MODULE, Function, [State]),
     note_registered(Action, Reply),
     Reply.
@@ -453,14 +453,14 @@ handle_action(Action, State) ->
 %% reconnect or a process restart can restore it after the old lease
 %% expired.
 note_registered(register, ok) ->
-    persistent_term:put(?REGISTERED_KEY, true);
+    application:set_env(ekka, ?REGISTERED_KEY, true);
 note_registered(unregister, _) ->
-    persistent_term:put(?REGISTERED_KEY, false);
+    application:set_env(ekka, ?REGISTERED_KEY, false);
 note_registered(_Action, _Reply) ->
     ok.
 
 is_registered() ->
-    persistent_term:get(?REGISTERED_KEY, false).
+    application:get_env(ekka, ?REGISTERED_KEY, false).
 
 connect(State = #state{hosts = Hosts, open_opts = OpenOpts}) ->
     %% At the time of writing, the etcd connection process does not
@@ -515,7 +515,8 @@ disconnect(State = #state{keepalive_pid = Pid}) ->
     case is_pid(Pid) of
         true ->
             unlink(Pid),
-            %% flush an already-delivered exit signal, if any
+            exit(Pid, kill),
+            %% flush an exit signal delivered before the unlink, if any
             receive {'EXIT', Pid, _} -> ok after 0 -> ok end;
         false ->
             ok
