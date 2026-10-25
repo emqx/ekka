@@ -149,12 +149,11 @@ acquire(Name, Resource, all, Piggyback) when is_atom(Name) ->
                  Name, lock_obj(Resource), Piggyback).
 
 acquire_locks(Nodes, Name, LockObj, Piggyback) ->
-    {ResL, _BadNodes}
-        = rpc:multicall(Nodes, ?MODULE, acquire_lock, [Name, LockObj, Piggyback], ?MC_TIMEOUT),
+    ResL = multicall(Nodes, acquire_lock, [Name, LockObj, Piggyback]),
     case merge_results(ResL) of
         Res = {true, _}  -> Res;
         Res = {false, _} ->
-            rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj], ?MC_TIMEOUT),
+            _ = multicall(Nodes, release_lock, [Name, LockObj]),
             Res
     end.
 
@@ -217,8 +216,25 @@ release(Name, Resource, all) ->
     release_locks(mria_membership:nodelist(up), Name, lock_obj(Resource)).
 
 release_locks(Nodes, Name, LockObj) ->
-    {ResL, _BadNodes} = rpc:multicall(Nodes, ?MODULE, release_lock, [Name, LockObj], ?MC_TIMEOUT),
-    merge_results(ResL).
+    merge_results(multicall(Nodes, release_lock, [Name, LockObj])).
+
+%% Call the local node in the caller process when it is the only node;
+%% rpc:multicall/5 spawns a process also for the local node.
+multicall([Node], Fun, Args) when Node =:= node() ->
+    [local_call(Fun, Args)];
+multicall(Nodes, Fun, Args) ->
+    {ResL, _BadNodes} = rpc:multicall(Nodes, ?MODULE, Fun, Args, ?MC_TIMEOUT),
+    ResL.
+
+%% Same result as rpc:multicall/5 gives for an exception.
+local_call(Fun, Args) ->
+    try apply(?MODULE, Fun, Args)
+    catch
+        throw:{'EXIT', _} = Exit -> {badrpc, Exit};
+        throw:Return -> Return;
+        exit:Reason -> {badrpc, {'EXIT', Reason}};
+        error:Reason:Stack -> {badrpc, {'EXIT', {Reason, Stack}}}
+    end.
 
 release_lock(Name, #lock{resource = Resource, owner = Owner}) ->
     Res = try ets:lookup(Name, Resource) of

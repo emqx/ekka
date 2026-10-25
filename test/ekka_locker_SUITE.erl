@@ -81,12 +81,60 @@ t_acquire_should_fail_when_all_nodes_down(_) ->
     ?assertEqual([], ets:tab2list(?SERVER)).
 
 t_acquire_should_fail_when_rpc_fails(_) ->
-    ok = meck:expect(mria_membership, nodelist, fun(_) -> [node()] end),
-    meck:new(erpc, [unstick, passthrough]),
-    %% meck erpc timeout
-    ok = meck:expect(erpc, multicall, fun(Nodes, M, F, A, _Timeout) ->
-                                              meck:passthrough([Nodes, M, F, A, 0])
-                                      end),
+    Remote = 'node@nowhere',
+    ok = meck:expect(mria_membership, nodelist, fun(_) -> [node(), Remote] end),
+    ok = meck:new(erpc, [unstick, passthrough]),
+    %% the remote node fails, the local node runs the real call
+    ok = meck:expect(erpc, multicall,
+                     fun(Nodes, M, F, A, Timeout) ->
+                             [case N of
+                                  Remote -> {error, {exception, badarg, []}};
+                                  _ -> hd(meck:passthrough([[N], M, F, A, Timeout]))
+                              end || N <- Nodes]
+                     end),
     ?assertEqual([], ets:tab2list(?SERVER)),
-    ?assertEqual({false, []}, ekka_locker:acquire(?SERVER, resource, all)),
+    ?assertMatch({false, [{badrpc, {'EXIT', {badarg, []}}}]},
+                 ekka_locker:acquire(?SERVER, resource, all)),
+    %% the lock taken on the local node is released
+    ?assertEqual([], ets:tab2list(?SERVER)),
+    %% one call for acquire, one for the release after the failure
+    ?assertEqual(2, meck:num_calls(erpc, multicall, '_')),
+    %% with more than one node, the local node is in the multicall too
+    ?assert(meck:called(erpc, multicall, [[node(), Remote], '_', '_', '_', '_'])),
     ok = meck:unload(erpc).
+
+t_no_rpc_to_local_node(_) ->
+    Node = node(),
+    ok = meck:expect(mria_membership, ring, fun(_) -> [#member{node = Node, status = up}] end),
+    ok = meck:expect(mria_membership, nodelist, fun(_) -> [Node] end),
+    ok = meck:new(erpc, [unstick, passthrough]),
+    lists:foreach(
+      fun(Type) ->
+              ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, Type)),
+              ?assertMatch([_], ets:tab2list(?SERVER)),
+              ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, Type)),
+              ?assertEqual([], ets:tab2list(?SERVER))
+      end, [quorum, all]),
+    ?assertEqual(0, meck:num_calls(erpc, multicall, '_')),
+    ok = meck:unload(erpc).
+
+t_acquire_release_all_with_down_node(_) ->
+    Node = node(),
+    ok = meck:expect(mria_membership, nodelist, fun(_) -> [Node, 'node@nowhere'] end),
+    Self = self(),
+    %% a down node is a bad node of the multicall, it is ignored
+    ?assertEqual({true, [Node]}, ekka_locker:acquire(?SERVER, resource, all)),
+    ?assertMatch([{lock, resource, Self, 1, _}], ets:tab2list(?SERVER)),
+    ?assertEqual({true, [Node]}, ekka_locker:release(?SERVER, resource, all)),
+    ?assertEqual([], ets:tab2list(?SERVER)).
+
+t_acquire_should_fail_when_piggyback_crashes(_) ->
+    Node = node(),
+    ok = meck:expect(mria_membership, nodelist, fun(_) -> [Node] end),
+    Piggyback = {erlang, error, [boom]},
+    ?assertMatch({false, [{badrpc, {'EXIT', {boom, _}}}]},
+                 ekka_locker:acquire(?SERVER, resource, all, Piggyback)),
+    ?assertEqual([], ets:tab2list(?SERVER)),
+    ?assertMatch({false, [{badrpc, {'EXIT', killed}}]},
+                 ekka_locker:acquire(?SERVER, resource, all, {erlang, exit, [killed]})),
+    ?assertEqual([], ets:tab2list(?SERVER)).
