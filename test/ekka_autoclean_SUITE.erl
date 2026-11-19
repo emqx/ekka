@@ -26,14 +26,28 @@ all() -> ekka_ct:all(?MODULE).
 
 init_per_suite(Config) ->
     ok = application:set_env(ekka, cluster_name, ekka),
+    Previous = application:get_env(ekka, cluster_autoclean),
     ok = application:set_env(ekka, cluster_autoclean, 1000),
     ok = application:set_env(ekka, cluster_discovery, {manual, []}),
-    ok = ekka:start(),
-    Config.
+    try
+        ok = ekka:start(),
+        [{autoclean, Previous} | Config]
+    catch
+        Class:Reason:Stack ->
+            restore_autoclean(Previous),
+            erlang:raise(Class, Reason, Stack)
+    end.
 
-end_per_suite(_Config) ->
-    application:stop(ekka),
-    ekka_mnesia:ensure_stopped().
+end_per_suite(Config) ->
+    try
+        application:stop(ekka),
+        ekka_mnesia:ensure_stopped()
+    after
+        restore_autoclean(proplists:get_value(autoclean, Config))
+    end.
+
+restore_autoclean({ok, Previous}) -> application:set_env(ekka, cluster_autoclean, Previous);
+restore_autoclean(undefined) -> application:unset_env(ekka, cluster_autoclean).
 
 t_autoclean(_) ->
     with_peer(autoclean_expiry, fun(Peer) ->

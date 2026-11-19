@@ -28,6 +28,11 @@ all(Suite) ->
 start_slave(node, Name) ->
     ok = slave:stop(list_to_atom(lists:concat([Name, "@", host()]))),
     {ok, Node} = slave:start(host(), Name, ebin_path()),
+    %% A testcase can restart its peer without inheriting another testcase's schema.
+    Dir = filename:absname(filename:join([
+        "mnesia", string:trim(pid_to_list(self()), both, "<>"), atom_to_list(Node)
+    ])),
+    ok = rpc:call(Node, application, set_env, [mnesia, dir, Dir, [{persistent, true}]]),
     snabbkaffe:forward_trace(Node),
     Node;
 start_slave(ekka, Name) ->

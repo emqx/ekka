@@ -447,7 +447,8 @@ t_force_leave_offline_notifies_after_removal(_) ->
     try
         ok = rpc:call(Peer, ekka_cluster, join, [node()]),
         ok = ekka:monitor(membership, Monitor),
-        ok = ekka_ct:stop_slave(Peer),
+        _ = wait_member(Peer, up),
+        ok = stop_offline_peer(Peer),
         _ = wait_member(Peer, down),
         ?assert(lists:member(Peer, ekka_mnesia:cluster_nodes(all))),
         ?assertEqual(ok, ekka_cluster:force_leave(Peer)),
@@ -460,7 +461,7 @@ t_force_leave_offline_notifies_after_removal(_) ->
         ?assertEqual(false, ekka_membership:lookup_member(Peer))
     after
         catch ekka:unmonitor(membership, Monitor),
-        ekka_ct:stop_slave(Peer)
+        cleanup_offline_peer(Peer)
     end.
 
 t_force_leave_offline_failure_keeps_member(_) ->
@@ -470,7 +471,8 @@ t_force_leave_offline_failure_keeps_member(_) ->
     try
         ok = rpc:call(Peer, ekka_cluster, join, [node()]),
         ok = ekka:monitor(membership, Monitor),
-        ok = ekka_ct:stop_slave(Peer),
+        _ = wait_member(Peer, up),
+        ok = stop_offline_peer(Peer),
         Down = wait_member(Peer, down),
         ok = meck:new(mnesia, [passthrough, unstick]),
         ok = meck:expect(mnesia, del_table_copy, fun
@@ -480,14 +482,23 @@ t_force_leave_offline_failure_keeps_member(_) ->
             (Table, N) ->
                 meck:passthrough([Table, N])
         end),
-        Caller = spawn(fun() -> Parent ! {removal_result, ekka_cluster:force_leave(Peer)} end),
-        receive {removing, Peer} -> ok after 5000 -> error(removal_not_started) end,
-        %% No notification while the deletion is still pending.
-        ?assertNot(receive_event({node, leaving, Peer}, 300)),
-        Caller ! proceed,
-        receive {removal_result, Result} ->
-            ?assertEqual({error, simulated_removal_failure}, Result)
-        after 5000 -> error(no_removal_result)
+        {Caller, Ref} = spawn_monitor(fun() ->
+            Parent ! {removal_result, ekka_cluster:force_leave(Peer)}
+        end),
+        try
+            receive {removing, Peer} -> ok after 5000 -> error(removal_not_started) end,
+            %% No notification while the deletion is still pending.
+            ?assertNot(receive_event({node, leaving, Peer}, 300)),
+            Caller ! proceed,
+            receive {removal_result, Result} ->
+                ?assertEqual({error, simulated_removal_failure}, Result)
+            after 5000 -> error(no_removal_result)
+            end
+        after
+            exit(Caller, kill),
+            receive {'DOWN', Ref, process, Caller, _} -> ok
+            after 5000 -> error({test_removal_caller_still_running, Peer})
+            end
         end,
         ?assertNot(receive_event({node, leaving, Peer}, 500)),
         ?assertEqual(Down, peer_record(Peer)),
@@ -495,13 +506,40 @@ t_force_leave_offline_failure_keeps_member(_) ->
     after
         catch meck:unload(mnesia),
         catch ekka:unmonitor(membership, Monitor),
-        ekka_ct:stop_slave(Peer),
-        catch ekka_cluster:force_leave(Peer)
+        cleanup_offline_peer(Peer)
     end.
 
 %%--------------------------------------------------------------------
 %% Helpers
 %%--------------------------------------------------------------------
+
+stop_offline_peer(Peer) ->
+    ok = ekka_ct:stop_slave(Peer),
+    %% The membership-down notification can arrive before Mnesia observes the stop.
+    wait_mnesia_down(Peer, 100).
+
+wait_mnesia_down(Peer, Tries) ->
+    Running = ekka_mnesia:running_nodes(),
+    case lists:member(Peer, Running) of
+        false -> ok;
+        true when Tries > 0 ->
+            timer:sleep(50),
+            wait_mnesia_down(Peer, Tries - 1);
+        true -> error({test_peer_mnesia_still_running, Peer, Running})
+    end.
+
+cleanup_offline_peer(Peer) ->
+    ok = stop_offline_peer(Peer),
+    Result = case ekka_mnesia:is_node_in_cluster(Peer) of
+        true -> ekka_cluster:force_leave(Peer);
+        false -> ok
+    end,
+    Schema = ekka_mnesia:cluster_nodes(all),
+    case {Result, lists:member(Peer, Schema)} of
+        {ok, false} -> ok;
+        {{error, node_not_in_cluster}, false} -> ok;
+        _ -> error({test_peer_cleanup_failed, Peer, Result, Schema})
+    end.
 
 install_guard(Node, Decide) ->
     Guard = fun(_Node, _Targets, Action) -> Decide(Action) end,
