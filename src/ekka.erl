@@ -88,15 +88,15 @@
 %% Start/Stop
 %%--------------------------------------------------------------------
 
--spec(start() -> ok).
+-spec(start() -> ok | {error, term()}).
 start() ->
     case ekka_mnesia:start() of
-        ok -> ok;
+        ok ->
+            {ok, _Apps} = application:ensure_all_started(ekka),
+            ok;
         {error, Reason} ->
-            error(Reason)
-    end,
-    {ok, _Apps} = application:ensure_all_started(ekka),
-    ok.
+            {error, Reason}
+    end.
 
 -spec(stop() -> ok).
 stop() ->

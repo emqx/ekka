@@ -35,6 +35,25 @@ end_per_suite(_Config) ->
     ok = application:stop(ekka),
     ekka_mnesia:ensure_stopped().
 
+t_membership_guard(_) ->
+    Reject = fun(Node, Targets, _) -> {error, {busy, Node, Targets}} end,
+    ok = ekka:callback(membership_guard, Reject),
+    Local = node(),
+    Peer = 'peer@localhost',
+    try
+        ?assertEqual({error, {guard_refused, {busy, Local, []}}}, ekka_mnesia:start()),
+        ?assertEqual({error, {busy, Local, []}}, ekka_mnesia:ensure_started()),
+        ?assertEqual(ok, ekka_cluster:heal(reboot)),
+        ?assertEqual({error, {busy, Local, [Peer]}}, ekka_mnesia:join_cluster(Peer)),
+        ?assertEqual({error, {busy, Peer, []}}, ekka_cluster:force_leave(Peer)),
+        ?assertEqual({error, {guard_refused, {busy, Local, []}}},
+                     ekka_cluster:heal(shutdown_and_reboot)),
+        ?assert(is_pid(whereis(ekka_sup))),
+        ?assertEqual(yes, mnesia:system_info(is_running))
+    after
+        application:unset_env(ekka, {callback, membership_guard})
+    end.
+
 t_data_dir(_) ->
     ekka_mnesia:data_dir().
 

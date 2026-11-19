@@ -18,8 +18,21 @@
 
 -include("ekka.hrl").
 
+-define(LOG(Level, Format, Args),
+        logger:Level("Ekka(Mnesia): " ++ Format, Args)).
+
+%% Marks that the membership guard ran the action; a rejected action never runs it.
+-define(GUARD_RAN, {?MODULE, guard_ran}).
+
 %% Start and stop mnesia
 -export([ start/0
+        , restart/1
+        , restart_membership/1
+        , resume_membership/0
+        , guarded/3
+        , guarded_refusal/3
+        , transient_refusal/1
+        , join_cluster/2
         , ensure_started/0
         , ensure_stopped/0
         , connect/1
@@ -61,8 +74,13 @@
 %%--------------------------------------------------------------------
 
 %% @doc Start mnesia database
+%% A membership guard refusal is reported as {error, {guard_refused, Reason}} so the
+%% application start can be retried.
 -spec(start() -> ok | {error, term()}).
 start() ->
+    guarded_refusal(node(), [], fun start_mnesia/0).
+
+start_mnesia() ->
     ensure_ok(ensure_data_dir()),
     ensure_ok(init_schema()),
     ok = mnesia:start(),
@@ -83,6 +101,36 @@ data_dir() -> mnesia:system_info(directory).
 %% @doc Ensure mnesia started
 -spec(ensure_started() -> ok | {error, any()}).
 ensure_started() ->
+    guarded(node(), [], fun start_and_wait/0).
+
+%% A legacy heal has already stopped this node. Retry admission to start Mnesia
+%% separately from application recovery.
+resume_membership() ->
+    guarded_refusal(node(), [], fun() ->
+        case mnesia:system_info(is_running) of
+            yes -> ok;
+            _ -> start_and_wait()
+        end
+    end).
+
+restart(Prepare) ->
+    guarded(node(), [], fun() ->
+        ensure_ok(Prepare()),
+        ensure_ok(ensure_stopped()),
+        start_and_wait()
+    end).
+
+%% Restart mnesia for a membership change. A guard refusal happened before the local
+%% application was stopped, so it is reported as {error, {guard_refused, Reason}} and can
+%% be retried; an error after the stop/start started keeps its own shape.
+restart_membership(Prepare) ->
+    guarded_refusal(node(), [], fun() ->
+        ensure_ok(Prepare()),
+        ensure_ok(ensure_stopped()),
+        start_and_wait()
+    end).
+
+start_and_wait() ->
     ok = mnesia:start(), wait_for(start).
 
 %% @doc Ensure mnesia stopped
@@ -154,13 +202,106 @@ del_schema_copy(Node) ->
 %%--------------------------------------------------------------------
 
 %% @doc Join the mnesia cluster
--spec(join_cluster(node()) -> ok).
+-spec(join_cluster(node()) -> ok | {error, term()}).
 join_cluster(Node) when Node =/= node() ->
+    join_cluster(Node, fun() -> ok end).
+
+join_cluster(Node, Prepare) when Node =/= node() ->
+    guarded(node(), [Node], fun() ->
+        case Prepare() of
+            ok -> do_join(Node);
+            Error -> Error
+        end
+    end).
+
+%% The guard either runs the action and returns its result, or refuses it with
+%% {error, Reason} without changing anything.
+-spec guarded(node(), [node()], fun(() -> T)) -> T | {error, term()}.
+guarded(Node, Targets, Action) ->
+    guarded(Node, Targets, Action, fun(Reason) -> {error, Reason} end).
+
+%% Same as guarded/3, but a refusal is reported as {error, {guard_refused, Reason}} so the
+%% caller can tell it apart from an error returned by the action.
+-spec guarded_refusal(node(), [node()], fun(() -> T)) -> T | {error, term()}.
+guarded_refusal(Node, Targets, Action) ->
+    Refusal = make_ref(),
+    try guarded(Node, Targets, Action, fun(Reason) -> {Refusal, Reason} end) of
+        {Refusal, Reason} -> {error, {guard_refused, Reason}};
+        {error, {guard_refused, _} = Reason} -> {error, {membership_action_failed, Reason}};
+        Result -> Result
+    catch
+        %% An ordinary throw is returned as a value by rpc:call.
+        throw:{error, {guard_refused, _} = Reason} -> {error, {membership_action_failed, Reason}}
+    end.
+
+guarded(Node, Targets, Action, OnRefusal) ->
+    case ekka:callback(membership_guard) of
+        {ok, Guard} ->
+            Marker = make_ref(),
+            Previous = get(?GUARD_RAN),
+            try
+                Result = Guard(Node, Targets, fun() -> put(?GUARD_RAN, Marker), Action() end),
+                case Result of
+                    {error, Reason} ->
+                        case get(?GUARD_RAN) of
+                            Marker -> Result;
+                            _ -> report_rejection(Node, Reason), OnRefusal(Reason)
+                        end;
+                    _ ->
+                        Result
+                end
+            after
+                restore_marker(Previous)
+            end;
+        undefined ->
+            Action()
+    end.
+
+%% A refusal is transient when the membership change is currently blocked and the same
+%% operation can be attempted again. Any other refusal is reported to the caller without
+%% retrying.
+-spec transient_refusal(term()) -> boolean().
+transient_refusal(busy) -> true;
+transient_refusal({route_cleanup_busy, _Node}) -> true;
+transient_refusal(cluster_view_changed) -> true;
+transient_refusal(cluster_view_unavailable) -> true;
+transient_refusal(cluster_lock_unavailable) -> true;
+transient_refusal(_) -> false.
+
+%% A refusal means the membership change did not even start. It is expected while another
+%% membership change or a cleanup holds the cleanup lock for the node, or while the cluster
+%% membership cannot be confirmed.
+report_rejection(Node, Reason) ->
+    ?LOG(warning, "Membership change for ~p was refused by the membership guard: ~p. "
+                  "Nothing was changed. This is expected while another membership change or "
+                  "a cleanup holds the cleanup lock for that node, or while the cluster "
+                  "membership cannot be confirmed; retry once that operation completes. "
+                  "Cleanup lock holders on ~p: ~p (pid and node).",
+         [Node, Reason, node(), lock_holders(Node)]).
+
+restore_marker(undefined) ->
+    erase(?GUARD_RAN),
+    ok;
+restore_marker(Marker) ->
+    put(?GUARD_RAN, Marker).
+
+%% Diagnostic only: holders of the cleanup lock for Node registered on this node. The lock
+%% is shared with the upper-layer route cleanup and is not necessarily held here.
+lock_holders(Node) ->
+    try
+        case ets:lookup(global_locks, {route_cleanup, Node}) of
+            [{_Resource, _Requester, Holders}] -> [{Pid, node(Pid)} || {Pid, _Ref} <- Holders];
+            [] -> []
+        end
+    catch _:_ -> []
+    end.
+
+do_join(Node) ->
     %% Stop mnesia and delete schema first
     ensure_ok(ensure_stopped()),
     ensure_ok(delete_schema()),
     %% Start mnesia and cluster to node
-    ensure_ok(ensure_started()),
+    ensure_ok(start_and_wait()),
     ensure_ok(connect(Node)),
     ensure_ok(copy_schema(node())),
     %% Copy tables
@@ -190,8 +331,8 @@ cluster_status(Node) ->
 
 -spec(cluster_view() -> {[node()], [node()]}).
 cluster_view() ->
-    list_to_tuple([lists:sort(cluster_nodes(Status))
-                   || Status <- [running, stopped]]).
+    Running = lists:sort(running_nodes()),
+    {Running, lists:sort(cluster_nodes(all) -- Running)}.
 
 %% @doc This node try leave the cluster
 -spec(leave_cluster() -> ok | {error, any()}).
@@ -233,9 +374,12 @@ remove_from_cluster(Node) when Node =/= node() ->
             ensure_ok(del_schema_copy(Node)),
             ensure_ok(rpc:call(Node, ?MODULE, delete_schema, []));
         {true, false} ->
-            mnesia_lib:del(extra_db_nodes, Node),
-            ensure_ok(del_schema_copy(Node));
-            %ensure_ok(rpc:call(Node, ?MODULE, delete_schema, []));
+            case del_schema_copy(Node) of
+                ok ->
+                    mnesia_lib:del(extra_db_nodes, Node),
+                    ok;
+                Error -> Error
+            end;
         {false, _} ->
             {error, node_not_in_cluster}
     end.

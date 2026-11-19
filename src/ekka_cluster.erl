@@ -17,11 +17,23 @@
 %% @doc Cluster via Mnesia database.
 -module(ekka_cluster).
 
+-define(LOG(Level, Format, Args),
+        logger:Level("Ekka(Cluster): " ++ Format, Args)).
+
+%% The target may go down between the entry check and the guarded join.
+-define(JOIN_TARGET_TIMEOUT, 5000).
+
+%% Applications are restarted after a membership change has committed. The application
+%% start reserves the same membership lock again, so a transient rejection must be retried
+%% instead of leaving Mnesia started and the applications stopped.
+-define(RECOVERY_RETRY_DELAYS, [1000, 2000, 4000]).
+
 -export([info/0, info/1]).
 
 %% Cluster API
 -export([ join/1
         , leave/0
+        , force_leave/2
         , force_leave/1
         , status/1
         ]).
@@ -54,58 +66,117 @@ status(Node) -> ekka_mnesia:cluster_status(Node).
 join(Node) when Node =:= node() ->
     ignore;
 join(Node) when is_atom(Node) ->
-    case {ekka_mnesia:is_node_in_cluster(Node), ekka_node:is_running(Node, ekka)} of
-        {false, true} ->
-            prepare(join), ok = ekka_mnesia:join_cluster(Node), reboot();
-        {false, false} ->
-            {error, {node_down, Node}};
-        {true, _} ->
-            {error, {already_in_cluster, Node}}
+    with_join_target(Node, fun() ->
+        maybe_reboot(ekka_mnesia:join_cluster(Node, fun() -> prepare_join(Node) end))
+    end).
+
+%% Runs inside the membership guard, before prepare/1 stops the local application: the
+%% target can go down while the join waits for a concurrent membership change.
+prepare_join(Node) ->
+    with_join_target(Node, fun() -> prepare(join) end).
+
+with_join_target(Node, Action) ->
+    case ekka_mnesia:is_node_in_cluster(Node) of
+        true ->
+            {error, {already_in_cluster, Node}};
+        false ->
+            case ekka_node:is_running(Node, ekka, ?JOIN_TARGET_TIMEOUT) of
+                true -> Action();
+                false -> {error, {node_down, Node}}
+            end
     end.
 
 %% @doc Leave from the cluster.
 -spec(leave() -> ok | {error, any()}).
 leave() ->
-    case ekka_mnesia:running_nodes() -- [node()] of
-        [_|_] ->
-            prepare(leave), ok = ekka_mnesia:leave_cluster(), reboot();
-        [] ->
-            {error, node_not_in_cluster}
-    end.
+    Result = ekka_mnesia:guarded(node(), [], fun() ->
+        case ekka_mnesia:running_nodes() -- [node()] of
+            [] -> {error, node_not_in_cluster};
+            [_ | _] ->
+                case prepare(leave) of
+                    ok -> ekka_mnesia:leave_cluster();
+                    Error -> Error
+                end
+        end
+    end),
+    maybe_reboot(Result).
 
 %% @doc Force a node leave from cluster.
 -spec(force_leave(node()) -> ok | ignore | {error, term()}).
-force_leave(Node) when Node =:= node() ->
-    ignore;
 force_leave(Node) ->
+    force_leave(Node, fun() -> true end).
+
+force_leave(Node, _Check) when Node =:= node() ->
+    ignore;
+force_leave(Node, Check) ->
+    Result = ekka_mnesia:guarded(Node, [], fun() ->
+        case Check() of
+            true -> do_force_leave(Node);
+            false -> ignore
+        end
+    end),
+    case Result of
+        reboot -> rpc:call(Node, ?MODULE, reboot, []);
+        _ -> Result
+    end.
+
+do_force_leave(Node) ->
     case ekka_mnesia:is_node_in_cluster(Node)
          andalso rpc:call(Node, ?MODULE, prepare, [leave]) of
         ok ->
             case ekka_mnesia:remove_from_cluster(Node) of
-                ok    -> rpc:call(Node, ?MODULE, reboot, []);
+                ok    -> reboot;
                 Error -> Error
             end;
         false ->
             ekka_membership:announce({force_leave, Node}),
             {error, node_not_in_cluster};
         {badrpc, nodedown} ->
-            ekka_membership:announce({force_leave, Node}),
-            ekka_mnesia:remove_from_cluster(Node);
+            case ekka_mnesia:remove_from_cluster(Node) of
+                ok -> ekka_membership:announce({force_leave, Node});
+                Error -> Error
+            end;
         {badrpc, Reason} ->
-            {error, Reason}
+            {error, Reason};
+        {error, _} = Error -> Error
     end.
 
 %% @doc Heal partitions
 -spec(heal(shutdown | reboot | shutdown_and_reboot) -> ok | {error, term()}).
 heal(shutdown) ->
-    prepare(heal), ekka_mnesia:ensure_stopped();
+    ekka_mnesia:guarded_refusal(node(), [], fun() ->
+        case prepare(heal) of
+            ok -> ekka_mnesia:ensure_stopped();
+            Error -> Error
+        end
+    end);
 heal(reboot) ->
-    ekka_mnesia:ensure_started(), reboot();
+    case mnesia:system_info(is_running) of
+        yes ->
+            %% Old coordinators send reboot even when shutdown was refused.
+            case applications_recovered() of
+                true -> ok;
+                false -> reboot()
+            end;
+        _ ->
+            Result = retry_guard_refusal(fun ekka_mnesia:resume_membership/0,
+                                         mnesia_start, ?RECOVERY_RETRY_DELAYS),
+            maybe_reboot(Result)
+    end;
 heal(shutdown_and_reboot) ->
-    prepare(heal),
-    ekka_mnesia:ensure_stopped(),
-    ekka_mnesia:ensure_started(),
-    reboot().
+    maybe_reboot(ekka_mnesia:restart_membership(fun() -> prepare(heal) end)).
+
+applications_recovered() ->
+    ekka_node:is_running(ekka) andalso
+        case ekka:callback(reboot_ready) of
+            {ok, Ready} -> Ready() =:= true;
+            undefined -> true
+        end.
+
+%% The Mnesia stop/start (or the membership change) is committed at this point; only the
+%% application start can be retried.
+maybe_reboot(ok) -> reboot();
+maybe_reboot(Error) -> Error.
 
 %% @doc Prepare to join or leave the cluster.
 -spec(prepare(join | leave | heal) -> ok | {error, term()}).
@@ -117,9 +188,48 @@ prepare(Action) ->
     end.
 
 %% @doc Reboot after join or leave cluster.
+%% The application stage reserves the membership lock again, so a transient guard refusal
+%% of the application start is retried here (and only here); the Mnesia stop/start is
+%% never repeated.
 -spec(reboot() -> ok | {error, term()}).
 reboot() ->
+    try retry_guard_refusal(fun do_reboot/0, application_start, ?RECOVERY_RETRY_DELAYS) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            restart_failed(Reason);
+        Other ->
+            restart_failed({bad_return, Other})
+    catch
+        throw:{error, {guard_refused, _} = Reason} ->
+            restart_failed(Reason)
+    end.
+
+retry_guard_refusal(Action, Stage, Delays) ->
+    case {Action(), Delays} of
+        {{error, {guard_refused, Reason}} = Error, [Delay | Rest]} ->
+            case ekka_mnesia:transient_refusal(Reason) of
+                true ->
+                    ?LOG(warning, "Recovery stage ~p was refused: ~p; retrying in ~p ms.",
+                         [Stage, Reason, Delay]),
+                    timer:sleep(Delay),
+                    retry_guard_refusal(Action, Stage, Rest);
+                false ->
+                    Error
+            end;
+        {Result, _} ->
+            Result
+    end.
+
+do_reboot() ->
     case ekka:callback(reboot) of
         {ok, Reboot} -> Reboot();
         undefined    -> ekka:start()
     end.
+
+restart_failed(Reason) ->
+    ?LOG(error, "Applications were not restarted after the membership change: ~p. The node "
+                "does not serve until they are restarted; a refusal log on the affected "
+                "node names the lock holder if the membership guard refused the start.",
+         [Reason]),
+    {error, {application_restart_failed, Reason}}.
