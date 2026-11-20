@@ -42,8 +42,6 @@
 %% A heal request is re-confirmed (membership view re-read, heal plan recomputed) at most
 %% this many times when the membership guard rejects it.
 -define(HEAL_ATTEMPTS, 3).
--define(LEGACY_SHUTDOWN_TIMEOUT, 30000).
--define(LEGACY_SHUTDOWN_CONFIRM_TIMEOUT, 30000).
 
 init() ->
     case enabled() of
@@ -248,8 +246,8 @@ retry_heal(Failed, Delay, Attempts) ->
 
 %% Only a refusal that happened before the membership change started and is known to be
 %% transient can be retried. Any other error means the change may have started or its
-%% outcome is unknown (a badrpc, a failure after the stop/start, a failed legacy two-step
-%% heal); replaying it could stop the peer again, so it is never retried.
+%% outcome is unknown (a badrpc or a failure after the stop/start). Replaying it
+%% could stop the peer again.
 retryable({error, {guard_refused, Reason}}) -> ekka_mnesia:transient_refusal(Reason);
 retryable(_) -> false.
 
@@ -282,14 +280,6 @@ heal_node(Node) ->
         ok ->
             ?LOG(info, "Healed ~s for autoheal", [Node]),
             ok;
-        {badrpc, {'EXIT', {function_clause,
-                           [{ekka_cluster, heal, [shutdown_and_reboot], _} | _]}}} ->
-            %% Old ekka on peer - fall back to legacy two-rpc path
-            ?LOG(warning, "Heal ~s: peer runs legacy ekka; using the two-step fallback", [Node]),
-            case legacy_heal(Node) of
-                {error, {guard_refused, Reason}} -> {error, {legacy_heal_refused, Reason}};
-                LegacyResult -> LegacyResult
-            end;
         {error, {guard_refused, Reason}} ->
             ?LOG(warning, "Heal ~s was refused: ~p", [Node, Reason]),
             {error, {guard_refused, Reason}};
@@ -303,52 +293,6 @@ heal_node(Node) ->
         Other ->
             ?LOG(warning, "Heal ~s returned ~p", [Node, Other]),
             Other
-    end.
-
-%% Old peers have no membership guard, so a legacy failure is never a retryable refusal.
-%% Once the shutdown step succeeded, replaying this path must not stop the peer again.
-legacy_heal(Node) ->
-    case rpc:call(Node, ekka_cluster, heal, [shutdown], ?LEGACY_SHUTDOWN_TIMEOUT) of
-        ok ->
-            legacy_reboot(Node);
-        {badrpc, timeout} = Timeout ->
-            %% The remote shutdown can finish after the RPC times out.
-            ?LOG(warning, "Shutdown of ~s for autoheal timed out; waiting for Mnesia to stop",
-                 [Node]),
-            Deadline = erlang:monotonic_time(millisecond) + ?LEGACY_SHUTDOWN_CONFIRM_TIMEOUT,
-            case confirm_legacy_shutdown(Node, Deadline) of
-                ok -> legacy_reboot(Node);
-                timeout ->
-                    ?LOG(warning, "Could not confirm shutdown of ~s for autoheal", [Node]),
-                    Timeout
-            end;
-        Error ->
-            ?LOG(warning, "Shutdown of ~s for autoheal (legacy) failed: ~p", [Node, Error]),
-            Error
-    end.
-
-confirm_legacy_shutdown(Node, Deadline) ->
-    case Deadline - erlang:monotonic_time(millisecond) of
-        Remaining when Remaining > 0 ->
-            case rpc:call(Node, mnesia, system_info, [is_running], min(1000, Remaining)) of
-                no -> ok;
-                _ ->
-                    timer:sleep(min(250, max(0, Deadline - erlang:monotonic_time(millisecond)))),
-                    confirm_legacy_shutdown(Node, Deadline)
-            end;
-        _ ->
-            timeout
-    end.
-
-legacy_reboot(Node) ->
-    timer:sleep(rand:uniform(1000) + 100),
-    case rpc:call(Node, ekka_cluster, heal, [reboot], 30000) of
-        ok ->
-            ?LOG(info, "Healed ~s for autoheal (legacy two-step)", [Node]),
-            ok;
-        Error ->
-            ?LOG(warning, "Reboot of ~s for autoheal (legacy) failed: ~p", [Node, Error]),
-            Error
     end.
 
 ensure_cancel_timer(undefined) ->

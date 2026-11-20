@@ -366,22 +366,6 @@ extract_heal_node_body(Src) ->
             end
     end.
 
-%% Verifies the legacy fallback branch: if the peer only supports
-%% heal(shutdown) / heal(reboot) (old ekka), heal_node/1 catches the
-%% function_clause from heal(shutdown_and_reboot) and invokes both legacy rpcs.
-%% We install a shim ekka_cluster module on the slave that only exports
-%% the two legacy clauses and records invocations in an ETS table.
-t_heal_legacy_fallback(_Config) ->
-    Node = start_slave_node(lf1),
-    try
-        ok = install_legacy_shim(Node, "ok"),
-        ?assertEqual(ok, ekka_autoheal:heal_node(Node)),
-        Calls = rpc:call(Node, ets, tab2list, [heal_calls]),
-        ?assertEqual([{call, reboot}, {call, shutdown}], lists:sort(Calls))
-    after
-        ekka_ct:stop_slave(Node)
-    end.
-
 t_heal_does_not_fallback_on_internal_function_clause(_Config) ->
     Node = start_slave_node(heal_internal_clause),
     try
@@ -400,84 +384,6 @@ t_heal_does_not_fallback_on_internal_function_clause(_Config) ->
     end.
 
 prepare_join_only(join) -> ok.
-
-t_heal_returns_legacy_reboot_failure(_Config) ->
-    Node = start_slave_node(lf2),
-    try
-        ok = install_legacy_shim(Node, "{error, simulated_reboot_failure}"),
-        ?assertEqual({error, simulated_reboot_failure}, ekka_autoheal:heal_node(Node)),
-        Calls = rpc:call(Node, ets, tab2list, [heal_calls]),
-        ?assertEqual([{call, reboot}, {call, shutdown}], lists:sort(Calls))
-    after
-        ekka_ct:stop_slave(Node)
-    end.
-
-t_heal_recovers_after_legacy_shutdown_timeout(_Config) ->
-    Node = start_slave_node(lf_slow),
-    try
-        Shutdown = "timer:sleep(31000), ok = application:stop(ekka), "
-                   "ekka_mnesia:ensure_stopped()",
-        Reboot = "no = mnesia:system_info(is_running), "
-                 "ok = ekka_mnesia:ensure_started(), application:start(ekka)",
-        ok = install_legacy_shim(Node, Shutdown, Reboot),
-        ok = rpc:call(Node, application, start, [ekka]),
-        ?assertEqual(ok, ekka_autoheal:heal_node(Node)),
-        Calls = rpc:call(Node, ets, tab2list, [heal_calls]),
-        ?assertEqual([{call, reboot}, {call, shutdown}], lists:sort(Calls)),
-        ?assertEqual(yes, rpc:call(Node, mnesia, system_info, [is_running])),
-        ?assert(ekka:is_running(Node, ekka))
-    after
-        ekka_ct:stop_slave(Node)
-    end.
-
-%% Install a legacy-shape ekka_cluster shim on the peer: heal/1 has only the two old
-%% clauses and records every call in a long-lived ETS table.
-install_legacy_shim(Node, RebootResult) ->
-    install_legacy_shim(Node, "ok", RebootResult).
-
-install_legacy_shim(Node, Shutdown, Reboot) ->
-    ShimForms = legacy_shim_forms(Shutdown, Reboot),
-    {ok, ekka_cluster, ShimBin} = compile:forms(ShimForms, [return_errors]),
-    %% Stop real ekka on the peer so swapping its cluster module is safe.
-    ok = rpc:call(Node, application, stop, [ekka]),
-    true = rpc:call(Node, code, delete, [ekka_cluster]),
-    _ = rpc:call(Node, code, purge, [ekka_cluster]),
-    {module, ekka_cluster} =
-        rpc:call(Node, code, load_binary,
-                 [ekka_cluster, "ekka_cluster.erl", ShimBin]),
-    %% The table must outlive the rpc:call, so a long-lived owner creates it.
-    _Owner = rpc:call(Node, erlang, spawn,
-                      [fun() ->
-                           ets:new(heal_calls, [public, named_table, duplicate_bag]),
-                           receive stop -> ok end
-                       end]),
-    wait_until(fun() -> rpc:call(Node, ets, info, [heal_calls, size]) =/= undefined end, 50).
-
-%% Abstract forms for a legacy-shape ekka_cluster shim:
-%%   -module(ekka_cluster).
-%%   -export([heal/1]).
-%%   heal(shutdown) -> ets:insert(heal_calls, {call, shutdown}), ok;
-%%   heal(reboot)   -> ets:insert(heal_calls, {call, reboot}), ok.
-legacy_shim_forms(Shutdown, Reboot) ->
-    Src = "-module(ekka_cluster).\n"
-          "-export([heal/1]).\n"
-          "heal(shutdown) ->\n"
-          "    ets:insert(heal_calls, {call, shutdown}), " ++ Shutdown ++ ";\n"
-          "heal(reboot) ->\n"
-          "    ets:insert(heal_calls, {call, reboot}), " ++ Reboot ++ ".\n",
-    {ok, Toks, _} = erl_scan:string(Src),
-    FormTokens = split_forms(Toks, [], []),
-    [begin {ok, F} = erl_parse:parse_form(Ts), F end || Ts <- FormTokens].
-
-split_forms([], [], Acc) ->
-    lists:reverse(Acc);
-split_forms([], _Cur, Acc) ->
-    %% Trailing tokens without a dot: ignore (shouldn't happen for valid src).
-    lists:reverse(Acc);
-split_forms([{dot, _} = D | Rest], Cur, Acc) ->
-    split_forms(Rest, [], [lists:reverse([D | Cur]) | Acc]);
-split_forms([T | Rest], Cur, Acc) ->
-    split_forms(Rest, [T | Cur], Acc).
 
 %% Poll Fun/0 until it returns true or Retries attempts have elapsed.
 %% Sleep 50ms between attempts. Returns ok on success, errors on timeout.

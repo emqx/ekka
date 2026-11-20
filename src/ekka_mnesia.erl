@@ -21,14 +21,10 @@
 -define(LOG(Level, Format, Args),
         logger:Level("Ekka(Mnesia): " ++ Format, Args)).
 
-%% Marks that the membership guard ran the action; a rejected action never runs it.
--define(GUARD_RAN, {?MODULE, guard_ran}).
-
 %% Start and stop mnesia
 -export([ start/0
         , restart/1
         , restart_membership/1
-        , resume_membership/0
         , guarded/3
         , guarded_refusal/3
         , transient_refusal/1
@@ -102,16 +98,6 @@ data_dir() -> mnesia:system_info(directory).
 -spec(ensure_started() -> ok | {error, any()}).
 ensure_started() ->
     guarded(node(), [], fun start_and_wait/0).
-
-%% A legacy heal has already stopped this node. Retry admission to start Mnesia
-%% separately from application recovery.
-resume_membership() ->
-    guarded_refusal(node(), [], fun() ->
-        case mnesia:system_info(is_running) of
-            yes -> ok;
-            _ -> start_and_wait()
-        end
-    end).
 
 restart(Prepare) ->
     guarded(node(), [], fun() ->
@@ -237,21 +223,18 @@ guarded_refusal(Node, Targets, Action) ->
 guarded(Node, Targets, Action, OnRefusal) ->
     case ekka:callback(membership_guard) of
         {ok, Guard} ->
-            Marker = make_ref(),
-            Previous = get(?GUARD_RAN),
+            %% A synchronous guard may execute the action in another local worker.
+            Marker = ets:new(membership_action, [public]),
             try
-                Result = Guard(Node, Targets, fun() -> put(?GUARD_RAN, Marker), Action() end),
-                case Result of
-                    {error, Reason} ->
-                        case get(?GUARD_RAN) of
-                            Marker -> Result;
-                            _ -> report_rejection(Node, Reason), OnRefusal(Reason)
-                        end;
-                    _ ->
-                        Result
+                Result = Guard(Node, Targets, fun() -> ets:insert(Marker, {ran}), Action() end),
+                case {Result, ets:member(Marker, ran)} of
+                    {{error, Reason}, false} ->
+                        report_rejection(Node, Reason),
+                        OnRefusal(Reason);
+                    _ -> Result
                 end
             after
-                restore_marker(Previous)
+                ets:delete(Marker)
             end;
         undefined ->
             Action()
@@ -278,12 +261,6 @@ report_rejection(Node, Reason) ->
                   "membership cannot be confirmed; retry once that operation completes. "
                   "Cleanup lock holders on ~p: ~p (pid and node).",
          [Node, Reason, node(), lock_holders(Node)]).
-
-restore_marker(undefined) ->
-    erase(?GUARD_RAN),
-    ok;
-restore_marker(Marker) ->
-    put(?GUARD_RAN, Marker).
 
 %% Diagnostic only: holders of the cleanup lock for Node registered on this node. The lock
 %% is shared with the upper-layer route cleanup and is not necessarily held here.

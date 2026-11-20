@@ -43,7 +43,6 @@ t_membership_guard(_) ->
     try
         ?assertEqual({error, {guard_refused, {busy, Local, []}}}, ekka_mnesia:start()),
         ?assertEqual({error, {busy, Local, []}}, ekka_mnesia:ensure_started()),
-        ?assertEqual(ok, ekka_cluster:heal(reboot)),
         ?assertEqual({error, {busy, Local, [Peer]}}, ekka_mnesia:join_cluster(Peer)),
         ?assertEqual({error, {busy, Peer, []}}, ekka_cluster:force_leave(Peer)),
         ?assertEqual({error, {guard_refused, {busy, Local, []}}},

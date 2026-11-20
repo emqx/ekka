@@ -142,36 +142,9 @@ do_force_leave(Node) ->
     end.
 
 %% @doc Heal partitions
--spec(heal(shutdown | reboot | shutdown_and_reboot) -> ok | {error, term()}).
-heal(shutdown) ->
-    ekka_mnesia:guarded_refusal(node(), [], fun() ->
-        case prepare(heal) of
-            ok -> ekka_mnesia:ensure_stopped();
-            Error -> Error
-        end
-    end);
-heal(reboot) ->
-    case mnesia:system_info(is_running) of
-        yes ->
-            %% Old coordinators send reboot even when shutdown was refused.
-            case applications_recovered() of
-                true -> ok;
-                false -> reboot()
-            end;
-        _ ->
-            Result = retry_guard_refusal(fun ekka_mnesia:resume_membership/0,
-                                         mnesia_start, ?RECOVERY_RETRY_DELAYS),
-            maybe_reboot(Result)
-    end;
+-spec(heal(shutdown_and_reboot) -> ok | {error, term()}).
 heal(shutdown_and_reboot) ->
     maybe_reboot(ekka_mnesia:restart_membership(fun() -> prepare(heal) end)).
-
-applications_recovered() ->
-    ekka_node:is_running(ekka) andalso
-        case ekka:callback(reboot_ready) of
-            {ok, Ready} -> Ready() =:= true;
-            undefined -> true
-        end.
 
 %% The Mnesia stop/start (or the membership change) is committed at this point; only the
 %% application start can be retried.

@@ -113,73 +113,6 @@ t_force_leave(_) ->
         ok = ekka_ct:stop_slave(N2)
     end.
 
-t_heal_shutdown(_) ->
-    N1 = ekka_ct:start_slave(ekka, n1),
-    ok = rpc:call(N1, ekka_cluster, heal, [shutdown]),
-    ok = ekka_ct:stop_slave(N1).
-
-t_heal_reboot(_) ->
-    N1 = ekka_ct:start_slave(ekka, n1),
-    ok = rpc:call(N1, ekka_cluster, heal, [reboot]),
-    ok = ekka_ct:stop_slave(N1).
-
-t_legacy_reboot_is_noop_after_refused_shutdown(_) ->
-    Node = ekka_ct:start_slave(ekka, legacy_refused),
-    try
-        install_prepare_counter(Node),
-        install_reboot_counter(Node),
-        install_guard(Node, fun(_Action) -> {error, busy} end),
-        Mnesia = rpc:call(Node, erlang, whereis, [mnesia_sup]),
-        ?assert(is_pid(Mnesia)),
-        CheckShutdown = fun(Result) ->
-            ?assertEqual({error, {guard_refused, busy}}, Result),
-            ?assert(ekka:is_running(Node, ekka))
-        end,
-        ?assertEqual(ok, legacy_coordinator_heal(Node, CheckShutdown)),
-        ?assertEqual(0, counter(Node, prepares)),
-        ?assertEqual(0, counter(Node, reboots)),
-        ?assertEqual(Mnesia, rpc:call(Node, erlang, whereis, [mnesia_sup])),
-        ?assert(ekka:is_running(Node, ekka))
-    after
-        ekka_ct:stop_slave(Node)
-    end.
-
-t_legacy_heal_recovers_after_refused_mnesia_start(_) ->
-    Node = ekka_ct:start_slave(ekka, legacy_recover),
-    try
-        install_prepare_counter(Node),
-        install_reboot_counter(Node),
-        install_guard(Node, fun(Action) ->
-            case bump(guard_calls) of
-                2 ->
-                    no = mnesia:system_info(is_running),
-                    {error, busy};
-                _ ->
-                    Action()
-            end
-        end),
-        CheckShutdown = fun(Result) ->
-            ?assertEqual(ok, Result),
-            ?assertEqual(no, rpc:call(Node, mnesia, system_info, [is_running])),
-            ?assertNot(ekka:is_running(Node, ekka))
-        end,
-        ?assertEqual(ok, legacy_coordinator_heal(Node, CheckShutdown)),
-        ?assertEqual(1, counter(Node, prepares)),
-        ?assertEqual(1, counter(Node, reboots)),
-        ?assertEqual(4, counter(Node, guard_calls)),
-        ?assertEqual(yes, rpc:call(Node, mnesia, system_info, [is_running])),
-        ?assert(ekka:is_running(Node, ekka))
-    after
-        ekka_ct:stop_slave(Node)
-    end.
-
-%% Ekka 0.8.1.11 logs the shutdown result and proceeds to reboot regardless.
-legacy_coordinator_heal(Node, CheckShutdown) ->
-    Result = rpc:call(Node, ekka_cluster, heal, [shutdown], 10000),
-    CheckShutdown(Result),
-    timer:sleep(rand:uniform(1000) + 100),
-    rpc:call(Node, ekka_cluster, heal, [reboot], 30000).
-
 t_prepare(_) ->
     N1 = ekka_ct:start_slave(ekka, n1),
     ok = rpc:call(N1, ekka_cluster, prepare, [join]),
@@ -285,6 +218,26 @@ t_heal_action_error_is_not_retried(_) ->
         ?assertNot(ekka:is_running(Node, ekka))
     after
         ekka_ct:stop_slave(Node)
+    end.
+
+t_guard_action_in_worker(_) ->
+    Guard = fun(_, _, Action) ->
+        {Pid, Ref} = spawn_monitor(fun() -> exit({action_result, Action()}) end),
+        receive
+            {'DOWN', Ref, process, Pid, Reason} ->
+                {action_result, Result} = Reason,
+                Result
+        end
+    end,
+    Previous = ekka:callback(membership_guard),
+    ok = ekka:callback(membership_guard, Guard),
+    try
+        ?assertEqual({error, busy}, ekka_mnesia:guarded_refusal(node(), [], fun() -> {error, busy} end))
+    after
+        case Previous of
+            undefined -> application:unset_env(ekka, {callback, membership_guard});
+            {ok, Old} -> ekka:callback(membership_guard, Old)
+        end
     end.
 
 t_heal_only_tags_refusals_before_the_action(_) ->
