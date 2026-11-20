@@ -65,6 +65,43 @@ t_join_leave(_) ->
         ok = ekka_ct:stop_slave(N2)
     end.
 
+t_join_reboots_with_joined_mnesia(_) ->
+    Target = node(),
+    Joiner = ekka_ct:start_slave(ekka, join_reboot),
+    Parent = self(),
+    Guard = fun(_, Targets, Action) ->
+        case Targets of
+            [Target] -> Action();
+            [] -> {error, refused_start}
+        end
+    end,
+    Reboot = fun() ->
+        Parent ! {rebooting, self()},
+        receive proceed -> ekka:start_for_application() after 15000 -> error(reboot_timeout) end
+    end,
+    try
+        ok = ekka_ct:wait_running(Joiner),
+        ok = rpc:call(Joiner, ekka, callback, [membership_guard, Guard]),
+        ok = rpc:call(Joiner, ekka, callback, [reboot, Reboot]),
+        Join = rpc:async_call(Joiner, ekka_cluster, join, [Target]),
+        Rebooter = receive {rebooting, Pid} -> Pid after 5000 -> error(reboot_not_started) end,
+        try
+            ?assertEqual({error, {guard_refused, refused_start}}, rpc:call(Joiner, ekka, start, []))
+        after
+            Rebooter ! proceed
+        end,
+        ?assertEqual(ok, rpc:yield(Join)),
+        ?assertEqual(running, ekka_cluster:status(Joiner)),
+        ?assert(ekka:is_running(Joiner, ekka)),
+        ?assertEqual({error, {guard_refused, refused_start}},
+            rpc:call(Joiner, ekka, start_for_application, []))
+    after
+        ok = rpc:call(Joiner, application, unset_env, [ekka, {callback, membership_guard}]),
+        ok = rpc:call(Joiner, application, unset_env, [ekka, {callback, reboot}]),
+        ok = ekka_cluster:force_leave(Joiner),
+        ok = ekka_ct:stop_slave(Joiner)
+    end.
+
 t_join_rechecks_membership(_) ->
     Target = node(),
     Peer = ekka_ct:start_slave(ekka, n1),

@@ -23,12 +23,14 @@
 
 %% Start and stop mnesia
 -export([ start/0
+        , start_for_application/0
         , restart/1
         , restart_membership/1
         , guarded/3
         , guarded_refusal/3
         , transient_refusal/1
         , join_cluster/2
+        , join_and_reboot/3
         , ensure_started/0
         , ensure_stopped/0
         , connect/1
@@ -75,6 +77,21 @@
 -spec(start() -> ok | {error, term()}).
 start() ->
     guarded_refusal(node(), [], fun start_mnesia/0).
+
+-spec(start_for_application() -> ok | {error, term()}).
+start_for_application() ->
+    case joined_mnesia_is_running() of
+        true -> ok;
+        false -> start()
+    end.
+
+joined_mnesia_is_running() ->
+    case application:get_env(ekka, joined_mnesia) of
+        {ok, {Joiner, Monitor}} when is_pid(Joiner), is_pid(Monitor) ->
+            whereis(mnesia_monitor) =:= Monitor andalso is_process_alive(Joiner) andalso
+                mnesia:system_info(is_running) =:= yes;
+        _ -> false
+    end.
 
 start_mnesia() ->
     ensure_ok(ensure_data_dir()),
@@ -193,9 +210,29 @@ join_cluster(Node) when Node =/= node() ->
     join_cluster(Node, fun() -> ok end).
 
 join_cluster(Node, Prepare) when Node =/= node() ->
+    guarded_join(Node, Prepare, fun() -> ok end).
+
+join_and_reboot(Node, Prepare, Reboot) when Node =/= node() ->
+    case guarded_join(Node, Prepare, fun() -> {joined, whereis(mnesia_monitor)} end) of
+        {joined, Monitor} ->
+            %% The application starts in a different process. Reuse the admitted Mnesia
+            %% instance for this reboot while it still owns the replicated tables.
+            Marker = {self(), Monitor},
+            ok = application:set_env(ekka, joined_mnesia, Marker),
+            try Reboot()
+            after
+                case application:get_env(ekka, joined_mnesia) of
+                    {ok, Marker} -> application:unset_env(ekka, joined_mnesia);
+                    _ -> ok
+                end
+            end;
+        Error -> Error
+    end.
+
+guarded_join(Node, Prepare, Joined) ->
     guarded(node(), [Node], fun() ->
         case Prepare() of
-            ok -> do_join(Node);
+            ok -> ok = do_join(Node), Joined();
             Error -> Error
         end
     end).

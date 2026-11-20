@@ -67,7 +67,8 @@ join(Node) when Node =:= node() ->
     ignore;
 join(Node) when is_atom(Node) ->
     with_join_target(Node, fun() ->
-        maybe_reboot(ekka_mnesia:join_cluster(Node, fun() -> prepare_join(Node) end))
+        ekka_mnesia:join_and_reboot(Node, fun() -> prepare_join(Node) end,
+            fun() -> reboot(fun ekka:start_for_application/0) end)
     end).
 
 %% Runs inside the membership guard, before prepare/1 stops the local application: the
@@ -161,12 +162,13 @@ prepare(Action) ->
     end.
 
 %% @doc Reboot after join or leave cluster.
-%% The application stage reserves the membership lock again, so a transient guard refusal
-%% of the application start is retried here (and only here); the Mnesia stop/start is
-%% never repeated.
+%% Retry a transient refusal of application startup without repeating the membership action.
 -spec(reboot() -> ok | {error, term()}).
 reboot() ->
-    try retry_guard_refusal(fun do_reboot/0, application_start, ?RECOVERY_RETRY_DELAYS) of
+    reboot(fun ekka:start/0).
+
+reboot(Default) ->
+    try retry_guard_refusal(fun() -> do_reboot(Default) end, application_start, ?RECOVERY_RETRY_DELAYS) of
         ok ->
             ok;
         {error, Reason} ->
@@ -194,10 +196,10 @@ retry_guard_refusal(Action, Stage, Delays) ->
             Result
     end.
 
-do_reboot() ->
+do_reboot(Default) ->
     case ekka:callback(reboot) of
         {ok, Reboot} -> Reboot();
-        undefined    -> ekka:start()
+        undefined    -> Default()
     end.
 
 restart_failed(Reason) ->
