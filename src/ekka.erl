@@ -19,7 +19,7 @@
 -include("ekka.hrl").
 
 %% Start/Stop
--export([start/0, stop/0]).
+-export([start/0, start_for_application/0, stop/0]).
 
 %% Env
 -export([env/1, env/2]).
@@ -88,15 +88,22 @@
 %% Start/Stop
 %%--------------------------------------------------------------------
 
--spec(start() -> ok).
+-spec(start() -> ok | {error, term()}).
 start() ->
-    case ekka_mnesia:start() of
-        ok -> ok;
+    start(fun ekka_mnesia:start/0).
+
+-spec(start_for_application() -> ok | {error, term()}).
+start_for_application() ->
+    start(fun ekka_mnesia:start_for_application/0).
+
+start(StartMnesia) ->
+    case StartMnesia() of
+        ok ->
+            {ok, _Apps} = application:ensure_all_started(ekka),
+            ok;
         {error, Reason} ->
-            error(Reason)
-    end,
-    {ok, _Apps} = application:ensure_all_started(ekka),
-    ok.
+            {error, Reason}
+    end.
 
 -spec(stop() -> ok).
 stop() ->

@@ -20,6 +20,7 @@
 -export([ is_aliving/1
         , is_running/1
         , is_running/2
+        , is_running/3
         , parse_name/1
         ]).
 
@@ -38,7 +39,12 @@ is_running(App) ->
 %% @doc Is the application running?
 -spec(is_running(node(), atom()) -> boolean()).
 is_running(Node, App) ->
-    case rpc:call(Node, ekka_node, is_running, [App]) of
+    is_running(Node, App, infinity).
+
+%% @doc Is the application running (with an explicit call timeout)?
+-spec(is_running(node(), atom(), timeout()) -> boolean()).
+is_running(Node, App, Timeout) ->
+    case rpc:call(Node, ?MODULE, is_running, [App], Timeout) of
         {badrpc, _} -> false;
         Result -> Result
     end.

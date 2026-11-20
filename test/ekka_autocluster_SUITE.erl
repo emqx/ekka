@@ -217,6 +217,9 @@ t_autocluster_retry_when_missing_nodes(Config) ->
               ok = ekka_ct:wait_running(Node)
       end,
       Nodes),
+    %% The fake etcd server acknowledges both lock requests. Form the peer
+    %% cluster first so neither node tries to join a peer that is also stopping.
+    ok = rpc:call(N2, ekka, join, [N1]),
     rpc:call(N1, ekka, autocluster, []),
     rpc:call(N2, ekka, autocluster, []),
     ekka:autocluster(),
@@ -228,17 +231,17 @@ t_autocluster_retry_when_missing_nodes(Config) ->
     assert_cluster_nodes_equal([N1, N2], N1),
     assert_cluster_nodes_equal([N1, N2], N2),
     assert_cluster_nodes_equal([ThisNode], ThisNode),
-    %% Now remove the mock; the cluster should eventually heal
-    %% itself.
+    %% Let the isolated node discover and join the peers before restoring
+    %% discovery on the peers. The fake etcd server does not serialize joins.
+    ct:pal("testing cluster without failure"),
+    ok = meck:unload(ekka_node),
+    ok = wait_for_node(N1),
+    AllNodes = [ThisNode, N1, N2],
+    assert_cluster_nodes_equal(AllNodes, ThisNode),
     ok = rpc:call(N1, meck, unload, [ekka_node]),
     ok = rpc:call(N2, meck, unload, [ekka_node]),
-    meck:unload(ekka_node),
-    ct:pal("testing cluster without failure"),
-    timer:sleep(10000),
-    AllNodes = [ThisNode, N1, N2],
     assert_cluster_nodes_equal(AllNodes, N1),
     assert_cluster_nodes_equal(AllNodes, N2),
-    assert_cluster_nodes_equal(AllNodes, ThisNode),
     ok.
 
 %%--------------------------------------------------------------------
@@ -291,8 +294,8 @@ wait_for_node(Node) ->
     wait_for_node(Node, 20).
 wait_for_node(Node, Cnt) ->
     ok = timer:sleep(500),
-    Running = ekka:info(running_nodes),
-    case lists:member(Node, Running) of
+    Running = ekka_mnesia:running_nodes(),
+    case lists:member(Node, Running) andalso ekka_node:is_running(ekka) of
         true -> timer:sleep(500), ok;
         false ->
             case Cnt > 0 of
