@@ -550,6 +550,98 @@ t_autoheal_does_not_retry_permanent_refusal(_Config) ->
         snabbkaffe:stop()
     end.
 
+t_autoheal_excludes_successful_target_on_retry(_Config) ->
+    check_retry_excludes_target([ah_success1, ah_success2, ah_success3], fun() -> ok end).
+
+t_autoheal_excludes_unknown_target_on_retry(_Config) ->
+    check_retry_excludes_target([ah_unknown1, ah_unknown2, ah_unknown3],
+                                fun() -> exit(unknown_heal_outcome) end).
+
+check_retry_excludes_target(Names, Result) ->
+    with_retry_split(Names, fun([Coordinator, Finished, Refused]) ->
+        mock_heal(Finished, self(), fun(_) -> Result() end),
+        mock_heal(Refused, self(), fun
+            (1) -> {error, {guard_refused, busy}};
+            (2) -> ok
+        end),
+        ok = ekka_node_monitor:cast(Coordinator, {heal_cluster, [Finished, Refused], []}),
+        expect_heals([Finished, Refused, Refused])
+    end).
+
+t_autoheal_retry_handoff_keeps_exclusions_and_budget(_Config) ->
+    with_retry_split([ah_handoff1, ah_handoff2, ah_handoff3], fun([Keeper, Coordinator, Finished]) ->
+        Test = self(),
+        ok = rpc:call(Keeper, meck, expect, [ekka_mnesia, cluster_nodes, fun(Kind) ->
+            {current_stacktrace, Stack} = process_info(self(), current_stacktrace),
+            case Kind =:= all andalso lists:keymember(ekka_autoheal, 1, Stack) of
+                true -> Test ! {retry_view, node()};
+                false -> ok
+            end,
+            meck:passthrough([Kind])
+        end]),
+        mock_heal(Keeper, Test, fun(_) -> {error, {guard_refused, busy}} end),
+        mock_heal(Finished, Test, fun(_) -> ok end),
+        mock_heal(Coordinator, Test, fun(_) -> {error, {guard_refused, busy}} end),
+        ok = ekka_node_monitor:cast(Coordinator, {heal_cluster, [Keeper, Finished], []}),
+        expect_heals([Keeper, Finished, Coordinator, Coordinator]),
+        receive {retry_view, Keeper} -> ok after 5000 -> error(no_handoff_retry_view) end
+    end).
+
+t_autoheal_retries_peers_when_keeper_lacks_handoff(_Config) ->
+    with_retry_split([ah_legacy1, ah_legacy2, ah_legacy3, ah_legacy4],
+                     fun([Keeper, Coordinator, Finished, Refused]) ->
+        Test = self(),
+        ok = rpc:call(Keeper, meck, new, [ekka_autoheal, [passthrough, no_link]]),
+        ok = rpc:call(Keeper, meck, expect, [ekka_autoheal, continue_heal, fun(Nodes, Excluded, Delay, Budget) ->
+            Test ! {handoff_unsupported, node()},
+            erlang:raise(error, undef, [{ekka_autoheal, continue_heal, [Nodes, Excluded, Delay, Budget], []}])
+        end]),
+        mock_heal(Coordinator, Test, fun(_) -> ok end),
+        mock_heal(Finished, Test, fun(_) -> ok end),
+        mock_heal(Refused, Test, fun
+            (1) -> {error, {guard_refused, busy}};
+            (2) -> ok
+        end),
+        ok = ekka_node_monitor:cast(Coordinator, {heal_cluster, [Finished, Refused], []}),
+        expect_heals([Finished, Refused, Refused]),
+        receive {handoff_unsupported, Keeper} -> ok after 5000 -> error(no_legacy_handoff) end
+    end).
+
+with_retry_split(Names, Check) ->
+    [Seed | Peers] = Nodes = lists:map(fun start_slave_node/1, Names),
+    try
+        [ok = rpc:call(N, ekka, join, [Seed]) || N <- Peers],
+        lists:foreach(fun(N) ->
+            View = fun() -> {[node()], Nodes -- [node()]} end,
+            ok = rpc:call(N, meck, new, [ekka_mnesia, [passthrough, no_link]]),
+            ok = rpc:call(N, meck, expect, [ekka_mnesia, cluster_view, View])
+        end, Nodes),
+        Check(Nodes)
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
+    end.
+
+mock_heal(Node, Test, Result) ->
+    ok = rpc:call(Node, meck, new, [ekka_cluster, [passthrough, no_link]]),
+    ok = rpc:call(Node, meck, expect, [ekka_cluster, heal, fun(shutdown_and_reboot) ->
+        Key = {?MODULE, heal_attempts},
+        Attempt = application:get_env(ekka, Key, 0) + 1,
+        ok = application:set_env(ekka, Key, Attempt),
+        Test ! {heal_called, node()},
+        Result(Attempt)
+    end]).
+
+expect_heals([Node | Rest]) ->
+    receive
+        {heal_called, Target} -> ?assertEqual(Node, Target), expect_heals(Rest)
+    after 10000 -> error({heal_not_dispatched, Node})
+    end;
+expect_heals([]) ->
+    receive {heal_called, Node} -> error({unexpected_heal, Node})
+    after 2500 -> ok
+    end.
+
 install_test_guard(Node, Mode) ->
     Key = {?MODULE, guard_calls},
     ok = rpc:call(Node, application, set_env, [ekka, Key, 0]),

@@ -22,6 +22,7 @@
         , enabled/0
         , proc/1
         , handle_msg/2
+        , continue_heal/4
         ]).
 
 -ifdef(TEST).
@@ -131,6 +132,15 @@ handle_msg({heal_cluster, _Minority, _SplitView}, Autoheal = #autoheal{proc = _P
     ?LOG(info, "Ignoring a heal request while another heal is in progress", []),
     Autoheal;
 
+handle_msg({continue_heal, Nodes, Excluded, Delay, Attempts},
+           Autoheal = #autoheal{proc = undefined}) ->
+    Proc = spawn_link(fun() -> heal_nodes(Nodes, Excluded, Delay, Attempts) end),
+    Autoheal#autoheal{role = coordinator, proc = Proc};
+
+handle_msg({continue_heal, _, _, _, _}, Autoheal) ->
+    ?LOG(info, "Ignoring a heal request while another heal is in progress", []),
+    Autoheal;
+
 handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
     ?LOG(info, "Ignoring a heal request while another heal is in progress: ~p", [SplitView]),
     Autoheal;
@@ -216,33 +226,60 @@ heal_partition([{Majority, Minority}, {Minority, Majority}] = SplitView, Delay) 
     heal_nodes(Minority, Delay, ?HEAL_ATTEMPTS).
 
 heal_nodes(Nodes, Delay, Attempts) ->
-    case [{Node, Result} || Node <- Nodes, Result <- [heal_node(Node)], retryable(Result)] of
-        [] ->
-            ok;
-        Failed ->
-            retry_heal(Failed, Delay, Attempts - 1)
+    heal_nodes(Nodes, [], Delay, Attempts).
+
+heal_nodes(Nodes, Excluded, Delay, Attempts) ->
+    Results = [{Node, heal_node(Node)} || Node <- Nodes],
+    case lists:partition(fun({_, Result}) -> retryable(Result) end, Results) of
+        {[], _} -> ok;
+        {Failed, Settled} ->
+            DoNotReplay = [Node || {Node, _} <- Settled] ++ Excluded,
+            retry_heal({Failed, DoNotReplay}, Delay, Attempts - 1)
     end.
 
-retry_heal(Failed, _Delay, 0) ->
+retry_heal({Failed, _Excluded}, _Delay, 0) ->
     ?LOG(error, "Autoheal stopped retrying, nodes still not restarted: ~p. "
                 "Inspect the logs on the affected nodes. A new partition event re-triggers "
                 "autoheal.", [Failed]);
-retry_heal(Failed, Delay, Attempts) ->
+retry_heal(State = {_Failed, Excluded}, Delay, Attempts) ->
     timer:sleep(Delay),
     case read_split_view() of
         {ok, SplitView} ->
             case find_heal_plan(SplitView) of
-                {_, Minority} ->
-                    %% Only retry targets that were explicitly refused before stopping.
-                    Rejected = [N || {N, _} <- Failed, lists:member(N, Minority)],
-                    heal_nodes(Rejected, Delay, Attempts);
+                {Candidates, Minority} ->
+                    dispatch_retry(Candidates, Minority, Excluded, Delay, Attempts);
                 {} ->
                     ok
             end;
         {error, Reason} ->
             ?LOG(warning, "Could not re-read the cluster view to retry autoheal: ~p", [Reason]),
-            retry_heal(Failed, Delay, Attempts - 1)
+            retry_heal(State, Delay, Attempts - 1)
     end.
+
+dispatch_retry(Candidates, Minority, Excluded, Delay, Attempts) ->
+    Targets = Minority -- Excluded,
+    case {Targets, lists:member(node(), Minority), Candidates} of
+        {[], _, _} ->
+            ok;
+        {_, true, [_ | _]} ->
+            Coordinator = pick_coordinator(Candidates),
+            case rpc:call(Coordinator, ?MODULE, continue_heal,
+                          [Targets, Excluded, Delay, Attempts], 5000) of
+                ok ->
+                    ok;
+                {badrpc, {'EXIT', {undef, [{?MODULE, continue_heal, _, _} | _]}}} ->
+                    %% An older coordinator cannot take over this retry.
+                    heal_nodes(Targets -- [node()], Excluded, Delay, Attempts);
+                Error ->
+                    ?LOG(warning, "Could not hand off autoheal retry to ~s: ~p", [Coordinator, Error])
+            end;
+        _ ->
+            heal_nodes(Targets -- [node()], Excluded, Delay, Attempts)
+    end.
+
+continue_heal(Targets, Excluded, Delay, Attempts) ->
+    ekka_node_monitor ! {autoheal, {continue_heal, Targets, Excluded, Delay, Attempts}},
+    ok.
 
 %% Only a refusal that happened before the membership change started and is known to be
 %% transient can be retried. Any other error means the change may have started or its
