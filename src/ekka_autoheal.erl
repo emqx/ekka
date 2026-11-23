@@ -22,6 +22,7 @@
         , enabled/0
         , proc/1
         , handle_msg/2
+        , continue_heal/4
         ]).
 
 -ifdef(TEST).
@@ -38,6 +39,10 @@
 -define(DEFAULT_DELAY, 15000).
 -define(LOG(Level, Format, Args),
         logger:Level("Ekka(Autoheal): " ++ Format, Args)).
+
+%% A heal request is re-confirmed (membership view re-read, heal plan recomputed) at most
+%% this many times when the membership guard rejects it.
+-define(HEAL_ATTEMPTS, 3).
 
 init() ->
     case enabled() of
@@ -79,10 +84,8 @@ handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{delay = Delay, t
     ensure_cancel_timer(TRef),
     case ekka_membership:is_all_alive() of
         true ->
-            Nodes = ekka_mnesia:cluster_nodes(all),
-            case rpc:multicall(Nodes, ekka_mnesia, cluster_view, [], 30000) of
-                {Views, []} ->
-                    SplitView = find_split_view(Nodes, Views),
+            case read_split_view() of
+                {ok, SplitView} ->
                     HealPlan = find_heal_plan(SplitView),
                     case HealPlan of
                         {Candidates = [_ | _], Minority} ->
@@ -96,8 +99,8 @@ handle_msg(Msg = {create_splitview, Node}, Autoheal = #autoheal{delay = Delay, t
                             ignore
                     end,
                     Autoheal#autoheal{timer = undefined};
-                {_Views, BadNodes} ->
-                    ?LOG(critical, "Bad nodes found when autoheal: ~p", [BadNodes]),
+                {error, Reason} ->
+                    ?LOG(warning, "Could not read the cluster view for autoheal: ~p", [Reason]),
                     Autoheal#autoheal{timer = ekka_node_monitor:run_after(Delay, {autoheal, Msg})}
             end;
         false ->
@@ -108,7 +111,7 @@ handle_msg(Msg = {create_splitview, _Node}, Autoheal) ->
     ?LOG(critical, "I am not leader, but received : ~p", [Msg]),
     Autoheal;
 
-handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined}) ->
+handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined, delay = Delay}) ->
     %% NOTE: Backward compatibility.
     case SplitView of
         %% No partitions.
@@ -116,22 +119,30 @@ handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined}) 
         [{_, []}] -> Autoheal;
         %% Partitions.
         SplitView ->
-            Proc = spawn_link(fun() -> heal_partition(SplitView) end),
+            Proc = spawn_link(fun() -> heal_partition(SplitView, Delay) end),
             Autoheal#autoheal{role = coordinator, proc = Proc}
     end;
 
-handle_msg({heal_cluster, Minority, SplitView}, Autoheal = #autoheal{proc = undefined}) ->
-    Proc = spawn_link(fun() ->
-        ?tp(critical, "Healing cluster partition", #{
-            need_reboot => Minority,
-            split_view => SplitView
-        }),
-        reboot_minority(Minority -- [node()])
-    end),
+handle_msg({heal_cluster, Minority, SplitView},
+           Autoheal = #autoheal{proc = undefined, delay = Delay}) ->
+    Proc = spawn_link(fun() -> heal_cluster(Minority, SplitView, Delay) end),
     Autoheal#autoheal{role = coordinator, proc = Proc};
 
+handle_msg({heal_cluster, _Minority, _SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
+    ?LOG(info, "Ignoring a heal request while another heal is in progress", []),
+    Autoheal;
+
+handle_msg({continue_heal, Nodes, Excluded, Delay, Attempts},
+           Autoheal = #autoheal{proc = undefined}) ->
+    Proc = spawn_link(fun() -> heal_nodes(Nodes, Excluded, Delay, Attempts) end),
+    Autoheal#autoheal{role = coordinator, proc = Proc};
+
+handle_msg({continue_heal, _, _, _, _}, Autoheal) ->
+    ?LOG(info, "Ignoring a heal request while another heal is in progress", []),
+    Autoheal;
+
 handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
-    ?LOG(critical, "Unexpected heal_partition msg: ~p", [SplitView]),
+    ?LOG(info, "Ignoring a heal request while another heal is in progress: ~p", [SplitView]),
     Autoheal;
 
 handle_msg({'EXIT', Pid, normal}, Autoheal = #autoheal{proc = Pid}) ->
@@ -198,31 +209,127 @@ pick_coordinator(Candidates) ->
         false -> ekka_membership:coordinator(Candidates)
     end.
 
-heal_partition([{Nodes, []} | _] = SplitView) ->
-    %% Symmetric partition.
-    ?LOG(info, "Healing partition: ~p", [SplitView]),
-    reboot_minority(Nodes -- [node()]);
-heal_partition([{Majority, Minority}, {Minority, Majority}] = SplitView) ->
-    %% Symmetric partition.
-    ?LOG(info, "Healing partition: ~p", [SplitView]),
-    reboot_minority(Minority).
+heal_cluster(Minority, SplitView, Delay) ->
+    ?tp(critical, "Healing cluster partition", #{
+        need_reboot => Minority,
+        split_view => SplitView
+    }),
+    heal_nodes(Minority -- [node()], Delay, ?HEAL_ATTEMPTS).
 
-reboot_minority(Minority) ->
-    lists:foreach(fun heal_node/1, Minority),
-    Minority.
+heal_partition([{Nodes, []} | _] = SplitView, Delay) ->
+    %% Symmetric partition.
+    ?LOG(info, "Healing partition: ~p", [SplitView]),
+    heal_nodes(Nodes -- [node()], Delay, ?HEAL_ATTEMPTS);
+heal_partition([{Majority, Minority}, {Minority, Majority}] = SplitView, Delay) ->
+    %% Symmetric partition.
+    ?LOG(info, "Healing partition: ~p", [SplitView]),
+    heal_nodes(Minority, Delay, ?HEAL_ATTEMPTS).
+
+heal_nodes(Nodes, Delay, Attempts) ->
+    heal_nodes(Nodes, [], Delay, Attempts).
+
+heal_nodes(Nodes, Excluded, Delay, Attempts) ->
+    Results = [{Node, heal_node(Node)} || Node <- Nodes],
+    case lists:partition(fun({_, Result}) -> retryable(Result) end, Results) of
+        {[], _} -> ok;
+        {Failed, Settled} ->
+            DoNotReplay = [Node || {Node, _} <- Settled] ++ Excluded,
+            retry_heal({Failed, DoNotReplay}, Delay, Attempts - 1)
+    end.
+
+retry_heal({Failed, _Excluded}, _Delay, 0) ->
+    ?LOG(error, "Autoheal stopped retrying, nodes still not restarted: ~p. "
+                "Inspect the logs on the affected nodes. A new partition event re-triggers "
+                "autoheal.", [Failed]);
+retry_heal(State = {_Failed, Excluded}, Delay, Attempts) ->
+    timer:sleep(Delay),
+    case read_split_view() of
+        {ok, SplitView} ->
+            case find_heal_plan(SplitView) of
+                {Candidates, Minority} ->
+                    dispatch_retry(Candidates, Minority, Excluded, Delay, Attempts);
+                {} ->
+                    ok
+            end;
+        {error, Reason} ->
+            ?LOG(warning, "Could not re-read the cluster view to retry autoheal: ~p", [Reason]),
+            retry_heal(State, Delay, Attempts - 1)
+    end.
+
+dispatch_retry(Candidates, Minority, Excluded, Delay, Attempts) ->
+    Targets = Minority -- Excluded,
+    case {Targets, lists:member(node(), Minority), Candidates} of
+        {[], _, _} ->
+            ok;
+        {_, true, [_ | _]} ->
+            Coordinator = pick_coordinator(Candidates),
+            case rpc:call(Coordinator, ?MODULE, continue_heal,
+                          [Targets, Excluded, Delay, Attempts], 5000) of
+                ok ->
+                    ok;
+                {badrpc, {'EXIT', {undef, [{?MODULE, continue_heal, _, _} | _]}}} ->
+                    %% An older coordinator cannot take over this retry.
+                    heal_nodes(Targets -- [node()], Excluded, Delay, Attempts);
+                Error ->
+                    ?LOG(warning, "Could not hand off autoheal retry to ~s: ~p", [Coordinator, Error])
+            end;
+        _ ->
+            heal_nodes(Targets -- [node()], Excluded, Delay, Attempts)
+    end.
+
+continue_heal(Targets, Excluded, Delay, Attempts) ->
+    ekka_node_monitor ! {autoheal, {continue_heal, Targets, Excluded, Delay, Attempts}},
+    ok.
+
+%% Only a refusal that happened before the membership change started and is known to be
+%% transient can be retried. Any other error means the change may have started or its
+%% outcome is unknown (a badrpc or a failure after the stop/start). Replaying it
+%% could stop the peer again.
+retryable({error, {guard_refused, Reason}}) -> ekka_mnesia:transient_refusal(Reason);
+retryable(_) -> false.
+
+read_split_view() ->
+    Nodes = ekka_mnesia:cluster_nodes(all),
+    case rpc:multicall(Nodes, ekka_mnesia, cluster_view, [], 30000) of
+        {Views, []} when length(Views) =:= length(Nodes) ->
+            case [N || {N, View} <- lists:zip(Nodes, Views), not valid_view(N, View)] of
+                [] -> {ok, find_split_view(Nodes, Views)};
+                Invalid -> {error, {invalid_cluster_views, Invalid}}
+            end;
+        {_Views, BadNodes} ->
+            {error, {cluster_view_unavailable, BadNodes}}
+    end.
+
+valid_view(Node, {Running, Stopped}) ->
+    is_node_list(Running) andalso is_node_list(Stopped) andalso
+        lists:member(Node, Running) andalso
+        ordsets:is_disjoint(ordsets:from_list(Running), ordsets:from_list(Stopped));
+valid_view(_, _) ->
+    false.
+
+is_node_list([Node | Rest]) when is_atom(Node) -> is_node_list(Rest);
+is_node_list([]) -> true;
+is_node_list(_) -> false.
 
 heal_node(Node) ->
-    case rpc:call(Node, ekka_cluster, heal, [shutdown_and_reboot], 30000) of
-        {badrpc, {'EXIT', {function_clause, _}}} ->
-            %% Old ekka on peer — fallback to legacy two-rpc path
-            ?LOG(warning, "Heal ~s: peer has legacy ekka; using two-rpc fallback", [Node]),
-            LegShutdown = rpc:call(Node, ekka_cluster, heal, [shutdown], 30000),
-            ?LOG(critical, "Shutdown ~s for autoheal (legacy): ~p", [Node, LegShutdown]),
-            timer:sleep(rand:uniform(1000) + 100),
-            LegReboot = rpc:call(Node, ekka_cluster, heal, [reboot], 30000),
-            ?LOG(critical, "Reboot ~s for autoheal (legacy): ~p", [Node, LegReboot]);
-        Ret ->
-            ?LOG(critical, "Heal ~s for autoheal: ~p", [Node, Ret])
+    Result = rpc:call(Node, ekka_cluster, heal, [shutdown_and_reboot], 30000),
+    case Result of
+        ok ->
+            ?LOG(info, "Healed ~s for autoheal", [Node]),
+            ok;
+        {error, {guard_refused, Reason}} ->
+            ?LOG(warning, "Heal ~s was refused: ~p", [Node, Reason]),
+            {error, {guard_refused, Reason}};
+        {error, Reason} ->
+            ?LOG(warning, "Heal ~s failed: ~p", [Node, Reason]),
+            {error, Reason};
+        {badrpc, Reason} ->
+            ?LOG(warning, "Heal ~s did not answer: ~p; assuming the node is restarting",
+                 [Node, Reason]),
+            {badrpc, Reason};
+        Other ->
+            ?LOG(warning, "Heal ~s returned ~p", [Node, Other]),
+            Other
     end.
 
 ensure_cancel_timer(undefined) ->

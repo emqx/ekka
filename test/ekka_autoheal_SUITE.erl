@@ -366,77 +366,24 @@ extract_heal_node_body(Src) ->
             end
     end.
 
-%% Verifies the legacy fallback branch: if the peer only supports
-%% heal(shutdown) / heal(reboot) (old ekka), heal_node/1 catches the
-%% function_clause from heal(shutdown_and_reboot) and invokes both legacy rpcs.
-%% We install a shim ekka_cluster module on the slave that only exports
-%% the two legacy clauses and records invocations in an ETS table.
-t_heal_legacy_fallback(_Config) ->
-    Node = start_slave_node(lf1),
+t_heal_does_not_fallback_on_internal_function_clause(_Config) ->
+    Node = start_slave_node(heal_internal_clause),
     try
-        %% Compile shim module that records calls and lacks shutdown_and_reboot.
-        ShimForms = legacy_shim_forms(),
-        {ok, ekka_cluster, ShimBin} = compile:forms(ShimForms, [return_errors]),
-        %% Stop real ekka on slave so swapping its cluster module is safe.
-        ok = rpc:call(Node, application, stop, [ekka]),
-        %% Swap ekka_cluster with the legacy shim.
-        true = rpc:call(Node, code, delete, [ekka_cluster]),
-        _ = rpc:call(Node, code, purge, [ekka_cluster]),
-        {module, ekka_cluster} =
-            rpc:call(Node, code, load_binary,
-                     [ekka_cluster, "ekka_cluster.erl", ShimBin]),
-        %% Prime the ETS tracker on the slave. The table must outlive this
-        %% rpc:call (otherwise it would die with the rpc worker process), so
-        %% we spawn a long-lived owner on the slave and have it create the
-        %% table. Any process on the slave can then ets:insert into it
-        %% (public, named_table).
-        _Owner = rpc:call(Node, erlang, spawn,
-                          [fun() ->
-                               ets:new(heal_calls,
-                                       [public, named_table, bag]),
-                               receive stop -> ok end
-                           end]),
-        %% Wait until the table is visible to other processes on the slave.
-        ok = wait_until(
-               fun() ->
-                   rpc:call(Node, ets, info, [heal_calls, size]) =/= undefined
-               end, 50),
-        %% Invoke heal_node/1 — should hit function_clause, fall back.
-        _ = ekka_autoheal:heal_node(Node),
-        %% Verify both legacy rpcs ran on the slave.
-        Calls = rpc:call(Node, ets, tab2list, [heal_calls]),
-        ?assert(lists:member({call, shutdown}, Calls)),
-        ?assert(lists:member({call, reboot}, Calls)),
-        ?assertNot(lists:member({call, shutdown_and_reboot}, Calls))
+        Test = self(),
+        Prepare = fun(Action) ->
+            Test ! {preparing, node()},
+            prepare_join_only(Action)
+        end,
+        ok = rpc:call(Node, ekka, callback, [prepare, Prepare]),
+        ok = ekka_node_monitor:cast(node(), {heal_cluster, [Node], []}),
+        receive {preparing, Node} -> ok after 5000 -> error(heal_not_started) end,
+        receive {preparing, Node} -> error(heal_replayed) after 3000 -> ok end,
+        ?assert(ekka:is_running(Node, ekka))
     after
         ekka_ct:stop_slave(Node)
     end.
 
-%% Abstract forms for a legacy-shape ekka_cluster shim:
-%%   -module(ekka_cluster).
-%%   -export([heal/1]).
-%%   heal(shutdown) -> ets:insert(heal_calls, {call, shutdown}), ok;
-%%   heal(reboot)   -> ets:insert(heal_calls, {call, reboot}), ok.
-legacy_shim_forms() ->
-    Src = "-module(ekka_cluster).\n"
-          "-export([heal/1]).\n"
-          "heal(shutdown) ->\n"
-          "    ets:insert(heal_calls, {call, shutdown}), ok;\n"
-          "heal(reboot) ->\n"
-          "    ets:insert(heal_calls, {call, reboot}), ok.\n",
-    {ok, Toks, _} = erl_scan:string(Src),
-    FormTokens = split_forms(Toks, [], []),
-    [begin {ok, F} = erl_parse:parse_form(Ts), F end || Ts <- FormTokens].
-
-split_forms([], [], Acc) ->
-    lists:reverse(Acc);
-split_forms([], _Cur, Acc) ->
-    %% Trailing tokens without a dot: ignore (shouldn't happen for valid src).
-    lists:reverse(Acc);
-split_forms([{dot, _} = D | Rest], Cur, Acc) ->
-    split_forms(Rest, [], [lists:reverse([D | Cur]) | Acc]);
-split_forms([T | Rest], Cur, Acc) ->
-    split_forms(Rest, [T | Cur], Acc).
+prepare_join_only(join) -> ok.
 
 %% Poll Fun/0 until it returns true or Retries attempts have elapsed.
 %% Sleep 50ms between attempts. Returns ok on success, errors on timeout.
@@ -447,3 +394,276 @@ wait_until(Fun, Retries) when Retries > 0 ->
         true  -> ok;
         _     -> timer:sleep(50), wait_until(Fun, Retries - 1)
     end.
+
+%%--------------------------------------------------------------------
+%% A heal refused by the membership guard must be re-confirmed and retried; the retries
+%% are bounded.
+%%--------------------------------------------------------------------
+
+t_autoheal_retries_rejected_heal(_Config) ->
+    [N1, N2] = Nodes = lists:map(fun start_slave_node/1, [ah_retry1, ah_retry2]),
+    try
+        ok = rpc:call(N2, ekka, join, [N1]),
+        ?assertEqual(lists:sort(Nodes), lists:sort(rpc:call(N1, ekka_mnesia, running_nodes, []))),
+        [ok = install_test_guard(N, first_rejected) || N <- Nodes],
+        true = rpc:cast(N1, net_kernel, disconnect, [N2]),
+        ?assertEqual(ok, wait_until(fun() -> split_observed(Nodes) end, 100)),
+        %% No second partition event is created: the retry must come from the rejected heal.
+        ?assertEqual(ok, wait_until(fun() -> joined(Nodes) end, 400)),
+        %% One rejected admission, one successful admission and the application start.
+        ?assert(lists:max([guard_calls(N) || N <- Nodes]) >= 3)
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
+    end.
+
+t_autoheal_retry_is_bounded(_Config) ->
+    [N1, N2] = Nodes = lists:map(fun start_slave_node/1, [ah_bound1, ah_bound2]),
+    try
+        ok = rpc:call(N2, ekka, join, [N1]),
+        [ok = install_test_guard(N, always_rejected) || N <- Nodes],
+        true = rpc:cast(N1, net_kernel, disconnect, [N2]),
+        ?assertEqual(ok, wait_until(fun() -> lists:max([guard_calls(N) || N <- Nodes]) >= 3 end, 400)),
+        ok = timer:sleep(3000),
+        %% The heal is given up after the bounded attempts; no further attempts are made.
+        ?assertEqual([0, 3], lists:sort([guard_calls(N) || N <- Nodes])),
+        ?assertNotEqual(Nodes, rpc:call(N1, ekka_mnesia, running_nodes, []))
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
+    end.
+
+t_invalid_initial_view_is_retried(_Config) ->
+    Invalid = fun(Attempt) -> Attempt =:= 1 end,
+    with_view_failure([ah_initial1, ah_initial2], Invalid, fun(Nodes, Faulty) ->
+        Monitors = monitors(Nodes),
+        report_split(Nodes),
+        wait_for_invalid_view(Faulty, 1),
+        ?assertEqual(Monitors, monitors(Nodes)),
+        ?assertEqual([0, 0], [guard_calls(N) || N <- Nodes]),
+        ?assertEqual(ok, wait_until(fun() -> joined(Nodes) end, 400))
+    end).
+
+t_invalid_retry_view_is_retried(_Config) ->
+    Invalid = fun(Attempt) -> Attempt =:= 2 end,
+    with_view_failure([ah_retry_view1, ah_retry_view2], Invalid, fun(Nodes, Faulty) ->
+        report_split(Nodes),
+        wait_for_invalid_view(Faulty, 2),
+        ?assertEqual([0, 1], lists:sort([guard_calls(N) || N <- Nodes])),
+        ?assertEqual(ok, wait_until(fun() -> joined(Nodes) end, 400))
+    end).
+
+t_invalid_retry_views_exhaust_budget(_Config) ->
+    Invalid = fun(Attempt) -> Attempt >= 2 end,
+    with_view_failure([ah_invalid1, ah_invalid2], Invalid, fun(Nodes, Faulty) ->
+        Monitors = monitors(Nodes),
+        report_split(Nodes),
+        wait_for_invalid_view(Faulty, 2),
+        wait_for_invalid_view(Faulty, 3),
+        receive {invalid_view, Faulty, Attempt} -> error({unexpected_view_read, Attempt})
+        after 3000 -> ok
+        end,
+        ?assertEqual([0, 1], lists:sort([guard_calls(N) || N <- Nodes])),
+        ?assertEqual(Monitors, monitors(Nodes)),
+        ?assert(split_observed(Nodes))
+    end).
+
+with_view_failure(Names, Reject, Test) ->
+    [N1, N2] = Nodes = lists:map(fun start_slave_node/1, Names),
+    try
+        ok = rpc:call(N2, ekka, join, [N1]),
+        [ok = install_test_guard(N, first_rejected) || N <- Nodes],
+        ok = rpc:call(N2, meck, new, [ekka_mnesia, [passthrough, no_link]]),
+        Parent = self(),
+        View = fun() ->
+            Key = {?MODULE, view_reads},
+            Attempt = application:get_env(ekka, Key, 0) + 1,
+            ok = application:set_env(ekka, Key, Attempt),
+            case Reject(Attempt) of
+                true ->
+                    Parent ! {invalid_view, node(), Attempt},
+                    erlang:error(injected_view_failure);
+                false ->
+                    meck:passthrough([])
+            end
+        end,
+        ok = rpc:call(N2, meck, expect, [ekka_mnesia, cluster_view, View]),
+        Test(Nodes, N2)
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
+    end.
+
+report_split([N1, N2] = Nodes) ->
+    %% Drive just one heal cycle. Let any partition confirmation timers from join
+    %% elapse before setting up the split.
+    [ok = rpc:call(N, application, set_env, [ekka, cluster_autoheal, false]) || N <- Nodes],
+    ok = timer:sleep(3100),
+    Leader = rpc:call(N1, ekka_membership, leader, []),
+    true = rpc:cast(N1, net_kernel, disconnect, [N2]),
+    ok = wait_until(fun() -> split_observed(Nodes) end, 100),
+    ?assertEqual(pong, rpc:call(N1, net_adm, ping, [N2])),
+    ok = ekka_node_monitor:cast(Leader, {report_partition, N2}).
+
+monitors(Nodes) ->
+    [rpc:call(N, erlang, whereis, [ekka_node_monitor]) || N <- Nodes].
+
+wait_for_invalid_view(Node, Attempt) ->
+    receive {invalid_view, Node, Attempt} -> ok
+    after 15000 -> error({no_invalid_view, Attempt})
+    end.
+
+%% A heal whose membership change already started reports an error; it must not be
+%% replayed (that would stop the peer again).
+t_autoheal_does_not_replay_started_heal(_Config) ->
+    [N1, N2] = Nodes = lists:map(fun start_slave_node/1, [ah_started1, ah_started2]),
+    try
+        ok = rpc:call(N2, ekka, join, [N1]),
+        [ok = install_test_guard(N, first_started_then_error) || N <- Nodes],
+        true = rpc:cast(N1, net_kernel, disconnect, [N2]),
+        ?assertEqual(ok, wait_until(fun() -> split_observed(Nodes) end, 100)),
+        ?assertEqual(ok, wait_until(fun() -> joined(Nodes) end, 400)),
+        %% The heal admission ran the change, so the retry classifier must not replay it;
+        %% the reported error also prevents the application start.
+        ok = timer:sleep(3000),
+        ?assertEqual([0, 1], lists:sort([guard_calls(N) || N <- Nodes]))
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
+    end.
+
+%% A permanent refusal of the heal admission is reported without retrying.
+t_autoheal_does_not_retry_permanent_refusal(_Config) ->
+    [N1, N2] = Nodes = lists:map(fun start_slave_node/1, [ah_perm1, ah_perm2]),
+    try
+        ok = rpc:call(N2, ekka, join, [N1]),
+        [ok = install_test_guard(N, always_rejected_permanent) || N <- Nodes],
+        report_split(Nodes),
+        ?assertEqual(ok, wait_until(fun() -> lists:max([guard_calls(N) || N <- Nodes]) >= 1 end, 400)),
+        %% Wait longer than the autoheal retry delay: a transient refusal would be retried
+        %% by now, a permanent one is not.
+        ok = timer:sleep(2200),
+        ?assertEqual([0, 1], lists:sort([guard_calls(N) || N <- Nodes])),
+        ?assertNotEqual(Nodes, rpc:call(N1, ekka_mnesia, running_nodes, []))
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
+    end.
+
+t_autoheal_excludes_successful_target_on_retry(_Config) ->
+    check_retry_excludes_target([ah_success1, ah_success2, ah_success3], fun() -> ok end).
+
+t_autoheal_excludes_unknown_target_on_retry(_Config) ->
+    check_retry_excludes_target([ah_unknown1, ah_unknown2, ah_unknown3],
+                                fun() -> exit(unknown_heal_outcome) end).
+
+check_retry_excludes_target(Names, Result) ->
+    with_retry_split(Names, fun([Coordinator, Finished, Refused]) ->
+        mock_heal(Finished, self(), fun(_) -> Result() end),
+        mock_heal(Refused, self(), fun
+            (1) -> {error, {guard_refused, busy}};
+            (2) -> ok
+        end),
+        ok = ekka_node_monitor:cast(Coordinator, {heal_cluster, [Finished, Refused], []}),
+        expect_heals([Finished, Refused, Refused])
+    end).
+
+t_autoheal_retry_handoff_keeps_exclusions_and_budget(_Config) ->
+    with_retry_split([ah_handoff1, ah_handoff2, ah_handoff3], fun([Keeper, Coordinator, Finished]) ->
+        Test = self(),
+        ok = rpc:call(Keeper, meck, expect, [ekka_mnesia, cluster_nodes, fun(Kind) ->
+            {current_stacktrace, Stack} = process_info(self(), current_stacktrace),
+            case Kind =:= all andalso lists:keymember(ekka_autoheal, 1, Stack) of
+                true -> Test ! {retry_view, node()};
+                false -> ok
+            end,
+            meck:passthrough([Kind])
+        end]),
+        mock_heal(Keeper, Test, fun(_) -> {error, {guard_refused, busy}} end),
+        mock_heal(Finished, Test, fun(_) -> ok end),
+        mock_heal(Coordinator, Test, fun(_) -> {error, {guard_refused, busy}} end),
+        ok = ekka_node_monitor:cast(Coordinator, {heal_cluster, [Keeper, Finished], []}),
+        expect_heals([Keeper, Finished, Coordinator, Coordinator]),
+        receive {retry_view, Keeper} -> ok after 5000 -> error(no_handoff_retry_view) end
+    end).
+
+t_autoheal_retries_peers_when_keeper_lacks_handoff(_Config) ->
+    with_retry_split([ah_legacy1, ah_legacy2, ah_legacy3, ah_legacy4],
+                     fun([Keeper, Coordinator, Finished, Refused]) ->
+        Test = self(),
+        ok = rpc:call(Keeper, meck, new, [ekka_autoheal, [passthrough, no_link]]),
+        ok = rpc:call(Keeper, meck, expect, [ekka_autoheal, continue_heal, fun(Nodes, Excluded, Delay, Budget) ->
+            Test ! {handoff_unsupported, node()},
+            erlang:raise(error, undef, [{ekka_autoheal, continue_heal, [Nodes, Excluded, Delay, Budget], []}])
+        end]),
+        mock_heal(Coordinator, Test, fun(_) -> ok end),
+        mock_heal(Finished, Test, fun(_) -> ok end),
+        mock_heal(Refused, Test, fun
+            (1) -> {error, {guard_refused, busy}};
+            (2) -> ok
+        end),
+        ok = ekka_node_monitor:cast(Coordinator, {heal_cluster, [Finished, Refused], []}),
+        expect_heals([Finished, Refused, Refused]),
+        receive {handoff_unsupported, Keeper} -> ok after 5000 -> error(no_legacy_handoff) end
+    end).
+
+with_retry_split(Names, Check) ->
+    [Seed | Peers] = Nodes = lists:map(fun start_slave_node/1, Names),
+    try
+        [ok = rpc:call(N, ekka, join, [Seed]) || N <- Peers],
+        lists:foreach(fun(N) ->
+            View = fun() -> {[node()], Nodes -- [node()]} end,
+            ok = rpc:call(N, meck, new, [ekka_mnesia, [passthrough, no_link]]),
+            ok = rpc:call(N, meck, expect, [ekka_mnesia, cluster_view, View])
+        end, Nodes),
+        Check(Nodes)
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
+    end.
+
+mock_heal(Node, Test, Result) ->
+    ok = rpc:call(Node, meck, new, [ekka_cluster, [passthrough, no_link]]),
+    ok = rpc:call(Node, meck, expect, [ekka_cluster, heal, fun(shutdown_and_reboot) ->
+        Key = {?MODULE, heal_attempts},
+        Attempt = application:get_env(ekka, Key, 0) + 1,
+        ok = application:set_env(ekka, Key, Attempt),
+        Test ! {heal_called, node()},
+        Result(Attempt)
+    end]).
+
+expect_heals([Node | Rest]) ->
+    receive
+        {heal_called, Target} -> ?assertEqual(Node, Target), expect_heals(Rest)
+    after 10000 -> error({heal_not_dispatched, Node})
+    end;
+expect_heals([]) ->
+    receive {heal_called, Node} -> error({unexpected_heal, Node})
+    after 2500 -> ok
+    end.
+
+install_test_guard(Node, Mode) ->
+    Key = {?MODULE, guard_calls},
+    ok = rpc:call(Node, application, set_env, [ekka, Key, 0]),
+    Guard = fun(_Node, _Targets, Action) ->
+        N = application:get_env(ekka, Key, 0) + 1,
+        ok = application:set_env(ekka, Key, N),
+        case {Mode, N} of
+            {first_rejected, 1} -> {error, busy};
+            {always_rejected, _} -> {error, busy};
+            {always_rejected_permanent, _} -> {error, not_allowed};
+            {first_started_then_error, 1} -> _ = Action(), {error, started};
+            _ -> Action()
+        end
+    end,
+    ok = rpc:call(Node, ekka, callback, [membership_guard, Guard]).
+
+guard_calls(Node) ->
+    rpc:call(Node, application, get_env, [ekka, {?MODULE, guard_calls}, 0]).
+
+split_observed(Nodes) ->
+    lists:all(fun(N) -> rpc:call(N, ekka_mnesia, running_nodes, []) =:= [N] end, Nodes).
+
+joined(Nodes) ->
+    Sorted = lists:sort(Nodes),
+    lists:all(fun(N) -> lists:sort(rpc:call(N, ekka_mnesia, running_nodes, [])) =:= Sorted end, Nodes).
