@@ -90,14 +90,14 @@ t_autoheal(_Config) ->
 %% retained reporters the heal targets.
 %%--------------------------------------------------------------------
 
-t_reported_nodes_healed_once_after_busy_worker(_Config) ->
+t_data_plan_heals_retained_reporters(_Config) ->
     with_reported_heal([ah_keep1, ah_keep2, ah_keep3], fun complete_view/2, 2,
                        fun(_Nodes) -> ok end,
                        fun([N1, N2, N3]) ->
                            expect_heals([N3, N1, N2])
                        end).
 
-t_split_view_wins_over_retained_reports(_Config) ->
+t_late_plan_uses_normal_heal(_Config) ->
     with_reported_heal([ah_late1, ah_late2, ah_late3], fun late_view/2, 2,
                        fun(_Nodes) -> ok end,
                        fun([_N1, N2, N3]) ->
