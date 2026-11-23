@@ -1,7 +1,9 @@
 %% -*- mode: erlang -*-
 %% Unless you know what you are doing, DO NOT edit manually!!
 {VSN,
-  [{"0.8.1.18",
+  [{"0.8.1.19",
+    [{load_module,ekka_autoheal,brutal_purge,soft_purge,[]}]},
+   {"0.8.1.18",
     [{load_module,ekka_mnesia,brutal_purge,soft_purge,[]},
      {load_module,ekka_node,brutal_purge,soft_purge,[]},
      {load_module,ekka,brutal_purge,soft_purge,[]},
@@ -195,7 +197,9 @@
      {load_module,ekka_httpc,brutal_purge,soft_purge,[]},
      {load_module,ekka_autoclean,brutal_purge,soft_purge,[]},
      {load_module,ekka_dist,brutal_purge,soft_purge,[]}]}],
-  [{"0.8.1.18",
+  [{"0.8.1.19",
+    [{load_module,ekka_autoheal,brutal_purge,soft_purge,[]}]},
+   {"0.8.1.18",
     [{load_module,ekka_mnesia,brutal_purge,soft_purge,[]},
      {load_module,ekka_node,brutal_purge,soft_purge,[]},
      {load_module,ekka_cluster,brutal_purge,soft_purge,[]},
