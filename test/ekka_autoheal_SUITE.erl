@@ -84,6 +84,40 @@ t_autoheal(_Config) ->
         snabbkaffe:stop()
     end.
 
+%%--------------------------------------------------------------------
+%% Reports that arrive while a heal worker is busy must be retained and used after the
+%% worker exits. A split view still found by the planner wins; a complete view makes the
+%% retained reporters the heal targets.
+%%--------------------------------------------------------------------
+
+t_reported_nodes_healed_once_after_busy_worker(_Config) ->
+    with_reported_heal([ah_keep1, ah_keep2, ah_keep3], fun complete_view/2, 2,
+                       fun(_Nodes) -> ok end,
+                       fun([N1, N2, N3]) ->
+                           expect_heals([N3, N1, N2])
+                       end).
+
+t_split_view_wins_over_retained_reports(_Config) ->
+    with_reported_heal([ah_late1, ah_late2, ah_late3], fun late_view/2, 2,
+                       fun(_Nodes) -> ok end,
+                       fun([_N1, N2, N3]) ->
+                           expect_heals([N3, N2])
+                       end).
+
+%% Every running node reported. The runtime coordinator is healed last, by a worker of a
+%% peer that was healed first, through the existing continue_heal/4 entry point.
+t_all_reporters_handoff(_Config) ->
+    Setup = fun([_N1, _N2, N3]) -> install_handoff_mock(N3) end,
+    with_reported_heal([ah_all1, ah_all2, ah_all3], fun complete_view/2, 3, Setup,
+                       fun([N1, N2, N3]) ->
+                           expect_heals([N3, N2, N3, N1]),
+                           receive
+                               {handoff, N3, [N1], [N2, N3]} -> ok
+                           after 5000 ->
+                               error(no_handoff)
+                           end
+                       end).
+
 t_autoheal_asymm(_Config) ->
     [N1,N2,N3,N4] = Nodes = lists:map(fun start_slave_node/1, [ah1,ah2,ah3,ah4]),
     try
@@ -710,6 +744,74 @@ with_retry_split(Names, Check) ->
         lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
         snabbkaffe:stop()
     end.
+
+%% Start a cluster whose first heal is held in flight. Reports for the first ReportCount
+%% nodes arrive while that worker is busy, and the worker is then released.
+with_reported_heal(Names, ViewFun, ReportCount, Setup, Check) ->
+    [N1, N2, N3] = Nodes = lists:map(fun start_slave_node/1, Names),
+    try
+        ok = rpc:call(N2, ekka, join, [N1]),
+        ok = rpc:call(N3, ekka, join, [N1]),
+        install_view(Nodes, ViewFun),
+        Test = self(),
+        mock_blocking_heal(N3, Test),
+        mock_heal(N1, Test, fun(_) -> ok end),
+        mock_heal(N2, Test, fun(_) -> ok end),
+        ok = ekka_node_monitor:cast(N1, {heal_cluster, [N3], []}),
+        Worker = receive {heal_started, N3, Pid} -> Pid after 5000 -> error(no_heal_start) end,
+        [ok = ekka_node_monitor:cast(N1, {report_partition, N})
+         || N <- lists:sublist(Nodes, ReportCount)],
+        Setup(Nodes),
+        Worker ! release,
+        Check(Nodes)
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
+        snabbkaffe:stop()
+    end.
+
+install_handoff_mock(N3) ->
+    Test = self(),
+    ok = rpc:call(N3, meck, new, [ekka_autoheal, [passthrough, no_link]]),
+    ok = rpc:call(N3, meck, expect,
+                  [ekka_autoheal, continue_heal,
+                   fun(Targets, Excluded, Delay, Attempts) ->
+                           Test ! {handoff, node(), Targets, Excluded},
+                           meck:passthrough([Targets, Excluded, Delay, Attempts])
+                   end]),
+    ok.
+
+install_view(Nodes, ViewFun) ->
+    lists:foreach(
+      fun(Node) ->
+              ok = rpc:call(Node, meck, new, [ekka_mnesia, [passthrough, no_link]]),
+              ok = rpc:call(Node, meck, expect, [ekka_mnesia, cluster_view, ViewFun(Node, Nodes)])
+      end, Nodes).
+
+complete_view(_Node, Nodes) ->
+    fun() -> {Nodes, []} end.
+
+late_view(Node, [N1, N2, N3]) ->
+    fun() ->
+            case Node of
+                N2 -> {[N2], [N1, N3]};
+                _ -> {[N1, N3], [N2]}
+            end
+    end.
+
+mock_blocking_heal(Node, Test) ->
+    ok = rpc:call(Node, meck, new, [ekka_cluster, [passthrough, no_link]]),
+    ok = rpc:call(Node, persistent_term, put, [{?MODULE, block}, true]),
+    ok = rpc:call(Node, meck, expect, [ekka_cluster, heal, fun(shutdown_and_reboot) ->
+        Test ! {heal_called, node()},
+        case persistent_term:get({?MODULE, block}, false) of
+            true ->
+                persistent_term:put({?MODULE, block}, false),
+                Test ! {heal_started, node(), self()},
+                receive release -> ok end;
+            false ->
+                ok
+        end
+    end]).
 
 mock_heal(Node, Test, Result) ->
     ok = rpc:call(Node, meck, new, [ekka_cluster, [passthrough, no_link]]),
