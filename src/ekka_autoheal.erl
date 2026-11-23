@@ -351,8 +351,6 @@ start_reported_heal(Coordinator, Reports, Delay, Autoheal) ->
             schedule_planner(Delay, Autoheal)
     end.
 
-start_heal_worker([], _Delay, Autoheal) ->
-    Autoheal;
 start_heal_worker(Reports, _Delay, Autoheal = #autoheal{proc = Proc}) when Proc =/= undefined ->
     ?LOG(info, "Ignoring a reported-node heal while a heal is in progress: ~p", [Reports]),
     Autoheal;
