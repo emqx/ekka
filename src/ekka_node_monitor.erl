@@ -45,6 +45,8 @@
          }).
 
 -define(SERVER, ?MODULE).
+-define(CONFIRM_DELAY, 3000).
+-define(CONFIRM_RETRY_KEY, {?MODULE, confirm_retry}).
 -define(LOG(Level, Format, Args),
         logger:Level("Ekka(Monitor): " ++ Format, Args)).
 
@@ -146,10 +148,16 @@ handle_info({mnesia_system_event, {mnesia_up, Node}},
     %% If there was an anymmetric cluster partition, we might need more
     %% autoheal iterations to completely bring the cluster back to normal.
     case ekka_autoheal:enabled() of
-        {true, _} -> run_after(3000, confirm_partition);
+        {true, _} -> run_after(?CONFIRM_DELAY, confirm_partition);
         false -> ignore
     end,
-    {noreply, State#state{partitions = lists:delete(Node, Partitions)}};
+    case lists:delete(Node, Partitions) of
+        [] ->
+            cancel_retry(),
+            {noreply, State#state{partitions = []}};
+        Remaining ->
+            {noreply, State#state{partitions = Remaining}}
+    end;
 
 handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
     ekka_membership:mnesia_down(Node),
@@ -160,7 +168,7 @@ handle_info({mnesia_system_event, {inconsistent_database, Context, Node}},
     ?LOG(critical, "Network partition detected from node ~s: ~p", [Node, Context]),
     ekka_membership:partition_occurred(Node),
     case ekka_autoheal:enabled() of
-        {true, _} -> run_after(3000, confirm_partition);
+        {true, _} -> run_after(?CONFIRM_DELAY, confirm_partition);
         false -> ignore
     end,
     {noreply, State#state{partitions = lists:usort([Node | Partitions])}};
@@ -173,16 +181,20 @@ handle_info({mnesia_system_event, Event}, State) ->
     ?LOG(error, "Mnesia system event: ~p", [Event]),
     {noreply, State};
 
+%% A regular confirmation may have already reported while this timeout was queued.
+handle_info({timeout, Ref, confirm_partition}, State) when is_reference(Ref) ->
+    case get(?CONFIRM_RETRY_KEY) of
+        Ref -> handle_info(confirm_partition, State);
+        _ -> {noreply, State}
+    end;
+
 %% Confirm if we should report the partitions
 handle_info(confirm_partition, State = #state{partitions = []}) ->
+    cancel_retry(),
     {noreply, State};
 
 handle_info(confirm_partition, State = #state{partitions = Partitions}) ->
-    Leader = ekka_membership:leader(),
-    case ekka_node:is_running(Leader, ekka) of
-        true  -> cast(Leader, {report_partition, node()});
-        false -> ?LOG(critical, "Leader is down, cannot autoheal the partitions: ~p", [Partitions])
-    end,
+    confirm_partition(Partitions),
     {noreply, State};
 
 handle_info({autoheal, Msg}, State) ->
@@ -231,3 +243,71 @@ ensure_heartbeat(State) ->
 
 autoheal_handle_msg(Msg, State = #state{autoheal = Autoheal}) ->
     State#state{autoheal = ekka_autoheal:handle_msg(Msg, Autoheal)}.
+
+%% The leader may be temporarily unavailable when a partition is confirmed; keep
+%% re-confirming until the partitions are gone or the report is delivered.
+confirm_partition(Partitions) ->
+    case ekka_autoheal:enabled() of
+        false ->
+            ?LOG(warning, "Autoheal is disabled, not reporting the partitions: ~p",
+                 [Partitions]),
+            cancel_retry();
+        {true, _} ->
+            Leader = ekka_membership:leader(),
+            case ekka_node:is_running(Leader, ekka) of
+                true  -> send_report(Leader, Partitions);
+                false -> schedule_retry(Partitions)
+            end
+    end.
+
+send_report(Leader, Partitions) ->
+    case retry_pending() of
+        true ->
+            ?LOG(info, "Leader ~s is available again, reporting the partitions: ~p",
+                 [Leader, Partitions]);
+        false ->
+            ok
+    end,
+    cancel_retry(),
+    cast(Leader, {report_partition, node()}).
+
+schedule_retry(Partitions) ->
+    case retry_pending() of
+        true ->
+            ?LOG(debug, "Leader is still down, will retry to autoheal the partitions: ~p",
+                 [Partitions]);
+        false ->
+            ?LOG(critical, "Leader is down, cannot autoheal the partitions: ~p", [Partitions])
+    end,
+    ensure_retry().
+
+%% Retries are tracked in the process dictionary so that #state{} keeps its shape:
+%% Ekka is hot-upgraded by load_module only, without code_change.
+retry_pending() ->
+    get(?CONFIRM_RETRY_KEY) =/= undefined.
+
+ensure_retry() ->
+    case get(?CONFIRM_RETRY_KEY) of
+        undefined ->
+            start_retry();
+        Ref ->
+            case erlang:read_timer(Ref) of
+                false -> start_retry();
+                _ -> ok
+            end
+    end,
+    ok.
+
+start_retry() ->
+    Ref = erlang:start_timer(?CONFIRM_DELAY, self(), confirm_partition),
+    put(?CONFIRM_RETRY_KEY, Ref).
+
+cancel_retry() ->
+    case get(?CONFIRM_RETRY_KEY) of
+        undefined ->
+            ok;
+        Ref ->
+            _ = erlang:cancel_timer(Ref),
+            _ = erase(?CONFIRM_RETRY_KEY),
+            ok
+    end.

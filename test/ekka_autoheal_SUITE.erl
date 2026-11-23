@@ -173,6 +173,95 @@ t_autoheal_fullsplit(_Config) ->
         snabbkaffe:stop()
     end.
 
+%%--------------------------------------------------------------------
+%% A partition report must survive the leader's Ekka being temporarily down:
+%% the reporter keeps re-confirming and addresses the leader elected by then.
+%%--------------------------------------------------------------------
+
+t_confirm_retry_after_leader_ekka_restart(_Config) ->
+    run_leader_restart_scenario(false).
+
+t_confirm_retry_suppressed_after_clear(_Config) ->
+    run_leader_restart_scenario(true).
+
+run_leader_restart_scenario(ClearBeforeRecovery) ->
+    [L, P, R] = Nodes = lists:map(fun start_slave_node/1, [pcr_l, pcr_p, pcr_r]),
+    try
+        ok = rpc:call(P, ekka, join, [L]),
+        ok = rpc:call(R, ekka, join, [L]),
+        ok = wait_until(fun() -> leader_agrees(Nodes, L) end, 100),
+        Test = self(),
+        ok = watch_reports(P, Test),
+        ok = watch_confirm_targets(R, Test),
+        %% R confirms the partition against L, which is still the leader.
+        true = rpc:cast(R, erlang, send,
+                        [ekka_node_monitor,
+                         {mnesia_system_event, {inconsistent_database, undefined, P}}]),
+        ok = wait_until(fun() -> rpc:call(R, ekka_node_monitor, partitions, []) =:= [P] end, 100),
+        ok = rpc:call(L, application, stop, [ekka]),
+        %% Wait for the first confirmation to observe L as unavailable.
+        receive {is_running, R, L, false} -> ok after 5000 -> ct:fail(no_first_confirm) end,
+        case ClearBeforeRecovery of
+            true ->
+                true = rpc:cast(R, erlang, send,
+                                [ekka_node_monitor, {mnesia_system_event, {mnesia_up, P}}]),
+                ok = wait_until(fun() -> rpc:call(R, ekka_node_monitor, partitions, []) =:= [] end, 100);
+            false ->
+                ok
+        end,
+        %% L restarts its Ekka and gets a new GUID, so P becomes the leader.
+        ok = rpc:call(L, ekka, start, []),
+        ok = wait_until(fun() -> leader_agrees(Nodes, P) end, 100),
+        case ClearBeforeRecovery of
+            true ->
+                receive
+                    {autoheal_msg, P, {report_partition, R}} ->
+                        ct:fail(reported_after_partition_cleared)
+                after 6000 -> ok
+                end,
+                receive {cluster_view, P} -> ct:fail(planned_after_partition_cleared)
+                after 0 -> ok
+                end,
+                receive {is_running, R, _, _} -> ct:fail(confirmed_after_partition_cleared)
+                after 0 -> ok
+                end;
+            false ->
+                receive
+                    {autoheal_msg, P, {report_partition, R}} -> ok
+                after 10000 -> ct:fail(no_report_to_new_leader)
+                end,
+                receive {cluster_view, P} -> ok after 5000 -> ct:fail(no_plan_after_report) end
+        end
+    after
+        lists:foreach(fun ekka_ct:stop_slave/1, Nodes)
+    end.
+
+leader_agrees(Nodes, Leader) ->
+    lists:all(fun(N) -> rpc:call(N, ekka_membership, leader, []) =:= Leader end, Nodes).
+
+watch_reports(Node, Test) ->
+    ok = rpc:call(Node, meck, new, [ekka_autoheal, [passthrough, no_link]]),
+    ok = rpc:call(Node, meck, expect, [ekka_autoheal, handle_msg,
+        fun(Msg, Autoheal) ->
+            Test ! {autoheal_msg, node(), Msg},
+            meck:passthrough([Msg, Autoheal])
+        end]),
+    ok = rpc:call(Node, meck, new, [ekka_mnesia, [passthrough, no_link]]),
+    ok = rpc:call(Node, meck, expect, [ekka_mnesia, cluster_view,
+        fun() ->
+            Test ! {cluster_view, node()},
+            meck:passthrough([])
+        end]).
+
+watch_confirm_targets(Node, Test) ->
+    ok = rpc:call(Node, meck, new, [ekka_node, [passthrough, no_link]]),
+    ok = rpc:call(Node, meck, expect, [ekka_node, is_running,
+        fun(Target, App) ->
+            Result = meck:passthrough([Target, App]),
+            Test ! {is_running, node(), Target, Result},
+            Result
+        end]).
+
 start_slave_node(Name) ->
     Node = ekka_ct:start_slave(node, Name),
     ok = init_app_envs(Node),
