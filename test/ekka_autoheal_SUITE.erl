@@ -91,10 +91,15 @@ t_autoheal(_Config) ->
 %%--------------------------------------------------------------------
 
 t_data_plan_heals_retained_reporters(_Config) ->
-    with_reported_heal([ah_keep1, ah_keep2, ah_keep3], fun complete_view/2, 2,
-                       fun(_Nodes) -> ok end,
+    Setup = fun([_N1, _N2, N3]) -> install_handoff_mock(N3) end,
+    with_reported_heal([ah_keep1, ah_keep2, ah_keep3], fun complete_view/2, 2, Setup,
                        fun([N1, N2, N3]) ->
-                           expect_heals([N3, N1, N2])
+                           expect_heals([N3, N1, N2]),
+                           receive
+                               {handoff, N3, [N1, N2], []} -> ok
+                           after 5000 ->
+                               error(no_coordinator_handoff)
+                           end
                        end).
 
 t_late_plan_uses_normal_heal(_Config) ->
@@ -759,14 +764,34 @@ with_reported_heal(Names, ViewFun, ReportCount, Setup, Check) ->
         mock_heal(N2, Test, fun(_) -> ok end),
         ok = ekka_node_monitor:cast(N1, {heal_cluster, [N3], []}),
         Worker = receive {heal_started, N3, Pid} -> Pid after 5000 -> error(no_heal_start) end,
-        [ok = ekka_node_monitor:cast(N1, {report_partition, N})
-         || N <- lists:sublist(Nodes, ReportCount)],
+        Reports = lists:sublist(Nodes, ReportCount),
+        [ok = ekka_node_monitor:cast(N1, {report_partition, N}) || N <- Reports],
+        ok = wait_retained(N1, Reports),
         Setup(Nodes),
         Worker ! release,
         Check(Nodes)
     after
         lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
         snabbkaffe:stop()
+    end.
+
+wait_retained(Node, Reports) ->
+    wait_until(fun() -> retained_equal(Node, Reports) end, 100).
+
+retained_equal(Node, Reports) ->
+    case rpc:call(Node, erlang, whereis, [ekka_node_monitor], 5000) of
+        Pid when is_pid(Pid) ->
+            case rpc:call(Node, erlang, process_info, [Pid, dictionary], 5000) of
+                {dictionary, Dict} ->
+                    case lists:keyfind({ekka_autoheal, pending}, 1, Dict) of
+                        {_, Pending} -> lists:sort(Pending) =:= lists:sort(Reports);
+                        false -> false
+                    end;
+                _ ->
+                    false
+            end;
+        _ ->
+            false
     end.
 
 install_handoff_mock(N3) ->

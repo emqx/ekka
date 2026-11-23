@@ -33,6 +33,8 @@
 -record(autoheal, {delay, role, proc, timer}).
 
 -define(PENDING_KEY, {?MODULE, pending}).
+-define(WORKER_FAILED_KEY, {?MODULE, worker_failed}).
+-define(WORKER_KEY, {?MODULE, worker}).
 
 -type autoheal() :: #autoheal{}.
 
@@ -74,6 +76,7 @@ handle_msg({report_partition, Node}, Autoheal = #autoheal{proc = Proc})
 handle_msg({report_partition, Node}, Autoheal = #autoheal{delay = Delay, timer = TRef}) ->
     case ekka_membership:leader() =:= node() of
         true ->
+            retain_report(Node),
             ensure_cancel_timer(TRef),
             TRef1 = ekka_node_monitor:run_after(Delay, {autoheal, {create_splitview, node()}}),
             Autoheal#autoheal{role = leader, timer = TRef1};
@@ -118,13 +121,15 @@ handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined, d
         [{_, []}] -> Autoheal;
         %% Partitions.
         SplitView ->
-            Proc = spawn_link(fun() -> heal_partition(SplitView, Delay) end),
+            remember_worker(normal, partition_targets(SplitView)),
+            Proc = spawn_link(fun() -> worker_result(fun() -> heal_partition(SplitView, Delay) end) end),
             Autoheal#autoheal{role = coordinator, proc = Proc}
     end;
 
 handle_msg({heal_cluster, Minority, SplitView},
            Autoheal = #autoheal{proc = undefined, delay = Delay}) ->
-    Proc = spawn_link(fun() -> heal_cluster(Minority, SplitView, Delay) end),
+    remember_worker(normal, Minority -- [node()]),
+    Proc = spawn_link(fun() -> worker_result(fun() -> heal_cluster(Minority, SplitView, Delay) end) end),
     Autoheal#autoheal{role = coordinator, proc = Proc};
 
 handle_msg({heal_cluster, _Minority, _SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
@@ -133,7 +138,8 @@ handle_msg({heal_cluster, _Minority, _SplitView}, Autoheal = #autoheal{proc = _P
 
 handle_msg({continue_heal, Nodes, Excluded, Delay, Attempts},
            Autoheal = #autoheal{proc = undefined}) ->
-    Proc = spawn_link(fun() -> heal_nodes(Nodes, Excluded, Delay, Attempts) end),
+    remember_worker(reported, Nodes),
+    Proc = spawn_link(fun() -> worker_result(fun() -> heal_nodes(Nodes, Excluded, Delay, Attempts) end) end),
     Autoheal#autoheal{role = coordinator, proc = Proc};
 
 handle_msg({continue_heal, _, _, _, _}, Autoheal) ->
@@ -144,11 +150,32 @@ handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
     ?LOG(info, "Ignoring a heal request while another heal is in progress: ~p", [SplitView]),
     Autoheal;
 
+handle_msg({worker_failed, Pid}, Autoheal = #autoheal{proc = Pid}) ->
+    erlang:put(?WORKER_FAILED_KEY, true),
+    Autoheal;
+handle_msg({worker_failed, _Pid}, Autoheal) ->
+    Autoheal;
 handle_msg({'EXIT', Pid, normal}, Autoheal = #autoheal{proc = Pid}) ->
     Autoheal1 = Autoheal#autoheal{proc = undefined},
-    resume_after_heal(Autoheal1);
+    {Kind, Targets} = take_worker(),
+    case take_worker_failed() of
+        true ->
+            drop_pending("the heal did not complete");
+        false ->
+            case Kind of
+                handoff ->
+                    drop_pending("the coordinator restart was handed to a peer");
+                reported ->
+                    remove_pending(Targets),
+                    resume_after_heal(Autoheal1);
+                normal ->
+                    resume_after_heal(Autoheal1)
+            end
+    end,
+    Autoheal1;
 handle_msg({'EXIT', Pid, Reason}, Autoheal = #autoheal{proc = Pid}) ->
     ?LOG(critical, "Autoheal process crashed: ~p", [Reason]),
+    _ = take_worker_failed(),
     case take_pending() of
         [] ->
             ok;
@@ -242,8 +269,9 @@ resume_after_heal(Autoheal) ->
                     TRef = ekka_node_monitor:run_after(0, {autoheal, {create_splitview, node()}}),
                     Autoheal#autoheal{timer = TRef};
                 Leader ->
-                    ?LOG(warning, "No longer the leader; forwarding retained report(s) to ~s: ~p",
-                         [Leader, Pending]),
+                    ?LOG(critical, "No longer the leader; forwarding retained report(s) to ~s: ~p. "
+                                   "If that leader is not running, the report(s) need a new "
+                                   "partition event.", [Leader, Pending]),
                     forward_reports(Leader, take_pending()),
                     Autoheal
             end
@@ -278,10 +306,17 @@ heal_reported_nodes(Reports, Delay, Autoheal) ->
 %% node from its targets, but a reporter can be the current leader/coordinator.
 reported_heal_coordinator(Reports) ->
     Running = ekka_mnesia:running_nodes(),
-    case [Node || Node <- Running -- Reports, ekka_membership:is_member(Node)] of
+    case [Node || Node <- Running -- Reports,
+                  ekka_membership:is_member(Node),
+                  supports_continue_heal(Node)] of
         [] -> undefined;
         Nodes -> ekka_membership:coordinator(Nodes)
     end.
+
+supports_continue_heal(Node) when Node =:= node() ->
+    erlang:function_exported(?MODULE, continue_heal, 4);
+supports_continue_heal(Node) ->
+    rpc:call(Node, erlang, function_exported, [?MODULE, continue_heal, 4], 5000) =:= true.
 
 %% Every running node reported, so no coordinator is left outside the report set. Heal
 %% the other reporters first and let the last healed peer restart the runtime coordinator:
@@ -309,9 +344,11 @@ start_reported_heal(Coordinator, Reports, Delay, Autoheal) ->
         ok ->
             Autoheal;
         Error ->
-            ?LOG(warning, "Could not hand off the reported-node heal to ~s: ~p",
+            ?LOG(critical, "Could not hand off the reported-node heal to ~s: ~p; "
+                           "retaining the report(s) for another planner run",
                  [Coordinator, Error]),
-            Autoheal
+            retain_reports(Reports),
+            schedule_planner(Delay, Autoheal)
     end.
 
 start_heal_worker([], _Delay, Autoheal) ->
@@ -320,7 +357,10 @@ start_heal_worker(Reports, _Delay, Autoheal = #autoheal{proc = Proc}) when Proc 
     ?LOG(info, "Ignoring a reported-node heal while a heal is in progress: ~p", [Reports]),
     Autoheal;
 start_heal_worker(Reports, Delay, Autoheal) ->
-    Proc = spawn_link(fun() -> heal_nodes(Reports, [], Delay, ?HEAL_ATTEMPTS) end),
+    remember_worker(reported, Reports),
+    Proc = spawn_link(fun() ->
+        worker_result(fun() -> heal_nodes(Reports, [], Delay, ?HEAL_ATTEMPTS) end)
+    end),
     Autoheal#autoheal{role = coordinator, proc = Proc}.
 
 start_handoff_heal_worker(Ordered, Delay, Autoheal) ->
@@ -338,38 +378,85 @@ start_handoff_heal_worker(_Ordered, _Peers, _Delay, Autoheal = #autoheal{proc = 
     ?LOG(info, "Ignoring an all-reporters heal while a heal is in progress", []),
     Autoheal;
 start_handoff_heal_worker(_Ordered, Peers, Delay, Autoheal) ->
-    Proc = spawn_link(fun() -> heal_peers_then_handoff(Peers, Delay) end),
+    remember_worker(handoff, Peers),
+    Proc = spawn_link(fun() -> worker_result(fun() -> heal_peers_then_handoff(Peers, Delay) end) end),
     Autoheal#autoheal{role = coordinator, proc = Proc}.
 
 heal_peers_then_handoff(Peers, Delay) ->
-    ok = heal_nodes(Peers, [], Delay, ?HEAL_ATTEMPTS),
-    Peer = lists:last(Peers),
-    case peers_recovered(Peers) of
-        true ->
-            ?LOG(info, "Handing this node's restart to ~s after healing ~p", [Peer, Peers]),
-            case rpc:call(Peer, ?MODULE, continue_heal,
-                          [[node()], Peers, Delay, ?HEAL_ATTEMPTS], 5000) of
-                ok ->
-                    ?LOG(info, "~s accepted the handoff of this node's restart", [Peer]);
-                Error ->
-                    ?LOG(critical, "~s did not accept the handoff of this node's restart: ~p. "
-                                   "This node was not restarted; a new partition event is "
-                                   "needed to retry.", [Peer, Error])
-            end;
-        false ->
-            ?LOG(critical, "Not handing off this node's restart: not every healed peer is "
-                           "running again: ~p. A new partition event is needed to retry.",
-                 [Peers])
+    case heal_nodes(Peers, [], Delay, ?HEAL_ATTEMPTS) of
+        ok ->
+            handoff_coordinator(Peers, Delay);
+        {error, Failed} ->
+            case await_badrpc(Peers, Failed, 60000) of
+                true ->
+                    handoff_coordinator(Peers, Delay);
+                false ->
+                    ?LOG(critical, "Not handing off this node's restart; peers were not healed: "
+                                   "~p. A new partition event is needed to retry.", [Failed])
+            end
     end.
 
+%% A heal RPC timeout leaves the peer restarting with an unknown outcome; wait for it
+%% instead of restarting it again. Any other failure means the handoff is not safe.
+await_badrpc(Peers, Failed, Timeout) ->
+    case [{Node, Reason} || {Node, Reason} <- Failed, not is_badrpc(Reason)] of
+        [] -> lists:all(fun(P) -> await_running(P, Timeout) end, Peers);
+        _ -> false
+    end.
+
+is_badrpc({badrpc, _}) -> true;
+is_badrpc(_) -> false.
+
+handoff_coordinator(Peers, Delay) ->
+    case peers_recovered(Peers) of
+        true ->
+            handoff_coordinator(Peers, lists:reverse(handoff_candidates(Peers)), Delay);
+        false ->
+            ?LOG(critical, "Not handing off this node's restart: not every healed peer is "
+                           "running again: ~p. A new partition event is needed to retry.", [Peers])
+    end.
+
+handoff_coordinator(_Peers, [], _Delay) ->
+    ?LOG(critical, "No healed peer can take over this node's restart; a new partition event "
+                   "is needed to retry.", []);
+handoff_coordinator(Peers, [Peer | Rest], Delay) ->
+    ?LOG(info, "Requesting the restart of this node on ~s after healing ~p", [Peer, Peers]),
+    case rpc:call(Peer, ?MODULE, continue_heal, [[node()], Peers, Delay, ?HEAL_ATTEMPTS], 5000) of
+        ok ->
+            ?LOG(info, "Handoff request for this node's restart was sent to ~s", [Peer]);
+        {badrpc, {'EXIT', {undef, _}}} ->
+            ?LOG(warning, "~s does not support the handoff; trying another healed peer", [Peer]),
+            handoff_coordinator(Peers, Rest, Delay);
+        Error ->
+            ?LOG(critical, "~s did not accept the handoff of this node's restart: ~p. "
+                           "This node was not restarted; a new partition event is needed to retry.",
+                 [Peer, Error])
+    end.
+
+handoff_candidates(Peers) ->
+    [Peer || Peer <- Peers, supports_continue_heal(Peer)].
+
 peers_recovered(Peers) ->
-    lists:all(fun(Node) -> ekka_node:is_running(Node, ekka, 5000) end, Peers).
+    lists:all(fun(Node) -> await_running(Node, 60000) end, Peers).
+
+await_running(Node, Timeout) when Timeout =< 0 ->
+    ekka_node:is_running(Node, ekka, 5000);
+await_running(Node, Timeout) ->
+    case ekka_node:is_running(Node, ekka, 5000) of
+        true -> true;
+        false -> timer:sleep(1000), await_running(Node, Timeout - 1000)
+    end.
 
 pick_coordinator(Candidates) ->
     case lists:member(node(), Candidates) of
         true -> node();
         false -> ekka_membership:coordinator(Candidates)
     end.
+
+partition_targets([{Nodes, []} | _]) ->
+    Nodes -- [node()];
+partition_targets([{_Majority, Minority} | _]) ->
+    Minority -- [node()].
 
 heal_cluster(Minority, SplitView, Delay) ->
     ?tp(critical, "Healing cluster partition", #{
@@ -393,7 +480,11 @@ heal_nodes(Nodes, Delay, Attempts) ->
 heal_nodes(Nodes, Excluded, Delay, Attempts) ->
     Results = [{Node, heal_node(Node)} || Node <- Nodes],
     case lists:partition(fun({_, Result}) -> retryable(Result) end, Results) of
-        {[], _} -> ok;
+        {[], Settled} ->
+            case [{Node, Result} || {Node, Result} <- Settled, Result =/= ok] of
+                [] -> ok;
+                Failed -> {error, Failed}
+            end;
         {Failed, Settled} ->
             DoNotReplay = [Node || {Node, _} <- Settled] ++ Excluded,
             retry_heal({Failed, DoNotReplay}, Delay, Attempts - 1)
@@ -402,7 +493,8 @@ heal_nodes(Nodes, Excluded, Delay, Attempts) ->
 retry_heal({Failed, _Excluded}, _Delay, 0) ->
     ?LOG(error, "Autoheal stopped retrying, nodes still not restarted: ~p. "
                 "Inspect the logs on the affected nodes. A new partition event re-triggers "
-                "autoheal.", [Failed]);
+                "autoheal.", [Failed]),
+    {error, Failed};
 retry_heal(State = {_Failed, Excluded}, Delay, Attempts) ->
     timer:sleep(Delay),
     case read_split_view() of
@@ -473,8 +565,55 @@ is_node_list([Node | Rest]) when is_atom(Node) -> is_node_list(Rest);
 is_node_list([]) -> true;
 is_node_list(_) -> false.
 
+remember_worker(Kind, Targets) ->
+    _ = erlang:erase(?WORKER_FAILED_KEY),
+    erlang:put(?WORKER_KEY, {Kind, lists:usort(Targets)}).
+
+take_worker() ->
+    case erlang:erase(?WORKER_KEY) of
+        undefined -> {normal, []};
+        Worker -> Worker
+    end.
+
+drop_pending(Reason) ->
+    case take_pending() of
+        [] ->
+            ok;
+        Dropped ->
+            ?LOG(warning, "Dropping retained partition report(s) because ~s: ~p",
+                 [Reason, Dropped])
+    end.
+
+remove_pending(Targets) ->
+    case pending_reports() -- Targets of
+        [] -> _ = take_pending(), ok;
+        Remaining -> erlang:put(?PENDING_KEY, Remaining)
+    end.
+
+retain_reports(Reports) ->
+    Pending = lists:usort(Reports ++ pending_reports()),
+    ?LOG(info, "Retained partition report(s) for another planner run: ~p", [Pending]),
+    erlang:put(?PENDING_KEY, Pending).
+
+schedule_planner(Delay, Autoheal) ->
+    _ = ensure_cancel_timer(Autoheal#autoheal.timer),
+    TRef = ekka_node_monitor:run_after(Delay, {autoheal, {create_splitview, node()}}),
+    Autoheal#autoheal{timer = TRef}.
+
+worker_result(Fun) ->
+    case Fun() of
+        {error, _} -> ekka_node_monitor ! {autoheal, {worker_failed, self()}};
+        _ -> ok
+    end.
+
+take_worker_failed() ->
+    case erlang:erase(?WORKER_FAILED_KEY) of
+        undefined -> false;
+        Failed -> Failed
+    end.
+
 retain_report(Node) ->
-    ?LOG(info, "Retained partition report from ~s while a heal is in progress", [Node]),
+    ?LOG(info, "Retained partition report from ~s", [Node]),
     erlang:put(?PENDING_KEY, lists:usort([Node | pending_reports()])).
 
 pending_reports() ->
