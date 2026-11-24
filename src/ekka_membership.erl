@@ -41,7 +41,7 @@
         , coordinator/1
         ]).
 
--export([is_all_alive/0]).
+-export([is_all_alive/0, leader_excluding/1]).
 
 %% Monitor API
 -export([monitor/3]).
@@ -124,7 +124,12 @@ members(Status) ->
 %% Get leader node of the members
 -spec(leader() -> node()).
 leader() ->
-    Member = oldest(members()), Member#member.node.
+    leader_excluding([]).
+
+leader_excluding(Excluded) ->
+    Members = [M || M = #member{node = Node} <- members(), not lists:member(Node, Excluded)],
+    Member = oldest(Members),
+    Member#member.node.
 
 %% Get coordinator node from all the alive members
 -spec(coordinator() -> node()).

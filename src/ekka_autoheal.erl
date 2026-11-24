@@ -24,6 +24,15 @@
         , handle_msg/2
         , continue_heal/4
         , accept_retained_reports/1
+        , heal_recovery_peer/2
+        , heal_recovery_peer/3
+        , observe_partition/2
+        , accept_recovery_handoff/2
+        , recovery_status/0
+        , local_recovery_status/0
+        , request_manual/3
+        , authorize_manual/3
+        , shadowed_owner/1
         ]).
 
 -ifdef(TEST).
@@ -34,6 +43,9 @@
 -record(autoheal, {delay, role, proc, timer}).
 
 -define(PENDING_KEY, {?MODULE, pending}).
+-define(REPORT_SEQ, {?MODULE, report_sequence}).
+-define(RELEASED_KEY, {?MODULE, keep_release_reports}).
+-define(RECOVERY_KEY, {?MODULE, recovery_candidate}).
 -define(WORKER_FAILED_KEY, {?MODULE, worker_failed}).
 -define(WORKER_KEY, {?MODULE, worker}).
 %% Older workers only subtract exclusions from node lists, so the marker is safe to forward.
@@ -53,7 +65,12 @@
 
 init() ->
     case enabled() of
-        {true, Delay} -> #autoheal{delay = Delay};
+        {true, Delay} ->
+            Autoheal = #autoheal{delay = Delay},
+            case ekka_isolated_heal:restore_shadow() of
+                true -> schedule_planner(Delay, Autoheal);
+                false -> Autoheal
+            end;
         false -> undefined
     end.
 
@@ -71,18 +88,13 @@ proc(#autoheal{proc = Proc}) -> Proc.
 handle_msg(Msg, undefined) ->
     ?LOG(error, "Autoheal not enabled! Unexpected msg: ~p", [Msg]), undefined;
 
-handle_msg({report_partition, Node}, Autoheal = #autoheal{proc = Proc})
-    when Proc =/= undefined ->
-    retain_report(Node),
-    Autoheal;
-
-handle_msg({report_partition, Node}, Autoheal = #autoheal{delay = Delay}) ->
-    case ekka_membership:leader() =:= node() of
+handle_msg({report_partition, Node}, Autoheal) ->
+    case ekka_isolated_heal:active() of
         true ->
-            schedule_planner(Delay, Autoheal#autoheal{role = leader});
+            retain_report(Node),
+            Autoheal;
         false ->
-            ?LOG(critical, "I am not leader, but received partition report from ~s", [Node]),
-            Autoheal
+            handle_report(Node, Autoheal)
     end;
 
 handle_msg({retained_reports, Reports}, Autoheal = #autoheal{proc = undefined, delay = Delay}) ->
@@ -107,24 +119,95 @@ handle_msg({create_splitview, Node}, Autoheal = #autoheal{delay = Delay, proc = 
     schedule_planner(Delay, Autoheal);
 handle_msg({create_splitview, Node}, Autoheal = #autoheal{delay = Delay})
   when Node =:= node() ->
-    case ekka_membership:is_all_alive() of
-        true ->
-            case read_split_view() of
-                {ok, SplitView} ->
-                    plan_after_view(SplitView, take_pending(), Delay, cancel_planner(Autoheal));
-                {error, Reason} ->
-                    ?LOG(warning, "Could not read the cluster view for autoheal: ~p", [Reason]),
-                    schedule_planner(Delay, Autoheal)
-            end;
-        false ->
-            schedule_planner(Delay, Autoheal)
+    case ekka_isolated_heal:active() of
+        true -> recovery_tick(Delay, Autoheal);
+        false -> plan_split(Delay, Autoheal)
     end;
 
 handle_msg(Msg = {create_splitview, _Node}, Autoheal) ->
     ?LOG(critical, "I am not leader, but received : ~p", [Msg]),
     Autoheal;
 
-handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined, delay = Delay}) ->
+handle_msg(Request, Autoheal)
+  when element(1, Request) =:= heal_partition;
+       element(1, Request) =:= heal_cluster;
+       element(1, Request) =:= continue_heal ->
+    case ekka_isolated_heal:active() of
+        true ->
+            ?LOG(warning, "Deferring ordinary autoheal during isolated recovery: ~p", [Request]),
+            Autoheal;
+        false ->
+            start_heal_worker(Request, Autoheal)
+    end;
+
+handle_msg({recovery_candidate, Pid, Target, Round, Peer}, Autoheal = #autoheal{proc = Pid}) ->
+    put(?RECOVERY_KEY, {Target, Round, Peer}),
+    Autoheal;
+handle_msg({recovery_finished, Pid}, Autoheal = #autoheal{proc = Pid}) ->
+    erase(?RECOVERY_KEY),
+    Autoheal;
+handle_msg({recovery_decision, Operation, Round}, Autoheal) ->
+    ok = ekka_isolated_heal:decide(Operation, Round, report_sequences()),
+    Autoheal;
+handle_msg({close_recovery_shadow, Round}, Autoheal) ->
+    case ekka_isolated_heal:close_shadow(Round) of
+        resume ->
+            resume_after_heal(cancel_planner(Autoheal));
+        keep ->
+            Autoheal
+    end;
+handle_msg({recovery_result, Key, Operation, Result}, Autoheal) ->
+    ok = ekka_isolated_heal:result(Key, Operation, Result),
+    Autoheal;
+handle_msg({worker_failed, Pid}, Autoheal = #autoheal{proc = Pid}) ->
+    erlang:put(?WORKER_FAILED_KEY, true),
+    Autoheal;
+handle_msg({worker_failed, _Pid}, Autoheal) ->
+    Autoheal;
+handle_msg({'EXIT', Pid, normal}, Autoheal = #autoheal{proc = Pid}) ->
+    Autoheal1 = Autoheal#autoheal{proc = undefined},
+    Kind = take_worker(),
+    case {erase(?RECOVERY_KEY), take_worker_failed()} of
+        {{Target, Round, Peer}, _} ->
+            ok = ekka_isolated_heal:start(Target, Round, Peer),
+            schedule_planner(Autoheal#autoheal.delay, Autoheal1);
+        {undefined, true} ->
+            drop_pending("the heal did not complete"),
+            cancel_planner(Autoheal1);
+        {undefined, false} when Kind =:= handoff ->
+            drop_pending("the coordinator restart was handed to a peer"),
+            cancel_planner(Autoheal1);
+        {undefined, false} ->
+            resume_after_heal(Autoheal1)
+    end;
+handle_msg({'EXIT', Pid, Reason}, Autoheal = #autoheal{proc = Pid}) ->
+    ?LOG(critical, "Autoheal process crashed: ~p", [Reason]),
+    _ = take_worker_failed(),
+    _ = take_worker(),
+    case erase(?RECOVERY_KEY) of
+        {Target, Round, Peer} ->
+            ok = ekka_isolated_heal:start(Target, Round, Peer),
+            schedule_planner(Autoheal#autoheal.delay, Autoheal#autoheal{proc = undefined});
+        undefined ->
+            failed_worker(Autoheal)
+    end;
+
+handle_msg(Msg, Autoheal) ->
+    ?LOG(critical, "Unexpected msg: ~p", [Msg, Autoheal]),
+    Autoheal.
+
+failed_worker(Autoheal) ->
+    case take_pending() of
+        [] ->
+            ok;
+        Dropped ->
+            ?LOG(warning, "Dropping retained partition report(s) after the crashed heal: ~p",
+                 [Dropped])
+    end,
+    _Retry = ekka_node_monitor:run_after(1000, confirm_partition),
+    cancel_planner(Autoheal#autoheal{proc = undefined}).
+
+start_heal_worker({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined, delay = Delay}) ->
     %% NOTE: Backward compatibility.
     case SplitView of
         %% No partitions.
@@ -137,65 +220,92 @@ handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = undefined, d
             Autoheal#autoheal{role = coordinator, proc = Proc}
     end;
 
-handle_msg({heal_cluster, Minority, SplitView},
+start_heal_worker({heal_cluster, Minority, SplitView},
            Autoheal = #autoheal{proc = undefined, delay = Delay}) ->
     remember_worker(normal),
     Proc = spawn_link(fun() -> worker_result(fun() -> heal_cluster(Minority, SplitView, Delay) end) end),
     Autoheal#autoheal{role = coordinator, proc = Proc};
 
-handle_msg({heal_cluster, _Minority, _SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
+start_heal_worker({heal_cluster, _Minority, _SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
     ?LOG(info, "Ignoring a heal request while another heal is in progress", []),
     Autoheal;
 
-handle_msg({continue_heal, Nodes, Excluded, Delay, Attempts},
+start_heal_worker({continue_heal, Nodes, Excluded, Delay, Attempts},
            Autoheal = #autoheal{proc = undefined}) ->
     remember_worker(normal),
     Proc = spawn_link(fun() -> worker_result(fun() -> heal_nodes(Nodes, Excluded, Delay, Attempts) end) end),
     Autoheal#autoheal{role = coordinator, proc = Proc};
 
-handle_msg({continue_heal, _, _, _, _}, Autoheal) ->
+start_heal_worker({continue_heal, _, _, _, _}, Autoheal) ->
     ?LOG(info, "Ignoring a heal request while another heal is in progress", []),
     Autoheal;
 
-handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
+start_heal_worker({heal_partition, SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
     ?LOG(info, "Ignoring a heal request while another heal is in progress: ~p", [SplitView]),
-    Autoheal;
-
-handle_msg({worker_failed, Pid}, Autoheal = #autoheal{proc = Pid}) ->
-    erlang:put(?WORKER_FAILED_KEY, true),
-    Autoheal;
-handle_msg({worker_failed, _Pid}, Autoheal) ->
-    Autoheal;
-handle_msg({'EXIT', Pid, normal}, Autoheal = #autoheal{proc = Pid}) ->
-    Autoheal1 = Autoheal#autoheal{proc = undefined},
-    Kind = take_worker(),
-    case take_worker_failed() of
-        true ->
-            drop_pending("the heal did not complete"),
-            cancel_planner(Autoheal1);
-        false when Kind =:= handoff ->
-            drop_pending("the coordinator restart was handed to a peer"),
-            cancel_planner(Autoheal1);
-        false ->
-            resume_after_heal(Autoheal1)
-    end;
-handle_msg({'EXIT', Pid, Reason}, Autoheal = #autoheal{proc = Pid}) ->
-    ?LOG(critical, "Autoheal process crashed: ~p", [Reason]),
-    _ = take_worker_failed(),
-    _ = take_worker(),
-    case take_pending() of
-        [] ->
-            ok;
-        Dropped ->
-            ?LOG(warning, "Dropping retained partition report(s) after the crashed heal: ~p",
-                 [Dropped])
-    end,
-    _Retry = ekka_node_monitor:run_after(1000, confirm_partition),
-    cancel_planner(Autoheal#autoheal{proc = undefined});
-
-handle_msg(Msg, Autoheal) ->
-    ?LOG(critical, "Unexpected msg: ~p", [Msg, Autoheal]),
     Autoheal.
+
+handle_report(Node, Autoheal = #autoheal{proc = Proc}) when Proc =/= undefined ->
+    retain_report(Node),
+    Autoheal;
+handle_report(Node, Autoheal = #autoheal{delay = Delay}) ->
+    case ekka_membership:leader() =:= node() of
+        true ->
+            case get(?RELEASED_KEY) of
+                true -> retain_report(Node);
+                _ -> ok
+            end,
+            schedule_planner(Delay, Autoheal#autoheal{role = leader});
+        false ->
+            ?LOG(critical, "I am not leader, but received partition report from ~s", [Node]),
+            Autoheal
+    end.
+
+observe_partition(Event, Node) ->
+    ekka_isolated_heal:event(Event, Node, report_sequences()).
+
+request_manual(Target, Round, Instance) ->
+    gen_server:call(ekka_node_monitor, {autoheal_manual_recovery, Target, Round, Instance}, 10000).
+
+authorize_manual(Target, Round, Instance) ->
+    ekka_isolated_heal:authorize_manual(Target, Round, Instance, report_sequences()).
+
+recovery_status() ->
+    gen_server:call(ekka_node_monitor, autoheal_recovery_status).
+
+local_recovery_status() ->
+    #{recovery => ekka_isolated_heal:status(), reports => report_sequences()}.
+
+shadowed_owner(Owner) ->
+    ekka_isolated_heal:shadowed_owner(Owner).
+
+accept_recovery_handoff(State, Reports) ->
+    ekka_isolated_heal:accept_handoff(State#{owner_reports => Reports}).
+
+recovery_tick(Delay, Autoheal) ->
+    case ekka_isolated_heal:tick(report_sequences(), Delay) of
+        keep -> schedule_planner(Delay, Autoheal);
+        {consume, Snapshot} ->
+            consume_snapshot(Snapshot),
+            schedule_planner(Delay, Autoheal);
+        resume ->
+            put(?RELEASED_KEY, true),
+            resume_after_heal(cancel_planner(Autoheal))
+    end.
+
+plan_split(Delay, Autoheal) ->
+    case ekka_membership:is_all_alive() of
+        true ->
+            case read_split_view() of
+                {ok, SplitView} ->
+                    erase(?RELEASED_KEY),
+                    plan_after_view(SplitView, take_pending(), Delay, cancel_planner(Autoheal));
+                {error, Reason} ->
+                    ?LOG(warning, "Could not read the cluster view for autoheal: ~p", [Reason]),
+                    schedule_planner(Delay, Autoheal)
+            end;
+        false ->
+            schedule_planner(Delay, Autoheal)
+    end.
 
 find_split_view(Nodes, Views) ->
     ClusterView = lists:zipwith(
@@ -436,7 +546,14 @@ heal_nodes(Nodes, Delay, Attempts) ->
     heal_nodes(Nodes, [], Delay, Attempts).
 
 heal_nodes(Nodes, Excluded, Delay, Attempts) ->
-    Results = [{Node, heal_node(Node)} || Node <- Nodes],
+    case heal_targets(Nodes, []) of
+        {isolation_pending, Target, Result} ->
+            {error, [{Target, Result}]};
+        Results ->
+            handle_heal_results(Results, Excluded, Delay, Attempts)
+    end.
+
+handle_heal_results(Results, Excluded, Delay, Attempts) ->
     case lists:partition(fun({_, Result}) -> retryable(Result) end, Results) of
         {[], Settled} ->
             case [{Node, Result} || {Node, Result} <- Settled, Result =/= ok] of
@@ -447,6 +564,59 @@ heal_nodes(Nodes, Excluded, Delay, Attempts) ->
             DoNotReplay = [Node || {Node, _} <- Settled] ++ Excluded,
             retry_heal({Failed, DoNotReplay}, Delay, Attempts - 1)
     end.
+
+heal_targets([], Results) ->
+    lists:reverse(Results);
+heal_targets([Target | Rest], Results) ->
+    case heal_target(Target) of
+        {isolation_pending, _, _} = Pending -> Pending;
+        Result -> heal_targets(Rest, [{Target, Result} | Results])
+    end.
+
+heal_target(Node) ->
+    case recovery_peer(Node) of
+        {ok, Peer} ->
+            Id = {node(), make_ref()},
+            ok = notify_recovery(Node, Id, Peer),
+            Result = heal_recovery_peer(Node, Id),
+            case Result of
+                {error, {heal_isolation, _}} ->
+                    {isolation_pending, Node, Result};
+                {error, {heal_interrupted, _}} ->
+                    {isolation_pending, Node, Result};
+                {badrpc, _} ->
+                    {isolation_pending, Node, Result};
+                _ ->
+                    ekka_node_monitor ! {autoheal, {recovery_finished, self()}},
+                    Result
+            end;
+        unavailable ->
+            heal_node(Node)
+    end.
+
+recovery_peer(Target) ->
+    case ekka_mnesia:cluster_nodes(all) -- [node(), Target] of
+        [Peer] when Peer =/= Target ->
+            case ekka_membership:leader() =:= node() andalso
+                 ekka_heal_recovery:capability() =:= 1 of
+                true ->
+                    case rpc:multicall([Target, Peer], ekka_heal_recovery, capability, [], 1000) of
+                        {[1, 1], []} -> {ok, Peer};
+                        Capability ->
+                            ?LOG(warning,
+                                 "Autoheal recovery protocol unavailable for ~p and ~p: ~p",
+                                 [Target, Peer, Capability]),
+                            unavailable
+                    end;
+                false -> unavailable
+            end;
+        _ ->
+            unavailable
+    end.
+
+notify_recovery(Target, Round, Peer) ->
+    ekka_node_monitor ! {autoheal, {recovery_candidate, self(), Target, Round, Peer}},
+    ok.
 
 retry_heal({Failed, _Excluded}, _Delay, 0) ->
     ?LOG(error, "Autoheal stopped retrying, nodes still not restarted: ~p. "
@@ -569,22 +739,47 @@ retain_report(Node) ->
     retain_reports([Node]).
 
 retain_reports(Reports) ->
-    erlang:put(?PENDING_KEY, lists:usort(Reports ++ pending_reports())).
+    lists:foreach(fun retain_sequence/1, Reports).
 
-pending_reports() ->
-    case erlang:get(?PENDING_KEY) of
-        undefined -> [];
-        Pending -> Pending
+retain_sequence(Node) ->
+    Seq = case get(?REPORT_SEQ) of undefined -> 1; Prev -> Prev + 1 end,
+    put(?REPORT_SEQ, Seq),
+    put(?PENDING_KEY, (report_sequences())#{Node => Seq}),
+    ekka_isolated_heal:report(Node).
+
+report_sequences() ->
+    case get(?PENDING_KEY) of
+        undefined -> #{};
+        Reports when is_map(Reports) -> Reports;
+        Reports when is_list(Reports) -> maps:from_list([{Node, 0} || Node <- Reports])
     end.
+
+pending_reports() -> lists:sort(maps:keys(report_sequences())).
 
 take_pending() ->
-    case erlang:erase(?PENDING_KEY) of
-        undefined -> [];
-        Pending -> Pending
-    end.
+    Reports = pending_reports(),
+    erase(?PENDING_KEY),
+    Reports.
+
+consume_snapshot(Snapshot) ->
+    Remaining = maps:filter(
+        fun(Node, Seq) -> Seq > maps:get(Node, Snapshot, -1) end,
+        report_sequences()
+    ),
+    put(?PENDING_KEY, Remaining),
+    ?LOG(info, "Autoheal consumed report snapshot ~p; retained ~p", [Snapshot, Remaining]).
 
 heal_node(Node) ->
-    Result = rpc:call(Node, ekka_cluster, heal, [shutdown_and_reboot], 30000),
+    call_heal(Node, shutdown_and_reboot).
+
+heal_recovery_peer(Node, Id) ->
+    call_heal(Node, {shutdown_and_reboot, Id}).
+
+heal_recovery_peer(Node, Id, Round) ->
+    call_heal(Node, {shutdown_and_reboot, Id, Round}).
+
+call_heal(Node, Request) ->
+    Result = rpc:call(Node, ekka_cluster, heal, [Request], 30000),
     case Result of
         ok ->
             ?LOG(info, "Healed ~s for autoheal", [Node]),

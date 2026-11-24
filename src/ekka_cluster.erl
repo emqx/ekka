@@ -42,6 +42,7 @@
 -export([ prepare/1
         , heal/1
         , reboot/0
+        , reboot_for_recovery/0
         ]).
 
 -type(info_key() :: running_nodes | stopped_nodes).
@@ -117,7 +118,11 @@ force_leave(Node, Check) ->
         end
     end),
     case Result of
-        reboot -> rpc:call(Node, ?MODULE, reboot, []);
+        reboot ->
+            case rpc:call(Node, ?MODULE, reboot, []) of
+                {error, autoheal_isolated} -> ok;
+                Reboot -> Reboot
+            end;
         _ -> Result
     end.
 
@@ -143,9 +148,66 @@ do_force_leave(Node) ->
     end.
 
 %% @doc Heal partitions
--spec(heal(shutdown_and_reboot) -> ok | {error, term()}).
+-type round_id() :: {node(), reference()}.
+
+-spec(heal(shutdown_and_reboot | {shutdown_and_reboot, round_id()} |
+           {shutdown_and_reboot, round_id(), round_id()}) -> ok | {error, term()}).
 heal(shutdown_and_reboot) ->
-    maybe_reboot(ekka_mnesia:restart_membership(fun() -> prepare(heal) end)).
+    maybe_reboot(ekka_mnesia:restart_membership(fun() -> prepare(heal) end));
+heal({shutdown_and_reboot, Id}) ->
+    with_tracked_heal(Id, fun() -> true end);
+heal({shutdown_and_reboot, Id, Round}) ->
+    with_tracked_heal(Id, fun() -> owns_peer_dispatch(Id, Round) end).
+
+with_tracked_heal({Owner, _} = Id, Check) ->
+    ekka_heal_recovery:locked(fun() ->
+        case ekka_heal_recovery:membership_allowed() andalso
+             not ekka_autoheal:shadowed_owner(Owner) andalso Check() of
+            true -> tracked_heal(Id);
+            false -> {error, autoheal_isolated}
+        end
+    end).
+
+owns_peer_dispatch({Owner, _} = Id, Round) ->
+    case rpc:call(Owner, ekka_autoheal, recovery_status, [], 1500) of
+        #{recovery := #{round := Round, repair := Id, stage := repairing, peer := Peer} = State}
+          when Peer =:= node(), not is_map_key(owner_fenced, State), not is_map_key(handed_off, State) ->
+            true;
+        _ ->
+            false
+    end.
+
+tracked_heal(Id) ->
+    Prepare = fun() ->
+        case prepare(heal) of
+            ok -> ekka_heal_recovery:begin_heal(Id);
+            Error -> Error
+        end
+    end,
+    case tracked_membership_restart(Prepare) of
+        ok ->
+            ok = ekka_heal_recovery:application_starting(),
+            case reboot_for_recovery() of
+                ok -> ekka_heal_recovery:complete();
+                {error, {application_restart_failed, cancelled}} = Error ->
+                    ok = ekka_heal_recovery:complete(),
+                    Error;
+                {error, {application_restart_failed, _}} = Error ->
+                    {error, {heal_isolation, ekka_heal_recovery:isolate(Error)}}
+            end;
+        Error ->
+            case ekka_heal_recovery:status() of
+                #{phase := healing, round := Id} -> {error, {heal_interrupted, Error}};
+                _ -> Error
+            end
+    end.
+
+tracked_membership_restart(Prepare) ->
+    try ekka_mnesia:restart_membership(Prepare)
+    catch
+        throw:{error, _} = Error -> Error;
+        Class:Reason:Stack -> {error, {membership_restart_failed, {Class, Reason, Stack}}}
+    end.
 
 %% The Mnesia stop/start (or the membership change) is committed at this point; only the
 %% application start can be retried.
@@ -155,17 +217,38 @@ maybe_reboot(Error) -> Error.
 %% @doc Prepare to join or leave the cluster.
 -spec(prepare(join | leave | heal) -> ok | {error, term()}).
 prepare(Action) ->
-    ekka_membership:announce(Action),
-    case ekka:callback(prepare) of
-        {ok, Prepare} -> Prepare(Action);
-        undefined     -> application:stop(ekka)
+    case {Action, ekka_heal_recovery:membership_allowed()} of
+        {leave, false} ->
+            case ekka_heal_recovery:status() of
+                #{phase := Phase, running := no, mnesia := undefined}
+                  when Phase =:= isolated; Phase =:= boot_wait ->
+                    ok;
+                _ ->
+                    {error, autoheal_isolated}
+            end;
+        {_, false} -> {error, autoheal_isolated};
+        {_, true} ->
+            ekka_membership:announce(Action),
+            case ekka:callback(prepare) of
+                {ok, Prepare} -> Prepare(Action);
+                undefined     -> application:stop(ekka)
+            end
     end.
 
 %% @doc Reboot after join or leave cluster.
 %% Retry a transient refusal of application startup without repeating the membership action.
 -spec(reboot() -> ok | {error, term()}).
 reboot() ->
-    reboot(fun ekka:start/0).
+    case ekka_heal_recovery:membership_allowed() of
+        true -> reboot(fun ekka:start/0);
+        false -> {error, autoheal_isolated}
+    end.
+
+reboot_for_recovery() ->
+    case ekka_heal_recovery:startup_allowed() of
+        true -> reboot(fun ekka:start_for_application/0);
+        false -> {error, autoheal_isolated}
+    end.
 
 reboot(Default) ->
     try retry_guard_refusal(fun() -> do_reboot(Default) end, application_start, ?RECOVERY_RETRY_DELAYS) of

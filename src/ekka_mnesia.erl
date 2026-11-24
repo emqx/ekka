@@ -24,6 +24,9 @@
 %% Start and stop mnesia
 -export([ start/0
         , start_for_application/0
+        , start_for_recovery/0
+        , join_for_recovery/1
+        , isolate/0
         , restart/1
         , restart_membership/1
         , guarded/3
@@ -76,14 +79,24 @@
 %% application start can be retried.
 -spec(start() -> ok | {error, term()}).
 start() ->
-    guarded_refusal(node(), [], fun start_mnesia/0).
+    guarded_refusal(node(), [], fun() -> local_start(membership, fun start_mnesia/0) end).
 
 -spec(start_for_application() -> ok | {error, term()}).
 start_for_application() ->
     case joined_mnesia_is_running() of
         true -> ok;
-        false -> start()
+        false ->
+            guarded_refusal(node(), [], fun() -> local_start(application_start, fun start_mnesia/0) end)
     end.
+
+start_for_recovery() ->
+    guarded_refusal(node(), [], fun() -> local_start(recovery, fun start_and_wait/0) end).
+
+join_for_recovery(Node) ->
+    guarded_refusal(node(), [Node], fun() -> local_start(recovery, fun() -> do_join(Node) end) end).
+
+isolate() ->
+    membership_lock(fun ensure_stopped/0).
 
 joined_mnesia_is_running() ->
     case application:get_env(ekka, joined_mnesia) of
@@ -114,24 +127,39 @@ data_dir() -> mnesia:system_info(directory).
 %% @doc Ensure mnesia started
 -spec(ensure_started() -> ok | {error, any()}).
 ensure_started() ->
-    guarded(node(), [], fun start_and_wait/0).
+    guarded(node(), [], fun() -> local_start(membership, fun start_and_wait/0) end).
 
 restart(Prepare) ->
-    guarded(node(), [], fun() ->
+    guarded(node(), [], fun() -> local_start(membership, fun() ->
         ensure_ok(Prepare()),
         ensure_ok(ensure_stopped()),
         start_and_wait()
-    end).
+    end) end).
 
 %% Restart mnesia for a membership change. A guard refusal happened before the local
 %% application was stopped, so it is reported as {error, {guard_refused, Reason}} and can
 %% be retried; an error after the stop/start started keeps its own shape.
 restart_membership(Prepare) ->
-    guarded_refusal(node(), [], fun() ->
+    guarded_refusal(node(), [], fun() -> local_start(membership, fun() ->
         ensure_ok(Prepare()),
         ensure_ok(ensure_stopped()),
         start_and_wait()
+    end) end).
+
+local_start(Kind, Action) ->
+    membership_lock(fun() ->
+        case start_allowed(Kind) of
+            true -> Action();
+            false -> {error, autoheal_isolated}
+        end
     end).
+
+start_allowed(application_start) -> ekka_heal_recovery:startup_allowed();
+start_allowed(recovery) -> ekka_heal_recovery:recovery_starting();
+start_allowed(membership) -> ekka_heal_recovery:membership_allowed().
+
+membership_lock(Action) ->
+    global:trans({{?MODULE, startup}, self()}, Action, [node()]).
 
 start_and_wait() ->
     ok = mnesia:start(), wait_for(start).
@@ -230,12 +258,12 @@ join_and_reboot(Node, Prepare, Reboot) when Node =/= node() ->
     end.
 
 guarded_join(Node, Prepare, Joined) ->
-    guarded(node(), [Node], fun() ->
+    guarded(node(), [Node], fun() -> local_start(membership, fun() ->
         case Prepare() of
             ok -> ok = do_join(Node), Joined();
             Error -> Error
         end
-    end).
+    end) end).
 
 %% The guard either runs the action and returns its result, or refuses it with
 %% {error, Reason} without changing anything.
@@ -351,6 +379,9 @@ cluster_view() ->
 %% @doc This node try leave the cluster
 -spec(leave_cluster() -> ok | {error, any()}).
 leave_cluster() ->
+    local_start(membership, fun do_leave_cluster/0).
+
+do_leave_cluster() ->
     case running_nodes() -- [node()] of
         [] ->
             {error, node_not_in_cluster};

@@ -561,19 +561,20 @@ t_autoheal_restores_mnesia(_Config) ->
         snabbkaffe:stop()
     end.
 
-%% Verifies that heal_node/1 uses a 30s timeout (not infinity) on every rpc:call.
-%% A live-timeout test would burn 30s of CI wall-clock, so we inspect the
-%% source to ensure the bounded timeout is present and infinity is absent
-%% within the heal_node/1 function body.
+%% The ordinary and tracked heals share the bounded RPC call.
 t_heal_timeout_30s(_Config) ->
     SrcPath = locate_ekka_autoheal_src(),
     {ok, Bin} = file:read_file(SrcPath),
     Src = binary_to_list(Bin),
-    FunText = extract_heal_node_body(Src),
-    %% Must contain bounded 30s timeout on rpc:call.
-    ?assertNotEqual(nomatch, string:find(FunText, ", 30000)")),
-    %% Must NOT use infinity timeout anywhere in heal_node/1.
-    ?assertEqual(nomatch, string:find(FunText, "infinity")),
+    Ordinary = extract_heal_call_body("heal_node(Node) ->", Src),
+    Tracked = extract_heal_call_body("heal_recovery_peer(Node, Id) ->", Src),
+    Peer = extract_heal_call_body("heal_recovery_peer(Node, Id, Round) ->", Src),
+    RPC = extract_heal_call_body("call_heal(Node, Request) ->", Src),
+    ?assertNotEqual(nomatch, string:find(Ordinary, "call_heal(Node, shutdown_and_reboot)")),
+    ?assertNotEqual(nomatch, string:find(Tracked, "call_heal(Node, {shutdown_and_reboot, Id})")),
+    ?assertNotEqual(nomatch, string:find(Peer, "call_heal(Node, {shutdown_and_reboot, Id, Round})")),
+    ?assertNotEqual(nomatch, string:find(RPC, "rpc:call(Node, ekka_cluster, heal, [Request], 30000)")),
+    ?assertEqual(nomatch, string:find(RPC, "infinity")),
     ok.
 
 locate_ekka_autoheal_src() ->
@@ -585,19 +586,14 @@ locate_ekka_autoheal_src() ->
         filename:join([Cwd, "..", "..", "..", "src", "ekka_autoheal.erl"]),
         filename:join([Cwd, "..", "..", "..", "..", "src", "ekka_autoheal.erl"])
     ],
-    Candidates = case code:lib_dir(ekka) of
-                     {error, _} -> Candidates0;
-                     LibDir     -> Candidates0 ++
-                                   [filename:join([LibDir, "src",
-                                                   "ekka_autoheal.erl"])]
-                 end,
+    CompileSource = proplists:get_value(source, ekka_autoheal:module_info(compile)),
+    Candidates = [CompileSource | Candidates0],
     case [P || P <- Candidates, filelib:is_regular(P)] of
         [Found | _] -> Found;
         []          -> error({ekka_autoheal_src_not_found, Candidates})
     end.
 
-extract_heal_node_body(Src) ->
-    Marker = "heal_node(Node) ->",
+extract_heal_call_body(Marker, Src) ->
     case string:find(Src, Marker) of
         nomatch ->
             error(heal_node_marker_not_found);

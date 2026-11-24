@@ -88,6 +88,23 @@ init([]) ->
 handle_call(partitions, _From, State = #state{partitions = Partitions}) ->
     {reply, Partitions, State};
 
+handle_call({autoheal_manual_recovery, Target, Round, Instance}, _From,
+            State = #state{autoheal = Autoheal}) when Autoheal =/= undefined ->
+    {reply, ekka_autoheal:authorize_manual(Target, Round, Instance), State};
+handle_call(autoheal_recovery_status, _From, State) ->
+    {reply, ekka_autoheal:local_recovery_status(), State};
+handle_call({autoheal_recovery_handoff, Recovery, Reports}, _From,
+            State = #state{autoheal = Autoheal}) when Autoheal =/= undefined ->
+    case ekka_autoheal:proc(Autoheal) of
+        undefined ->
+            Accept = fun() -> ekka_autoheal:accept_recovery_handoff(Recovery, Reports) end,
+            case ekka_heal_recovery:try_locked(Accept) of
+                ok -> {reply, ok, autoheal_handle_msg({retained_reports, []}, State)};
+                Error -> {reply, Error, State}
+            end;
+        _ ->
+            {reply, {error, autoheal_busy}, State}
+    end;
 handle_call(Req, _From, State) ->
     ?LOG(error, "Unexpected call: ~p", [Req]),
     {reply, ignore, State}.
@@ -127,6 +144,8 @@ handle_info({nodeup, Node, _Info}, State) ->
 
 handle_info({nodedown, Node, _Info}, State) ->
     ekka_membership:node_down(Node),
+    ok = ekka_heal_recovery:observe_owner_disconnect(Node),
+    ok = ekka_autoheal:observe_partition(nodedown, Node),
     run_after(3000, {suspect, Node}),
     {noreply, State};
 
@@ -161,12 +180,14 @@ handle_info({mnesia_system_event, {mnesia_up, Node}},
 
 handle_info({mnesia_system_event, {mnesia_down, Node}}, State) ->
     ekka_membership:mnesia_down(Node),
+    ok = ekka_autoheal:observe_partition(mnesia_down, Node),
     {noreply, State};
 
 handle_info({mnesia_system_event, {inconsistent_database, Context, Node}},
             State = #state{partitions = Partitions}) ->
     ?LOG(critical, "Network partition detected from node ~s: ~p", [Node, Context]),
     ekka_membership:partition_occurred(Node),
+    ok = ekka_autoheal:observe_partition(inconsistent_database, Node),
     case ekka_autoheal:enabled() of
         {true, _} -> run_after(?CONFIRM_DELAY, confirm_partition);
         false -> ignore
@@ -253,10 +274,22 @@ confirm_partition(Partitions) ->
                  [Partitions]),
             cancel_retry();
         {true, _} ->
-            Leader = ekka_membership:leader(),
+            Leader = reporting_leader(ekka_membership:leader()),
             case ekka_node:is_running(Leader, ekka) of
                 true  -> send_report(Leader, Partitions);
                 false -> schedule_retry(Partitions)
+            end
+    end.
+
+reporting_leader(Leader) ->
+    case ekka_node:is_running(Leader, ekka, 1000) of
+        true -> Leader;
+        false ->
+            case rpc:call(Leader, ekka_heal_recovery, status, [], 1000) of
+                #{phase := Phase} when Phase =:= isolated; Phase =:= boot_wait ->
+                    ekka_membership:leader_excluding([Leader]);
+                _ ->
+                    Leader
             end
     end.
 

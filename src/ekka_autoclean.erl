@@ -73,7 +73,22 @@ force_leave(Member = #member{node = Node}, Expiry) ->
 %% removed by this stale check.
 still_down(#member{node = Node} = Member) ->
     Member =:= ekka_membership:lookup_member(Node) andalso
-        not lists:member(Node, ekka_mnesia:running_nodes()).
+        not lists:member(Node, ekka_mnesia:running_nodes()) andalso
+        not recovery_in_progress(Node).
+
+recovery_in_progress(Node) ->
+    case ekka_isolated_heal:status() of
+        #{target := Node} -> true;
+        _ -> remote_recovery(Node)
+    end.
+
+remote_recovery(Node) ->
+    case rpc:call(Node, ekka_heal_recovery, status, [], 1000) of
+        #{phase := normal} -> false;
+        #{phase := serving} -> false;
+        #{phase := _} -> true;
+        _ -> false
+    end.
 
 expired(LTime, Expiry) ->
     timer:now_diff(erlang:timestamp(), LTime) div 1000 > Expiry.
