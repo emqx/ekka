@@ -96,7 +96,7 @@ t_data_plan_heals_retained_reporters(_Config) ->
                        fun([N1, N2, N3]) ->
                            expect_heals([N3, N1, N2]),
                            receive
-                               {handoff, N3, [N1, N2], []} -> ok
+                               {handoff, N3, [N1, N2], [{ekka_autoheal, reported_heal}]} -> ok
                            after 5000 ->
                                error(no_coordinator_handoff)
                            end
@@ -117,11 +117,130 @@ t_all_reporters_handoff(_Config) ->
                        fun([N1, N2, N3]) ->
                            expect_heals([N3, N2, N3, N1]),
                            receive
-                               {handoff, N3, [N1], [N2, N3]} -> ok
+                               {handoff, N3, [N1], [{ekka_autoheal, reported_heal}, N2, N3]} -> ok
                            after 5000 ->
                                error(no_handoff)
                            end
                        end).
+
+t_reported_heal_retries_guard_refusal_in_complete_view(_Config) ->
+    Test = self(),
+    Setup = fun([N1, _N2, _N3]) ->
+        ok = rpc:call(N1, meck, expect, [ekka_cluster, heal, fun(shutdown_and_reboot) ->
+            Test ! {heal_called, node()},
+            case persistent_term:get({?MODULE, refused_once}, false) of
+                false ->
+                    persistent_term:put({?MODULE, refused_once}, true),
+                    {error, {guard_refused, busy}};
+                true ->
+                    ok
+            end
+        end])
+    end,
+    with_reported_heal([ah_refused1, ah_refused2, ah_refused3], fun complete_view/2, 2, Setup,
+                       fun([N1, N2, N3]) -> expect_heals([N3, N1, N2, N1]) end).
+
+t_replans_report_from_already_healed_target(_Config) ->
+    Test = self(),
+    Setup = fun([_N1, N2, _N3]) -> install_blocking_heal(N2, Test) end,
+    with_reported_heal([ah_fresh1, ah_fresh2, ah_fresh3], fun complete_view/2, 2, Setup,
+                       fun([N1, N2, N3]) ->
+                           expect_heal_calls([N3, N1, N2]),
+                           Worker = receive
+                               {heal_started, N2, Pid} -> Pid
+                           after 5000 -> error(no_second_heal_start)
+                           end,
+                           report_partitions(N3, [N1]),
+                           Worker ! release,
+                           expect_heals([N1])
+                       end).
+
+t_idle_report_only_plans(_Config) ->
+    Test = self(),
+    with_heal_cluster([ah_idle1, ah_idle2, ah_idle3], watched_complete_view(Test),
+                      fun([Leader, Reporter, _] = Nodes) ->
+                          lists:foreach(fun(Node) -> mock_heal(Node, Test, fun(_) -> ok end) end, Nodes),
+                          report_partitions(Leader, [Reporter]),
+                          expect_view_reads(Nodes),
+                          expect_heals([])
+                      end).
+
+t_reported_heal_handoff_timeout(_Config) ->
+    check_handoff_timeout([ah_dispatch1, ah_dispatch2, ah_dispatch3], 2).
+
+t_last_step_handoff_timeout(_Config) ->
+    check_handoff_timeout([ah_last1, ah_last2, ah_last3], 3).
+
+check_handoff_timeout(Names, ReportCount) ->
+    Test = self(),
+    Setup = fun([_Leader, N2, N3]) ->
+        install_handoff_mock(N2),
+        install_timed_out_handoff(N3, Test)
+    end,
+    with_reported_heal(Names, watched_complete_view(Test), ReportCount, Setup,
+                       fun([Leader, N2, N3] = Nodes) ->
+                           expect_view_reads(Nodes),
+                           case ReportCount of
+                               2 -> expect_heal_calls([N3]);
+                               3 -> expect_heal_calls([N3, N2, N3])
+                           end,
+                           receive
+                               {handoff, N3, _, _} -> ok
+                           after 5000 -> error(no_handoff_request)
+                           end,
+                           assert_no_heal_work(8500),
+                           ?assert(ekka:is_running(Leader, ekka))
+                       end).
+
+t_unconfirmed_peer_heal_blocks_last_step(_Config) ->
+    Test = self(),
+    Setup = fun([_Leader, N2, N3]) ->
+        install_handoff_mock(N3),
+        ok = rpc:call(N2, meck, expect, [ekka_cluster, heal, fun(shutdown_and_reboot) ->
+            Test ! {heal_called, node()},
+            exit(unknown_heal_outcome)
+        end])
+    end,
+    with_reported_heal([ah_peer1, ah_peer2, ah_peer3], fun complete_view/2, 3, Setup,
+                       fun([Leader, N2, N3]) ->
+                           expect_heal_calls([N3, N2]),
+                           assert_no_heal_work(2500),
+                           ?assert(ekka:is_running(N2, ekka)),
+                           ?assert(ekka:is_running(Leader, ekka))
+                       end).
+
+assert_no_heal_work(Timeout) ->
+    receive
+        {heal_called, Node} -> ct:fail({unexpected_heal, Node});
+        {handoff, Node, Targets, _} -> ct:fail({unexpected_handoff, Node, Targets});
+        {cluster_view, Node} -> ct:fail({unexpected_replan, Node})
+    after Timeout ->
+        ok
+    end.
+
+watched_complete_view(Test) ->
+    fun(_Node, Nodes) ->
+        fun() ->
+            Test ! {cluster_view, node()},
+            {Nodes, []}
+        end
+    end.
+
+expect_view_reads(Nodes) ->
+    lists:foreach(fun(Node) ->
+        receive {cluster_view, Node} -> ok
+        after 5000 -> ct:fail({no_view_read, Node})
+        end
+    end, Nodes).
+
+install_timed_out_handoff(Node, Test) ->
+    ok = rpc:call(Node, meck, new, [ekka_autoheal, [passthrough, no_link]]),
+    ok = rpc:call(Node, meck, expect, [ekka_autoheal, continue_heal,
+        fun(Targets, Excluded, _Delay, _Attempts) ->
+            Test ! {handoff, node(), Targets, Excluded},
+            timer:sleep(15000),
+            ok
+        end]).
 
 t_autoheal_asymm(_Config) ->
     [N1,N2,N3,N4] = Nodes = lists:map(fun start_slave_node/1, [ah1,ah2,ah3,ah4]),
@@ -736,14 +855,16 @@ t_autoheal_retries_peers_when_keeper_lacks_handoff(_Config) ->
     end).
 
 with_retry_split(Names, Check) ->
+    SplitView = fun(Node, Nodes) ->
+        fun() -> {[Node], Nodes -- [Node]} end
+    end,
+    with_heal_cluster(Names, SplitView, Check).
+
+with_heal_cluster(Names, ViewFun, Check) ->
     [Seed | Peers] = Nodes = lists:map(fun start_slave_node/1, Names),
     try
         [ok = rpc:call(N, ekka, join, [Seed]) || N <- Peers],
-        lists:foreach(fun(N) ->
-            View = fun() -> {[node()], Nodes -- [node()]} end,
-            ok = rpc:call(N, meck, new, [ekka_mnesia, [passthrough, no_link]]),
-            ok = rpc:call(N, meck, expect, [ekka_mnesia, cluster_view, View])
-        end, Nodes),
+        install_view(Nodes, ViewFun),
         Check(Nodes)
     after
         lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
@@ -753,46 +874,26 @@ with_retry_split(Names, Check) ->
 %% Start a cluster whose first heal is held in flight. Reports for the first ReportCount
 %% nodes arrive while that worker is busy, and the worker is then released.
 with_reported_heal(Names, ViewFun, ReportCount, Setup, Check) ->
-    [N1, N2, N3] = Nodes = lists:map(fun start_slave_node/1, Names),
-    try
-        ok = rpc:call(N2, ekka, join, [N1]),
-        ok = rpc:call(N3, ekka, join, [N1]),
-        install_view(Nodes, ViewFun),
+    with_heal_cluster(Names, ViewFun, fun([N1, N2, N3] = Nodes) ->
         Test = self(),
         mock_blocking_heal(N3, Test),
         mock_heal(N1, Test, fun(_) -> ok end),
         mock_heal(N2, Test, fun(_) -> ok end),
         ok = ekka_node_monitor:cast(N1, {heal_cluster, [N3], []}),
         Worker = receive {heal_started, N3, Pid} -> Pid after 5000 -> error(no_heal_start) end,
-        Reports = lists:sublist(Nodes, ReportCount),
-        [ok = ekka_node_monitor:cast(N1, {report_partition, N}) || N <- Reports],
-        ok = wait_retained(N1, Reports),
+        report_partitions(N1, lists:sublist(Nodes, ReportCount)),
         Setup(Nodes),
         Worker ! release,
         Check(Nodes)
-    after
-        lists:foreach(fun ekka_ct:stop_slave/1, Nodes),
-        snabbkaffe:stop()
-    end.
+    end).
 
-wait_retained(Node, Reports) ->
-    wait_until(fun() -> retained_equal(Node, Reports) end, 100).
-
-retained_equal(Node, Reports) ->
-    case rpc:call(Node, erlang, whereis, [ekka_node_monitor], 5000) of
-        Pid when is_pid(Pid) ->
-            case rpc:call(Node, erlang, process_info, [Pid, dictionary], 5000) of
-                {dictionary, Dict} ->
-                    case lists:keyfind({ekka_autoheal, pending}, 1, Dict) of
-                        {_, Pending} -> lists:sort(Pending) =:= lists:sort(Reports);
-                        false -> false
-                    end;
-                _ ->
-                    false
-            end;
-        _ ->
-            false
-    end.
+report_partitions(Receiver, Reports) ->
+    %% The monitor handles the casts before the subsequent call from the same sender.
+    [] = rpc:call(Receiver, erlang, apply, [fun() ->
+        [ok = ekka_node_monitor:cast(node(), {report_partition, N}) || N <- Reports],
+        ekka_node_monitor:partitions()
+    end, []]),
+    ok.
 
 install_handoff_mock(N3) ->
     Test = self(),
@@ -825,6 +926,9 @@ late_view(Node, [N1, N2, N3]) ->
 
 mock_blocking_heal(Node, Test) ->
     ok = rpc:call(Node, meck, new, [ekka_cluster, [passthrough, no_link]]),
+    install_blocking_heal(Node, Test).
+
+install_blocking_heal(Node, Test) ->
     ok = rpc:call(Node, persistent_term, put, [{?MODULE, block}, true]),
     ok = rpc:call(Node, meck, expect, [ekka_cluster, heal, fun(shutdown_and_reboot) ->
         Test ! {heal_called, node()},
@@ -848,14 +952,18 @@ mock_heal(Node, Test, Result) ->
         Result(Attempt)
     end]).
 
-expect_heals([Node | Rest]) ->
-    receive
-        {heal_called, Target} -> ?assertEqual(Node, Target), expect_heals(Rest)
-    after 10000 -> error({heal_not_dispatched, Node})
-    end;
-expect_heals([]) ->
+expect_heals(Nodes) ->
+    expect_heal_calls(Nodes),
     receive {heal_called, Node} -> error({unexpected_heal, Node})
     after 2500 -> ok
+    end.
+
+expect_heal_calls([]) ->
+    ok;
+expect_heal_calls([Node | Rest]) ->
+    receive
+        {heal_called, Target} -> ?assertEqual(Node, Target), expect_heal_calls(Rest)
+    after 10000 -> error({heal_not_dispatched, Node})
     end.
 
 install_test_guard(Node, Mode) ->
