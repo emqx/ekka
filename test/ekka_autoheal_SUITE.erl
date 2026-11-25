@@ -155,6 +155,374 @@ t_replans_report_from_already_healed_target(_Config) ->
                            expect_heals([N1])
                        end).
 
+t_failed_heal_warns_about_pending_reports(_Config) ->
+    Test = self(),
+    with_heal_cluster([ah_warn1, ah_warn2, ah_warn3], fun complete_view/2,
+        fun([Leader, Reporter, Target]) ->
+            Filter = fun
+                (#{level := warning, msg := {"Ekka(Autoheal): Autoheal on " ++ _ = Format, Args}}, _) ->
+                    Test ! {delivery_warning, Format, Args},
+                    ignore;
+                (_, _) ->
+                    ignore
+            end,
+            ok = rpc:call(Leader, logger, add_primary_filter, [?MODULE, {Filter, undefined}]),
+            mock_heal(Target, Test, fun(_) ->
+                Test ! {heal_started, node(), self()},
+                receive release -> {error, startup_failed} end
+            end),
+            Run = fun(Reports) ->
+                ok = ekka_node_monitor:cast(Leader, {heal_cluster, [Target], []}),
+                Worker = receive {heal_started, Target, Pid} -> Pid
+                         after 5000 -> error(no_heal_start) end,
+                report_partitions(Leader, Reports),
+                Worker ! release,
+                expect_heals([Target])
+            end,
+            Run([]),
+            receive
+                {delivery_warning, _, _} -> ct:fail(warning_without_pending_reports)
+            after 0 -> ok
+            end,
+            Run([Reporter, Reporter]),
+            receive
+                {delivery_warning, Format, Args} ->
+                    ?assertEqual([Leader, [{Target, {error, startup_failed}}], [Reporter]], Args),
+                    Message = io_lib:format(Format, Args),
+                    ?assertNotEqual(nomatch, string:find(Message, "Verify cross-node MQTT delivery in both directions"))
+            after 5000 -> ct:fail(missing_delivery_warning)
+            end
+        end).
+
+t_single_peer_heal_waits_for_connectivity(_Config) ->
+    Test = self(),
+    with_failed_target_cluster([ah_stop1, ah_stop2, ah_stop3],
+        fun([A, B, C] = Nodes) ->
+            watch_recovery_logs(A, info),
+            mock_heal(A, Test, fun(_) -> ok end),
+            mock_heal(B, Test, fun(_) -> ok end),
+            ok = rpc:call(C, meck, expect, [ekka_mnesia, cluster_view, fun() -> {[], Nodes} end]),
+            ok = rpc:call(A, meck, expect, [ekka_mnesia, cluster_view, fun() ->
+                Key = {?MODULE, c_stopped_observed},
+                case application:get_env(ekka, Key, false) of
+                    false ->
+                        ok = application:set_env(ekka, Key, true),
+                        Test ! stale_membership_view,
+                        {[A, C], [B]};
+                    true -> {[A], [B, C]}
+                end
+            end]),
+            ok = rpc:call(B, meck, expect, [ekka_mnesia, cluster_view, fun() ->
+                Test ! {peer_view_requested, self()},
+                receive reply -> {[B], [A, C]} end
+            end]),
+            report_partitions(A, [A]),
+            ok = ekka_node_monitor:cast(A, {heal_cluster, [C], []}),
+            expect_heal_calls([C]),
+            Worker = receive {heal_started, C, Pid} -> Pid
+                     after 5000 -> ct:fail(no_initial_heal) end,
+            report_partitions(A, [A, B]),
+            receive
+                {autoheal_log, "Deferring a heal planner run" ++ _, []} -> ok
+            after 5000 -> ct:fail(planner_not_deferred)
+            end,
+            Worker ! {release, stopped_target_error()},
+            receive stale_membership_view -> ok after 5000 -> ct:fail(no_membership_check) end,
+            receive
+                {autoheal_log, "Autoheal on " ++ _, [A, B, C, {stopped_node_still_running, A, C}]} -> ok
+            after 5000 -> ct:fail(no_peer_wait_warning)
+            end,
+            receive {peer_view_requested, _} -> ct:fail(queried_peer_before_c_stop_visible) after 500 -> ok end,
+            First = await_peer_view(5000),
+            report_partitions(A, [C]),
+            Second = await_peer_view(10000),
+            receive
+                {autoheal_log, "Autoheal on " ++ _, [A, B, C, {peer_view_unavailable, timeout}]} -> ok
+            after 5000 -> ct:fail(no_peer_timeout_warning)
+            end,
+            First ! reply,
+            Second ! reply,
+            receive
+                {autoheal_log, "Autoheal on " ++ _,
+                 [A, B, C, {[A], [B, C]}, {[B], [A, C]}]} -> ok
+            after 5000 -> ct:fail(no_peer_heal_dispatch_log)
+            end,
+            expect_heal_calls([B]),
+            receive
+                {autoheal_log, "Heal of " ++ _, [B, A, C]} -> ok
+            after 5000 -> ct:fail(no_restart_instruction)
+            end,
+            receive
+                {autoheal_log, "Heal worker exited; planning again for retained report(s)" ++ _, [[C]]} -> ok
+            after 5000 -> ct:fail(new_report_not_retained)
+            end,
+            expect_heals([])
+        end).
+
+t_single_peer_heal_does_not_retry_refusal(_Config) ->
+    single_peer_heal_failure([ah_bref1, ah_bref2, ah_bref3],
+        fun(_) -> {error, {guard_refused, busy}} end, {guard_refused, busy}).
+
+t_repeated_peer_reports_only_warn_after_complete_view(_Config) ->
+    with_repeated_peer_reports([ah_dup1, ah_dup2, ah_dup3], fun([A, B, _C] = Nodes) ->
+        Complete = fun() -> {Nodes, []} end,
+        [ok = rpc:call(N, meck, expect, [ekka_mnesia, cluster_view, Complete]) || N <- Nodes],
+        Reporters = lists:sort([A, B]),
+        receive
+            {autoheal_log, "Membership view is complete after peer recovery" ++ _, [Reporters]} -> ok;
+            {heal_called, Node} -> ct:fail({unexpected_heal, Node})
+        after 7000 -> ct:fail(no_recheck_warning)
+        end,
+        expect_heals([])
+    end).
+
+t_repeated_peer_reports_allow_heal_of_visible_split(_Config) ->
+    with_repeated_peer_reports([ah_vdup1, ah_vdup2, ah_vdup3], fun([A, B, C]) ->
+        install_majority_view(A, B, C),
+        Reporters = lists:sort([A, B]),
+        receive
+            {autoheal_log, "Autoheal on " ++ _, [A, Reporters, [_ | _]]} -> ok
+        after 5000 -> ct:fail(no_visible_split_warning)
+        end,
+        expect_heal_calls([C]),
+        receive
+            {heal_started, C, Pid} -> Pid ! {release, ok}
+        after 5000 -> ct:fail(no_visible_split_heal)
+        end,
+        expect_heals([])
+    end).
+
+t_peer_recheck_forwards_other_reports_to_leader(_Config) ->
+    Test = self(),
+    BeforeCompletion = fun([A, B, C]) ->
+        ok = rpc:call(A, meck, new, [ekka_membership, [passthrough, no_link]]),
+        ok = rpc:call(A, meck, expect, [ekka_membership, leader, fun() -> B end]),
+        ok = rpc:call(B, meck, new, [ekka_autoheal, [passthrough, no_link]]),
+        ok = rpc:call(B, meck, expect, [ekka_autoheal, accept_retained_reports, fun(Reports) ->
+            Test ! {forwarded, Reports},
+            ok
+        end]),
+        report_partitions(A, [A, B, C])
+    end,
+    with_repeated_peer_reports([ah_mdup1, ah_mdup2, ah_mdup3], BeforeCompletion,
+        fun([A, B, C]) ->
+            receive
+                {forwarded, Reports} -> ?assertEqual([C], Reports)
+            after 5000 -> ct:fail(other_report_not_forwarded)
+            end,
+            install_majority_view(A, B, C),
+            Reporters = lists:sort([A, B]),
+            receive
+                {autoheal_log, "Autoheal on " ++ _, [A, B, Reporters, [_ | _]]} -> ok;
+                {heal_called, Node} -> ct:fail({old_leader_dispatched_heal, Node})
+            after 5000 -> ct:fail(no_leader_change_warning)
+            end,
+            expect_heals([])
+        end).
+
+install_majority_view(A, B, C) ->
+    Majority = fun() -> {[A, B], [C]} end,
+    [ok = rpc:call(N, meck, expect, [ekka_mnesia, cluster_view, Majority]) || N <- [A, B]],
+    ok = rpc:call(C, meck, expect, [ekka_mnesia, cluster_view, fun() -> {[C], [A, B]} end]).
+
+t_cancelled_peer_recheck_warns_about_reporters(_Config) ->
+    with_repeated_peer_reports([ah_xdup1, ah_xdup2, ah_xdup3], fun([A, B, C]) ->
+        fail_cluster_heal(A, C, {heal_cluster, [C], []}, [C], [], {error, startup_failed}),
+        Reporters = lists:sort([A, B]),
+        receive
+            {autoheal_log, "Membership recheck after peer recovery was cancelled" ++ _, [Reporters]} -> ok
+        after 5000 -> ct:fail(no_cancelled_recheck_warning)
+        end,
+        expect_heals([])
+    end).
+
+with_repeated_peer_reports(Names, Check) ->
+    with_repeated_peer_reports(Names, fun([A, B, _C]) -> report_partitions(A, [A, B]) end, Check).
+
+with_repeated_peer_reports(Names, BeforeCompletion, Check) ->
+    Test = self(),
+    with_failed_target_cluster(Names, fun([A, B, C] = Nodes) ->
+        watch_recovery_logs(A),
+        mock_heal(A, Test, fun(_) -> ok end),
+        mock_heal(B, Test, fun
+            (1) ->
+                Test ! {peer_heal_in_flight, self()},
+                receive complete -> ok end;
+            (_) -> ok
+        end),
+        ok = rpc:call(C, meck, expect, [ekka_mnesia, cluster_view, fun() -> {[], Nodes} end]),
+        fail_cluster_heal(A, C, {heal_cluster, [C], []}, [C], [A, B], stopped_target_error()),
+        expect_heal_calls([B]),
+        Peer = receive {peer_heal_in_flight, Pid} -> Pid after 5000 -> ct:fail(no_peer_heal) end,
+        BeforeCompletion(Nodes),
+        Peer ! complete,
+        receive
+            {autoheal_log, "Membership recheck after peer recovery is waiting" ++ _,
+             [_, {view_unavailable, {invalid_cluster_views, [C]}}]} -> ok
+        after 5000 -> ct:fail(no_recheck_while_c_stopped)
+        end,
+        Check(Nodes)
+    end).
+
+t_disable_autoheal_before_peer_rpc(_Config) ->
+    Test = self(),
+    with_failed_target_cluster([ah_dis1, ah_dis2, ah_dis3], fun([A, B, C]) ->
+        watch_recovery_logs(A),
+        mock_heal(B, Test, fun(_) -> ok end),
+        ok = rpc:call(B, meck, expect, [ekka_mnesia, cluster_view, fun() ->
+            Test ! {peer_view_requested, self()},
+            receive reply -> {[B], [A, C]} end
+        end]),
+        fail_cluster_heal(A, C, {heal_cluster, [C], []}, [C], [A, B], stopped_target_error()),
+        Query = await_peer_view(5000),
+        ok = rpc:call(A, application, set_env, [ekka, cluster_autoheal, false]),
+        Query ! reply,
+        receive
+            {autoheal_log, "Cannot heal " ++ _, [B, A, C, autoheal_disabled]} -> ok;
+            {heal_called, Node} -> ct:fail({heal_after_autoheal_disabled, Node})
+        after 5000 -> ct:fail(no_disabled_log)
+        end,
+        expect_heals([])
+    end).
+
+t_single_peer_heal_does_not_retry_timeout(_Config) ->
+    single_peer_heal_failure([ah_btime1, ah_btime2, ah_btime3],
+        fun(_) -> receive release -> ok end end, {badrpc, timeout}).
+
+t_single_peer_heal_after_retrying_same_target(_Config) ->
+    with_failed_target_cluster([ah_retryc1, ah_retryc2, ah_retryc3],
+        fun([A, B, C]) ->
+            watch_recovery_logs(A),
+            mock_heal(B, self(), fun(_) -> ok end),
+            MajorityView = fun() -> {[A, B], [C]} end,
+            [ok = rpc:call(N, meck, expect, [ekka_mnesia, cluster_view, MajorityView]) || N <- [A, B]],
+            fail_cluster_heal(A, C, {heal_cluster, [C], []}, [C], [A, B], {error, {guard_refused, busy}}),
+            Worker = receive {heal_started, C, Pid} -> Pid after 5000 -> ct:fail(no_c_retry) end,
+            Worker ! {release, stopped_target_error()},
+            View = {[A, B], [C]},
+            receive
+                {autoheal_log, "Autoheal on " ++ _, [A, B, C, View, View]} -> ok
+            after 5000 -> ct:fail(no_peer_heal_dispatch_warning)
+            end,
+            expect_heals([C, B])
+        end).
+
+t_single_peer_heal_skips_peer_already_healed_during_retry(_Config) ->
+    with_failed_target_cluster([ah_expand1, ah_expand2, ah_expand3],
+        fun([A, B, C]) ->
+            mock_heal(B, self(), fun(_) -> ok end),
+            Refusal = {error, {guard_refused, busy}},
+            fail_cluster_heal(A, C, {heal_cluster, [C], []}, [C], [A, B], Refusal),
+            Second = receive {heal_started, C, Pid2} -> Pid2 after 5000 -> ct:fail(no_c_retry) end,
+            expect_heal_calls([B, C]),
+            Second ! {release, Refusal},
+            Third = receive {heal_started, C, Pid3} -> Pid3 after 5000 -> ct:fail(no_final_c_retry) end,
+            Third ! {release, stopped_target_error()},
+            expect_heals([C])
+        end).
+
+t_single_peer_heal_requires_three_members(_Config) ->
+    with_failed_target_cluster([ah_four1, ah_four2, ah_four3, ah_four4],
+        fun([A, B, C, _D] = Nodes) ->
+            watch_recovery_logs(A),
+            mock_heal(A, self(), fun(_) -> ok end),
+            mock_heal(B, self(), fun(_) -> ok end),
+            fail_cluster_heal(A, C, {heal_cluster, [C], []}, [C], [A, B], stopped_target_error()),
+            Expected = lists:sort([A, B, C]),
+            Actual = lists:sort(Nodes),
+            receive
+                {autoheal_log, "Autoheal on " ++ _, [A, Expected, Actual]} -> ok
+            after 5000 -> ct:fail(no_membership_mismatch_warning)
+            end,
+            expect_heals([])
+        end).
+
+t_single_peer_heal_requires_reports_and_confirmed_stop(_Config) ->
+    with_failed_target_cluster([ah_elig1, ah_elig2, ah_elig3],
+        fun([A, B, C]) ->
+            watch_recovery_logs(A),
+            mock_heal(A, self(), fun(_) -> ok end),
+            mock_heal(B, self(), fun(_) -> ok end),
+            fail_cluster_heal(A, C, {heal_cluster, [C], []}, [C], [B], stopped_target_error()),
+            receive
+                {autoheal_log, "Autoheal on " ++ _, [A, C, [B]]} -> ok
+            after 5000 -> ct:fail(no_missing_report_warning)
+            end,
+            expect_heals([]),
+            Unconfirmed = {error, {application_restart_failed,
+                                   {listener_retry_cleanup_failed, listener_busy, mnesia_stopping}}},
+            fail_cluster_heal(A, C, {heal_cluster, [C], []}, [C], [A, B], Unconfirmed),
+            expect_heals([]),
+            fail_cluster_heal(A, C, {heal_cluster, [B, C], []}, [B, C], [A, B], stopped_target_error()),
+            expect_heals([]),
+            Legacy = {heal_partition, [{[A, B], [C]}, {[C], [A, B]}]},
+            fail_cluster_heal(A, C, Legacy, [C], [A, B], stopped_target_error()),
+            expect_heals([])
+        end).
+
+single_peer_heal_failure(Names, Heal, Reason) ->
+    with_failed_target_cluster(Names, fun([A, B, C]) ->
+        watch_recovery_logs(A),
+        mock_heal(A, self(), fun(_) -> ok end),
+        mock_heal(B, self(), Heal),
+        fail_cluster_heal(A, C, {heal_cluster, [C], []}, [C], [A, B], stopped_target_error()),
+        expect_heal_calls([B]),
+        Wording = case Reason of
+                      {badrpc, _} -> "was not confirmed";
+                      _ -> "failed after"
+                  end,
+        receive
+            {autoheal_log, "Heal of " ++ _, [B, A, C]} -> ct:fail(unexpected_restart_instruction);
+            {autoheal_log, "Heal of " ++ _ = Format, [B, A, C, Reason]} ->
+                ?assertNotEqual(nomatch, string:find(Format, Wording))
+        after 35000 -> ct:fail(no_peer_heal_failure_log)
+        end,
+        expect_heals([])
+    end).
+
+watch_recovery_logs(Node) ->
+    watch_recovery_logs(Node, warning).
+
+watch_recovery_logs(Node, Level) ->
+    Test = self(),
+    Filter = fun
+        (#{msg := {"Ekka(Autoheal): " ++ Format, Args}}, _) ->
+            Test ! {autoheal_log, Format, Args},
+            ignore;
+        (_, _) ->
+            ignore
+    end,
+    ok = rpc:call(Node, logger, set_primary_config, [level, Level]),
+    ok = rpc:call(Node, logger, add_primary_filter, [?MODULE, {Filter, undefined}]).
+
+stopped_target_error() ->
+    {error, {application_restart_failed, {listener_retry_failed, listener_busy}}}.
+
+with_failed_target_cluster(Names, Check) ->
+    Test = self(),
+    View = fun(Node, Nodes) -> fun() -> {[Node], Nodes -- [Node]} end end,
+    with_heal_cluster(Names, View, fun([_A, _B, C | _] = Nodes) ->
+        mock_heal(C, Test, fun(_) ->
+            Test ! {heal_started, node(), self()},
+            receive {release, Result} -> Result end
+        end),
+        Check(Nodes)
+    end).
+
+fail_cluster_heal(A, C, Request, Targets, Reports, Result) ->
+    ok = ekka_node_monitor:cast(A, Request),
+    Worker = receive {heal_started, C, Pid} -> Pid after 5000 -> ct:fail(no_initial_heal) end,
+    report_partitions(A, Reports),
+    Worker ! {release, Result},
+    expect_heal_calls(Targets).
+
+await_peer_view(Timeout) ->
+    receive
+        {peer_view_requested, Pid} -> Pid;
+        {heal_called, Node} -> ct:fail({heal_before_peer_view, Node})
+    after Timeout -> ct:fail(no_peer_view_query)
+    end.
+
 t_idle_report_only_plans(_Config) ->
     Test = self(),
     with_heal_cluster([ah_idle1, ah_idle2, ah_idle3], watched_complete_view(Test),

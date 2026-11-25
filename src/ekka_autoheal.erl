@@ -34,6 +34,7 @@
 -record(autoheal, {delay, role, proc, timer}).
 
 -define(PENDING_KEY, {?MODULE, pending}).
+-define(RECHECK_REPORTS_KEY, {?MODULE, recheck_reports}).
 -define(WORKER_FAILED_KEY, {?MODULE, worker_failed}).
 -define(WORKER_KEY, {?MODULE, worker}).
 %% Older workers only subtract exclusions from node lists, so the marker is safe to forward.
@@ -111,12 +112,14 @@ handle_msg({create_splitview, Node}, Autoheal = #autoheal{delay = Delay})
         true ->
             case read_split_view() of
                 {ok, SplitView} ->
-                    plan_after_view(SplitView, take_pending(), Delay, cancel_planner(Autoheal));
+                    Recheck = erlang:erase(?RECHECK_REPORTS_KEY),
+                    plan_after_recheck(SplitView, take_pending(), Delay, cancel_planner(Autoheal), Recheck);
                 {error, Reason} ->
-                    ?LOG(warning, "Could not read the cluster view for autoheal: ~p", [Reason]),
+                    log_planner_wait({view_unavailable, Reason}),
                     schedule_planner(Delay, Autoheal)
             end;
         false ->
+            log_planner_wait(members_unreachable),
             schedule_planner(Delay, Autoheal)
     end;
 
@@ -161,35 +164,33 @@ handle_msg({heal_partition, SplitView}, Autoheal = #autoheal{proc = _Proc}) ->
     ?LOG(info, "Ignoring a heal request while another heal is in progress: ~p", [SplitView]),
     Autoheal;
 
-handle_msg({worker_failed, Pid}, Autoheal = #autoheal{proc = Pid}) ->
-    erlang:put(?WORKER_FAILED_KEY, true),
+handle_msg({worker_failed, Pid, Reason}, Autoheal = #autoheal{proc = Pid}) ->
+    erlang:put(?WORKER_FAILED_KEY, {error, Reason}),
     Autoheal;
-handle_msg({worker_failed, _Pid}, Autoheal) ->
+handle_msg({worker_failed, _Pid, _Reason}, Autoheal) ->
     Autoheal;
 handle_msg({'EXIT', Pid, normal}, Autoheal = #autoheal{proc = Pid}) ->
     Autoheal1 = Autoheal#autoheal{proc = undefined},
     Kind = take_worker(),
-    case take_worker_failed() of
-        true ->
-            drop_pending("the heal did not complete"),
+    case {Kind, take_worker_failed()} of
+        {_, {error, {single_stopped_target, C, Error}}} ->
+            recover_after_failed_heal(C, Error, Autoheal1);
+        {_, {error, Reason}} ->
+            warn_pending_reports(Reason),
             cancel_planner(Autoheal1);
-        false when Kind =:= handoff ->
+        {handoff, false} ->
             drop_pending("the coordinator restart was handed to a peer"),
             cancel_planner(Autoheal1);
-        false ->
+        {{peer_recovery, B}, false} ->
+            recheck_after_peer_heal(B, Autoheal1);
+        {_, false} ->
             resume_after_heal(Autoheal1)
     end;
 handle_msg({'EXIT', Pid, Reason}, Autoheal = #autoheal{proc = Pid}) ->
     ?LOG(critical, "Autoheal process crashed: ~p", [Reason]),
     _ = take_worker_failed(),
     _ = take_worker(),
-    case take_pending() of
-        [] ->
-            ok;
-        Dropped ->
-            ?LOG(warning, "Dropping retained partition report(s) after the crashed heal: ~p",
-                 [Dropped])
-    end,
+    warn_pending_reports({worker_exit, Reason}),
     _Retry = ekka_node_monitor:run_after(1000, confirm_partition),
     cancel_planner(Autoheal#autoheal{proc = undefined});
 
@@ -286,6 +287,60 @@ resume_after_heal(Autoheal) ->
                 Leader ->
                     forward_reports(Leader, take_pending()),
                     cancel_planner(Autoheal)
+            end
+    end.
+
+recheck_after_peer_heal(B, Autoheal) ->
+    A = node(),
+    {Repeated, Other} = lists:partition(fun(N) -> N =:= A orelse N =:= B end, take_pending()),
+    case Repeated of
+        [] ->
+            retain_reports(Other),
+            resume_after_heal(Autoheal);
+        _ ->
+            case ekka_membership:leader() of
+                Leader when Leader =/= A, Other =/= [] -> forward_reports(Leader, Other);
+                _ -> retain_reports(Other)
+            end,
+            erlang:put(?RECHECK_REPORTS_KEY, {Repeated, undefined}),
+            schedule_planner(0, Autoheal)
+    end.
+
+plan_after_recheck(SplitView, Pending, Delay, Autoheal, undefined) ->
+    plan_after_view(SplitView, Pending, Delay, Autoheal);
+plan_after_recheck([], Pending, Delay, Autoheal, {Reports, _}) ->
+    ?LOG(warning, "Membership view is complete after peer recovery; partition reports from ~p "
+         "only triggered a recheck. Verify cross-node MQTT delivery in both directions.", [Reports]),
+    plan_after_view([], Pending, Delay, Autoheal);
+plan_after_recheck(SplitView, Pending, Delay, Autoheal, {Reports, _}) ->
+    case ekka_membership:leader() of
+        Leader when Leader =:= node() ->
+            ?LOG(warning, "Autoheal on ~p is planning a heal after peer recovery. "
+                 "Partition reports from ~0p, split view: ~0p", [Leader, Reports, SplitView]),
+            plan_heal(SplitView, Pending, Delay, Autoheal);
+        Leader ->
+            ?LOG(warning, "Autoheal on ~p stopped planning after peer recovery because ~p is leader. "
+                 "Partition reports from ~0p, split view: ~0p", [node(), Leader, Reports, SplitView]),
+            case Pending of
+                [] -> ok;
+                _ -> forward_reports(Leader, Pending)
+            end,
+            Autoheal
+    end.
+
+log_planner_wait(Reason) ->
+    case erlang:get(?RECHECK_REPORTS_KEY) of
+        {_, Reason} ->
+            ok;
+        {Reports, _} ->
+            ?LOG(warning, "Membership recheck after peer recovery is waiting for a usable view. "
+                 "Partition reports from ~0p, reason: ~0p", [Reports, Reason]),
+            erlang:put(?RECHECK_REPORTS_KEY, {Reports, Reason});
+        undefined ->
+            case Reason of
+                {view_unavailable, Error} ->
+                    ?LOG(warning, "Could not read the cluster view for autoheal: ~p", [Error]);
+                members_unreachable -> ok
             end
     end.
 
@@ -421,7 +476,134 @@ heal_cluster(Minority, SplitView, Delay) ->
         need_reboot => Minority,
         split_view => SplitView
     }),
-    heal_nodes(Minority -- [node()], Delay, ?HEAL_ATTEMPTS).
+    Targets = Minority -- [node()],
+    case Targets of
+        [C] -> heal_nodes(Targets, [], Delay, ?HEAL_ATTEMPTS, C);
+        _ -> heal_nodes(Targets, Delay, ?HEAL_ATTEMPTS)
+    end.
+
+recover_after_failed_heal(C, Error, Autoheal) ->
+    Reports = take_pending(),
+    warn_pending_reports([{C, Error}], Reports),
+    Cancelled = cancel_planner(Autoheal),
+    A = node(),
+    case {lists:member(A, Reports), Reports -- [A, C]} of
+        {true, [B]} -> start_peer_recovery(B, C, Cancelled);
+        _ ->
+            ?LOG(warning, "Autoheal on ~p skipped peer recovery after ~p stopped. "
+                 "Expected reports from the coordinator and exactly one surviving peer, got ~0p.",
+                 [A, C, Reports]),
+            Cancelled
+    end.
+
+start_peer_recovery(B, C, Autoheal = #autoheal{delay = Delay}) ->
+    Nodes = lists:sort([node(), B, C]),
+    case matches_recovery_members(Nodes) of
+        true ->
+            ?LOG(warning, "Waiting for connectivity to heal ~s from ~s after ~s stopped",
+                 [B, node(), C]),
+            %% Keep new reports separate from the reports that selected this peer.
+            remember_worker({peer_recovery, B}),
+            Proc = spawn_link(fun() ->
+                worker_result(fun() -> recover_peer(B, C, Nodes, Delay) end)
+            end),
+            Autoheal#autoheal{role = coordinator, proc = Proc};
+        false -> Autoheal
+    end.
+
+matches_recovery_members(Nodes) ->
+    try lists:sort(ekka_mnesia:cluster_nodes(all)) of
+        Nodes -> true;
+        Members ->
+            ?LOG(warning, "Autoheal on ~p skipped peer recovery due to a membership mismatch. "
+                 "Expected members: ~0p, current members: ~0p.", [node(), Nodes, Members]),
+            false
+    catch
+        Class:Reason ->
+            ?LOG(warning, "Cannot read membership for peer recovery (~0p). "
+                 "Administrator intervention is required.", [{Class, Reason}]),
+            false
+    end.
+
+recover_peer(B, C, Nodes, Delay) ->
+    A = node(),
+    case wait_for_peer_recovery(B, C, Nodes, Delay, undefined) of
+        {ok, AView, BView} ->
+            ?LOG(warning, "Autoheal on ~p is requesting a heal of ~p after ~p stopped. "
+                 "Coordinator and peer membership views (running, stopped): ~0p, ~0p.",
+                 [A, B, C, AView, BView]),
+            case heal_node(B) of
+                ok ->
+                    ?LOG(warning, "Heal of ~s by ~s confirmed. The administrator can restart ~s.",
+                         [B, A, C]),
+                    ok;
+                {error, Reason} = Error ->
+                    ?LOG(warning, "Heal of ~s by ~s failed after ~s stopped (~0p). "
+                         "Administrator intervention is required.", [B, A, C, Reason]),
+                    Error;
+                Unknown ->
+                    ?LOG(warning, "Heal of ~s by ~s was not confirmed after ~s stopped (~0p). "
+                         "Administrator intervention is required.", [B, A, C, Unknown]),
+                    {error, {unconfirmed_peer_heal, B, Unknown}}
+            end;
+        {error, Reason} = Error ->
+            ?LOG(warning, "Cannot heal ~s from ~s after ~s stopped (~0p). "
+                 "Administrator intervention is required.", [B, A, C, Reason]),
+            Error
+    end.
+
+wait_for_peer_recovery(B, C, Nodes, Delay, PreviousWait) ->
+    Status = case enabled() of
+                 false -> {error, autoheal_disabled};
+                 {true, _} -> peer_recovery_status(B, C, Nodes)
+             end,
+    case Status of
+        {wait, Reason} ->
+            log_peer_wait(B, C, Reason, PreviousWait),
+            timer:sleep(Delay),
+            wait_for_peer_recovery(B, C, Nodes, Delay, Reason);
+        {ok, _, _} = Ready ->
+            case enabled() of
+                false -> {error, autoheal_disabled};
+                {true, _} -> Ready
+            end;
+        Result -> Result
+    end.
+
+log_peer_wait(_B, _C, Reason, Reason) ->
+    ok;
+log_peer_wait(B, C, Reason, _PreviousWait) ->
+    ?LOG(warning, "Autoheal on ~p is waiting to heal ~p after ~p stopped. Reason: ~p.",
+         [node(), B, C, Reason]).
+
+peer_recovery_status(B, C, Nodes) ->
+    AView = ekka_mnesia:cluster_view(),
+    case check_recovery_view(node(), C, Nodes, AView) of
+        ok ->
+            case rpc:call(B, ekka_mnesia, cluster_view, [], 5000) of
+                {badrpc, nodedown} -> {wait, {peer_view_unavailable, nodedown}};
+                {badrpc, timeout} -> {wait, {peer_view_unavailable, timeout}};
+                BView ->
+                    case check_recovery_view(B, C, Nodes, BView) of
+                        ok -> {ok, AView, BView};
+                        Other -> Other
+                    end
+            end;
+        Other -> Other
+    end.
+
+check_recovery_view(Node, C, Nodes, {Running, Stopped} = View) ->
+    case valid_view(Node, View) andalso lists:sort(Running ++ Stopped) =:= Nodes of
+        true ->
+            case lists:member(C, Stopped) of
+                true -> ok;
+                %% The stop reply can arrive before this replica learns that C is down.
+                false -> {wait, {stopped_node_still_running, Node, C}}
+            end;
+        false -> {error, {invalid_peer_recovery_view, Node, View}}
+    end;
+check_recovery_view(Node, _C, _Nodes, View) ->
+    {error, {invalid_peer_recovery_view, Node, View}}.
 
 heal_partition([{Nodes, []} | _] = SplitView, Delay) ->
     %% Symmetric partition.
@@ -436,7 +618,16 @@ heal_nodes(Nodes, Delay, Attempts) ->
     heal_nodes(Nodes, [], Delay, Attempts).
 
 heal_nodes(Nodes, Excluded, Delay, Attempts) ->
+    heal_nodes(Nodes, Excluded, Delay, Attempts, undefined).
+
+heal_nodes(Nodes, Excluded, Delay, Attempts, RecoveryTarget) ->
     Results = [{Node, heal_node(Node)} || Node <- Nodes],
+    settle_heal_results(Results, Excluded, Delay, Attempts, RecoveryTarget).
+
+settle_heal_results([{C, {error, {application_restart_failed, {listener_retry_failed, _}}} = Error}],
+                    _Excluded, _Delay, _Attempts, C) ->
+    {error, {single_stopped_target, C, Error}};
+settle_heal_results(Results, Excluded, Delay, Attempts, RecoveryTarget) ->
     case lists:partition(fun({_, Result}) -> retryable(Result) end, Results) of
         {[], Settled} ->
             case [{Node, Result} || {Node, Result} <- Settled, Result =/= ok] of
@@ -445,21 +636,23 @@ heal_nodes(Nodes, Excluded, Delay, Attempts) ->
             end;
         {Failed, Settled} ->
             DoNotReplay = [Node || {Node, _} <- Settled] ++ Excluded,
-            retry_heal({Failed, DoNotReplay}, Delay, Attempts - 1)
+            %% The peer recovery is only safe when no other target was called.
+            NextTarget = case Results of [{RecoveryTarget, _}] -> RecoveryTarget; _ -> undefined end,
+            retry_heal({Failed, DoNotReplay, NextTarget}, Delay, Attempts - 1)
     end.
 
-retry_heal({Failed, _Excluded}, _Delay, 0) ->
+retry_heal({Failed, _Excluded, _RecoveryTarget}, _Delay, 0) ->
     ?LOG(error, "Autoheal stopped retrying, nodes still not restarted: ~p. "
                 "Inspect the logs on the affected nodes. A new partition event re-triggers "
                 "autoheal.", [Failed]),
     {error, Failed};
-retry_heal(State = {Failed, Excluded}, Delay, Attempts) ->
+retry_heal(State = {Failed, Excluded, RecoveryTarget}, Delay, Attempts) ->
     timer:sleep(Delay),
     case read_split_view() of
         {ok, SplitView} ->
             case find_heal_plan(SplitView) of
                 {Candidates, Minority} ->
-                    dispatch_retry(Candidates, Minority, Excluded, Delay, Attempts);
+                    dispatch_retry(Candidates, Minority, Excluded, Delay, Attempts, RecoveryTarget);
                 {} ->
                     case lists:member(?REPORTED_HEAL, Excluded) of
                         true ->
@@ -473,7 +666,7 @@ retry_heal(State = {Failed, Excluded}, Delay, Attempts) ->
             retry_heal(State, Delay, Attempts - 1)
     end.
 
-dispatch_retry(Candidates, Minority, Excluded, Delay, Attempts) ->
+dispatch_retry(Candidates, Minority, Excluded, Delay, Attempts, RecoveryTarget) ->
     Targets = Minority -- Excluded,
     case {Targets, lists:member(node(), Minority), Candidates} of
         {[], _, _} ->
@@ -482,12 +675,12 @@ dispatch_retry(Candidates, Minority, Excluded, Delay, Attempts) ->
             Coordinator = pick_coordinator(Candidates),
             case request_handoff(Coordinator, Targets, Excluded, Delay, Attempts) of
                 unavailable ->
-                    heal_nodes(Targets -- [node()], Excluded, Delay, Attempts);
+                    heal_nodes(Targets -- [node()], Excluded, Delay, Attempts, RecoveryTarget);
                 Result ->
                     Result
             end;
         _ ->
-            heal_nodes(Targets -- [node()], Excluded, Delay, Attempts)
+            heal_nodes(Targets -- [node()], Excluded, Delay, Attempts, RecoveryTarget)
     end.
 
 continue_heal(Targets, Excluded, Delay, Attempts) ->
@@ -530,9 +723,21 @@ remember_worker(Kind) ->
 
 take_worker() ->
     case erlang:erase(?WORKER_KEY) of
+        {peer_recovery, _} = Recovery -> Recovery;
         {Kind, _Targets} -> Kind;
         Kind -> Kind
     end.
+
+warn_pending_reports(Reason) ->
+    warn_pending_reports(Reason, take_pending()).
+
+warn_pending_reports(_Reason, []) -> ok;
+warn_pending_reports(Reason, Reporters) ->
+    ?LOG(warning,
+         "Autoheal on ~p failed (~0p) with pending partition reports from ~p. "
+         "Verify cross-node MQTT delivery in both directions for subscriptions "
+         "on the affected nodes after connectivity is restored.",
+         [node(), Reason, Reporters]).
 
 drop_pending(Reason) ->
     case take_pending() of
@@ -550,11 +755,17 @@ schedule_planner(Delay, Autoheal) ->
 
 cancel_planner(Autoheal) ->
     _ = ensure_cancel_timer(Autoheal#autoheal.timer),
+    case erlang:erase(?RECHECK_REPORTS_KEY) of
+        undefined -> ok;
+        {Reports, _} ->
+            ?LOG(warning, "Membership recheck after peer recovery was cancelled for partition reports "
+                 "from ~p. Verify cross-node MQTT delivery in both directions.", [Reports])
+    end,
     Autoheal#autoheal{timer = undefined}.
 
 worker_result(Fun) ->
     case Fun() of
-        {error, _} -> ekka_node_monitor ! {autoheal, {worker_failed, self()}};
+        {error, Reason} -> ekka_node_monitor ! {autoheal, {worker_failed, self(), Reason}};
         _ -> ok
     end.
 
